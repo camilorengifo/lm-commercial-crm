@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
+import { AI_CLIENT_ERROR_MESSAGE } from "@/lib/openai";
 import type { AccountSummaryResponse } from "@/lib/aiPrompts";
 import type { BrokerRecommendationsResponse } from "@/lib/aiPrompts";
 import type {
@@ -13,6 +14,43 @@ async function getAccessToken(): Promise<string | null> {
   } = await supabase.auth.getSession();
 
   return session?.access_token ?? null;
+}
+
+function sanitizeClientAiError(
+  error: string | null | undefined,
+  status: number,
+): string {
+  if (!error) {
+    return status >= 500 ? AI_CLIENT_ERROR_MESSAGE : "AI request failed. Please try again.";
+  }
+
+  if (
+    error === "Unauthorized" ||
+    error === "You must be signed in to use AI features." ||
+    error === "Company not found." ||
+    error === "Company ID is required." ||
+    error === "Invalid request body." ||
+    error.startsWith("A valid ")
+  ) {
+    return error;
+  }
+
+  if (
+    /sk-[A-Za-z0-9_-]+/.test(error) ||
+    /re_[A-Za-z0-9_-]+/.test(error) ||
+    /Bearer\s+/i.test(error) ||
+    error.includes("OPENAI_API_KEY=") ||
+    error.includes("RESEND_API_KEY=") ||
+    error.includes("Headers.append")
+  ) {
+    return AI_CLIENT_ERROR_MESSAGE;
+  }
+
+  if (status >= 500) {
+    return AI_CLIENT_ERROR_MESSAGE;
+  }
+
+  return error;
 }
 
 async function postAiRequest<T>(
@@ -39,7 +77,7 @@ async function postAiRequest<T>(
   if (!response.ok) {
     return {
       data: null,
-      error: payload.error ?? "AI request failed. Please try again.",
+      error: sanitizeClientAiError(payload.error, response.status),
     };
   }
 

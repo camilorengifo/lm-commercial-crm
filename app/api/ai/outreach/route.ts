@@ -11,7 +11,7 @@ import {
   type OutreachTone,
   type OutreachType,
 } from "@/lib/aiPrompts";
-import { generateJsonCompletion } from "@/lib/openai";
+import { generateJsonCompletion, AI_CLIENT_ERROR_MESSAGE } from "@/lib/openai";
 import { getAuthenticatedUser } from "@/lib/supabaseServer";
 
 interface OutreachRequestBody {
@@ -96,7 +96,7 @@ export async function POST(request: Request) {
 
     if (error || !data) {
       return NextResponse.json(
-        { error: error ?? "AI generation failed." },
+        { error: error ?? AI_CLIENT_ERROR_MESSAGE },
         { status: 500 },
       );
     }
@@ -107,11 +107,9 @@ export async function POST(request: Request) {
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Unable to generate outreach draft.";
-
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: AI_CLIENT_ERROR_MESSAGE },
+      { status: 500 },
+    );
   }
 }
