@@ -1,0 +1,260 @@
+"use client";
+
+import { LOAD_OPPORTUNITY_STATUSES, type LoadOpportunityStatus } from "@/lib/crmConstants";
+import {
+  type ContactOption,
+  type OpportunityFormState,
+  formatContactName,
+} from "@/lib/loadOpportunities";
+
+export function LoadOpportunityFormFields({
+  form,
+  setForm,
+  contacts,
+  idPrefix,
+}: {
+  form: OpportunityFormState;
+  setForm: React.Dispatch<React.SetStateAction<OpportunityFormState>>;
+  contacts: ContactOption[];
+  idPrefix: string;
+}) {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      <div className="sm:col-span-2">
+        <label
+          htmlFor={`${idPrefix}-contact_id`}
+          className="mb-1.5 block text-sm font-medium text-zinc-700"
+        >
+          Contact
+        </label>
+        <select
+          id={`${idPrefix}-contact_id`}
+          value={form.contact_id}
+          onChange={(event) =>
+            setForm((prev) => ({ ...prev, contact_id: event.target.value }))
+          }
+          className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+        >
+          <option value="">No specific contact</option>
+          {contacts.map((contact) => (
+            <option key={contact.id} value={contact.id}>
+              {formatContactName(contact)}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label
+          htmlFor={`${idPrefix}-lane_origin`}
+          className="mb-1.5 block text-sm font-medium text-zinc-700"
+        >
+          Lane origin
+        </label>
+        <input
+          id={`${idPrefix}-lane_origin`}
+          type="text"
+          value={form.lane_origin}
+          onChange={(event) =>
+            setForm((prev) => ({ ...prev, lane_origin: event.target.value }))
+          }
+          className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+          placeholder="Chicago, IL"
+        />
+      </div>
+
+      <div>
+        <label
+          htmlFor={`${idPrefix}-lane_destination`}
+          className="mb-1.5 block text-sm font-medium text-zinc-700"
+        >
+          Lane destination
+        </label>
+        <input
+          id={`${idPrefix}-lane_destination`}
+          type="text"
+          value={form.lane_destination}
+          onChange={(event) =>
+            setForm((prev) => ({
+              ...prev,
+              lane_destination: event.target.value,
+            }))
+          }
+          className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+          placeholder="Dallas, TX"
+        />
+      </div>
+
+      <div>
+        <label
+          htmlFor={`${idPrefix}-equipment_type`}
+          className="mb-1.5 block text-sm font-medium text-zinc-700"
+        >
+          Equipment type
+        </label>
+        <input
+          id={`${idPrefix}-equipment_type`}
+          type="text"
+          value={form.equipment_type}
+          onChange={(event) =>
+            setForm((prev) => ({ ...prev, equipment_type: event.target.value }))
+          }
+          className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+          placeholder="Dry van, reefer, flatbed..."
+        />
+      </div>
+
+      <div>
+        <label
+          htmlFor={`${idPrefix}-commodity`}
+          className="mb-1.5 block text-sm font-medium text-zinc-700"
+        >
+          Commodity
+        </label>
+        <input
+          id={`${idPrefix}-commodity`}
+          type="text"
+          value={form.commodity}
+          onChange={(event) =>
+            setForm((prev) => ({ ...prev, commodity: event.target.value }))
+          }
+          className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+          placeholder="General freight, produce..."
+        />
+      </div>
+
+      <div>
+        <label
+          htmlFor={`${idPrefix}-frequency`}
+          className="mb-1.5 block text-sm font-medium text-zinc-700"
+        >
+          Frequency
+        </label>
+        <input
+          id={`${idPrefix}-frequency`}
+          type="text"
+          value={form.frequency}
+          onChange={(event) =>
+            setForm((prev) => ({ ...prev, frequency: event.target.value }))
+          }
+          className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+          placeholder="Weekly, daily, spot..."
+        />
+      </div>
+
+      <div>
+        <label
+          htmlFor={`${idPrefix}-estimated_loads_per_week`}
+          className="mb-1.5 block text-sm font-medium text-zinc-700"
+        >
+          Estimated loads per week
+        </label>
+        <input
+          id={`${idPrefix}-estimated_loads_per_week`}
+          type="number"
+          min="0"
+          step="1"
+          value={form.estimated_loads_per_week}
+          onChange={(event) =>
+            setForm((prev) => ({
+              ...prev,
+              estimated_loads_per_week: event.target.value,
+            }))
+          }
+          className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+        />
+      </div>
+
+      <div>
+        <label
+          htmlFor={`${idPrefix}-target_rate`}
+          className="mb-1.5 block text-sm font-medium text-zinc-700"
+        >
+          Target rate
+        </label>
+        <input
+          id={`${idPrefix}-target_rate`}
+          type="number"
+          min="0"
+          step="0.01"
+          value={form.target_rate}
+          onChange={(event) =>
+            setForm((prev) => ({ ...prev, target_rate: event.target.value }))
+          }
+          className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+          placeholder="2500"
+        />
+      </div>
+
+      <div>
+        <label
+          htmlFor={`${idPrefix}-quoted_rate`}
+          className="mb-1.5 block text-sm font-medium text-zinc-700"
+        >
+          Quoted rate
+        </label>
+        <input
+          id={`${idPrefix}-quoted_rate`}
+          type="number"
+          min="0"
+          step="0.01"
+          value={form.quoted_rate}
+          onChange={(event) =>
+            setForm((prev) => ({ ...prev, quoted_rate: event.target.value }))
+          }
+          className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+          placeholder="2750"
+        />
+      </div>
+
+      <div>
+        <label
+          htmlFor={`${idPrefix}-status`}
+          className="mb-1.5 block text-sm font-medium text-zinc-700"
+        >
+          Status <span className="text-red-600">*</span>
+        </label>
+        <select
+          id={`${idPrefix}-status`}
+          required
+          value={form.status}
+          onChange={(event) =>
+            setForm((prev) => ({
+              ...prev,
+              status: event.target.value as LoadOpportunityStatus,
+            }))
+          }
+          className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+        >
+          {LOAD_OPPORTUNITY_STATUSES.map((status) => (
+            <option key={status} value={status}>
+              {status}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="sm:col-span-2">
+        <label
+          htmlFor={`${idPrefix}-notes`}
+          className="mb-1.5 block text-sm font-medium text-zinc-700"
+        >
+          Notes
+        </label>
+        <textarea
+          id={`${idPrefix}-notes`}
+          rows={3}
+          value={form.notes}
+          onChange={(event) =>
+            setForm((prev) => ({ ...prev, notes: event.target.value }))
+          }
+          className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+          placeholder="Volume expectations, seasonality, special requirements..."
+        />
+        <p className="mt-1 text-xs text-zinc-500">
+          Provide a lane, commodity, or notes to describe this opportunity.
+        </p>
+      </div>
+    </div>
+  );
+}
