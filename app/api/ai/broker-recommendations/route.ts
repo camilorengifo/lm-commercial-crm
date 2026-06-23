@@ -6,7 +6,11 @@ import {
   normalizeBrokerRecommendations,
   type BrokerRecommendationsResponse,
 } from "@/lib/aiPrompts";
-import { generateJsonCompletion, AI_CLIENT_ERROR_MESSAGE } from "@/lib/openai";
+import {
+  AI_CLIENT_ERROR_MESSAGE,
+  generateJsonCompletion,
+  logAiRequestStarted,
+} from "@/lib/openaiServer";
 import { getAuthenticatedUser } from "@/lib/supabaseServer";
 
 export async function POST(request: Request) {
@@ -18,6 +22,8 @@ export async function POST(request: Request) {
   }
 
   try {
+    logAiRequestStarted("broker-recommendations");
+
     const summary = await buildBrokerCrmSummary(supabase, user.id);
     const { data, error } = await generateJsonCompletion<BrokerRecommendationsResponse>({
       systemPrompt: BROKER_SYSTEM_PROMPT,

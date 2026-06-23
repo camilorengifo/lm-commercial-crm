@@ -1,5 +1,5 @@
 import { Resend } from "resend";
-import { generateJsonCompletion } from "@/lib/openai";
+import { generateJsonCompletion } from "@/lib/openaiServer";
 import {
   type BrokerReminderData,
   buildRuleBasedSuggestedActions,

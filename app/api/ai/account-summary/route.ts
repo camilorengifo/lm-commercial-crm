@@ -6,7 +6,11 @@ import {
   normalizeAccountSummary,
   type AccountSummaryResponse,
 } from "@/lib/aiPrompts";
-import { generateJsonCompletion, AI_CLIENT_ERROR_MESSAGE } from "@/lib/openai";
+import {
+  AI_CLIENT_ERROR_MESSAGE,
+  generateJsonCompletion,
+  logAiRequestStarted,
+} from "@/lib/openaiServer";
 import { getAuthenticatedUser } from "@/lib/supabaseServer";
 
 interface AccountSummaryRequestBody {
@@ -41,6 +45,8 @@ export async function POST(request: Request) {
   }
 
   try {
+    logAiRequestStarted("account-summary");
+
     const summary = await buildAccountCrmSummary(
       supabase,
       user.id,

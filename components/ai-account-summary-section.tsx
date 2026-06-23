@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AiOutputSections } from "@/components/ai-output-sections";
 import { fetchAccountSummary } from "@/lib/aiClient";
+import { AI_CLIENT_ERROR_MESSAGE } from "@/lib/aiConstants";
 import type { AccountSummaryResponse } from "@/lib/aiPrompts";
 
 export function AiAccountSummarySection({
@@ -23,7 +24,7 @@ export function AiAccountSummarySection({
     const { data, error: requestError } = await fetchAccountSummary(companyId);
 
     if (requestError || !data) {
-      setError(requestError ?? "Unable to generate account summary.");
+      setError(AI_CLIENT_ERROR_MESSAGE);
       setLoading(false);
       return;
     }

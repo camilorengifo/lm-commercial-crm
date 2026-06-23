@@ -1,5 +1,8 @@
 import { supabase } from "@/lib/supabaseClient";
-import { AI_CLIENT_ERROR_MESSAGE } from "@/lib/openai";
+import {
+  AI_CLIENT_ERROR_MESSAGE,
+  sanitizeClientAiError,
+} from "@/lib/aiConstants";
 import type { AccountSummaryResponse } from "@/lib/aiPrompts";
 import type { BrokerRecommendationsResponse } from "@/lib/aiPrompts";
 import type {
@@ -16,43 +19,6 @@ async function getAccessToken(): Promise<string | null> {
   return session?.access_token ?? null;
 }
 
-function sanitizeClientAiError(
-  error: string | null | undefined,
-  status: number,
-): string {
-  if (!error) {
-    return status >= 500 ? AI_CLIENT_ERROR_MESSAGE : "AI request failed. Please try again.";
-  }
-
-  if (
-    error === "Unauthorized" ||
-    error === "You must be signed in to use AI features." ||
-    error === "Company not found." ||
-    error === "Company ID is required." ||
-    error === "Invalid request body." ||
-    error.startsWith("A valid ")
-  ) {
-    return error;
-  }
-
-  if (
-    /sk-[A-Za-z0-9_-]+/.test(error) ||
-    /re_[A-Za-z0-9_-]+/.test(error) ||
-    /Bearer\s+/i.test(error) ||
-    error.includes("OPENAI_API_KEY=") ||
-    error.includes("RESEND_API_KEY=") ||
-    error.includes("Headers.append")
-  ) {
-    return AI_CLIENT_ERROR_MESSAGE;
-  }
-
-  if (status >= 500) {
-    return AI_CLIENT_ERROR_MESSAGE;
-  }
-
-  return error;
-}
-
 async function postAiRequest<T>(
   path: string,
   body?: Record<string, string | null | undefined>,
@@ -63,25 +29,29 @@ async function postAiRequest<T>(
     return { data: null, error: "You must be signed in to use AI features." };
   }
 
-  const response = await fetch(path, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  try {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
 
-  const payload = (await response.json()) as T & { error?: string };
+    const payload = (await response.json()) as T & { error?: string };
 
-  if (!response.ok) {
-    return {
-      data: null,
-      error: sanitizeClientAiError(payload.error, response.status),
-    };
+    if (!response.ok) {
+      return {
+        data: null,
+        error: sanitizeClientAiError(payload.error, response.status),
+      };
+    }
+
+    return { data: payload, error: null };
+  } catch {
+    return { data: null, error: AI_CLIENT_ERROR_MESSAGE };
   }
-
-  return { data: payload, error: null };
 }
 
 export async function fetchBrokerRecommendations() {

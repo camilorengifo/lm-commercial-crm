@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { fetchOutreachDraft } from "@/lib/aiClient";
+import { AI_CLIENT_ERROR_MESSAGE } from "@/lib/aiConstants";
 import {
   OUTREACH_TONES,
   OUTREACH_TYPES,
@@ -83,7 +84,7 @@ export function AiOutreachAssistantSection({
     });
 
     if (requestError || !data) {
-      setError(requestError ?? "Unable to generate outreach draft.");
+      setError(AI_CLIENT_ERROR_MESSAGE);
       setLoading(false);
       return;
     }

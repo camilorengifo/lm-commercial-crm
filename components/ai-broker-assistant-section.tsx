@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AiOutputSections } from "@/components/ai-output-sections";
 import { fetchBrokerRecommendations } from "@/lib/aiClient";
+import { AI_CLIENT_ERROR_MESSAGE } from "@/lib/aiConstants";
 import type { BrokerRecommendationsResponse } from "@/lib/aiPrompts";
 
 export function AiBrokerAssistantSection() {
@@ -19,7 +20,7 @@ export function AiBrokerAssistantSection() {
     const { data, error: requestError } = await fetchBrokerRecommendations();
 
     if (requestError || !data) {
-      setError(requestError ?? "Unable to generate AI recommendations.");
+      setError(AI_CLIENT_ERROR_MESSAGE);
       setLoading(false);
       return;
     }

@@ -11,7 +11,11 @@ import {
   type OutreachTone,
   type OutreachType,
 } from "@/lib/aiPrompts";
-import { generateJsonCompletion, AI_CLIENT_ERROR_MESSAGE } from "@/lib/openai";
+import {
+  AI_CLIENT_ERROR_MESSAGE,
+  generateJsonCompletion,
+  logAiRequestStarted,
+} from "@/lib/openaiServer";
 import { getAuthenticatedUser } from "@/lib/supabaseServer";
 
 interface OutreachRequestBody {
@@ -78,6 +82,8 @@ export async function POST(request: Request) {
   const goal = body.goal?.trim() || null;
 
   try {
+    logAiRequestStarted("outreach");
+
     const context = await buildOutreachCrmContext(supabase, user.id, companyId, {
       outreachType,
       tone,
