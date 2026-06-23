@@ -59,23 +59,11 @@ function SummaryCard({
   );
 }
 
-function QuickActionButton({
-  href,
-  label,
-  primary,
-}: {
-  href: string;
-  label: string;
-  primary?: boolean;
-}) {
+function QuickActionButton({ href, label }: { href: string; label: string }) {
   return (
     <Link
       href={href}
-      className={`inline-flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-medium transition ${
-        primary
-          ? "bg-zinc-900 text-white hover:bg-zinc-800"
-          : "border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"
-      }`}
+      className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800"
     >
       {label}
     </Link>
@@ -282,27 +270,23 @@ export function HomeDashboard() {
           <p className="mt-2 text-sm text-zinc-600">
             Your action plan for the day. Signed in as{" "}
             <span className="font-medium text-zinc-900">{user.email}</span>
+            {isAdminProfile(profile) && (
+              <>
+                {" "}
+                · Company-wide metrics:{" "}
+                <Link
+                  href="/admin"
+                  className="text-zinc-700 underline-offset-2 hover:underline"
+                >
+                  Admin
+                </Link>
+              </>
+            )}
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <QuickActionButton href="/companies" label="Add Company" primary />
-          <QuickActionButton href="/companies" label="View Companies" />
-          <QuickActionButton href="/pipeline" label="View Pipeline" />
-          <QuickActionButton href="/follow-ups" label="View Follow-ups" />
-        </div>
+        <QuickActionButton href="/companies" label="Add Company" />
       </div>
-
-      {isAdminProfile(profile) && (
-        <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-          You are viewing your personal broker dashboard. For company-wide
-          metrics and broker management, visit{" "}
-          <Link href="/admin" className="font-medium underline-offset-2 hover:underline">
-            Admin
-          </Link>
-          .
-        </div>
-      )}
 
       {fetchError && (
         <p className="mb-6 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
