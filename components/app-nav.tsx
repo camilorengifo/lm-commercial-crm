@@ -2,8 +2,13 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import {
+  fetchUserProfile,
+  isAdminProfile,
+  type UserProfile,
+} from "@/lib/userProfile";
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard" },
@@ -26,12 +31,43 @@ export function AppNav() {
   const pathname = usePathname();
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) {
+        setIsAdmin(false);
+        return;
+      }
+
+      const { data: profile } = await fetchUserProfile(session.user.id);
+      setIsAdmin(isAdminProfile(profile));
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!session) {
+        setIsAdmin(false);
+        return;
+      }
+
+      const { data: profile } = await fetchUserProfile(session.user.id);
+      setIsAdmin(isAdminProfile(profile));
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   async function handleLogout() {
     setLoggingOut(true);
     await supabase.auth.signOut();
     router.replace("/login");
   }
+
+  const navItems = isAdmin
+    ? [...NAV_ITEMS, { href: "/admin", label: "Admin" } as const]
+    : NAV_ITEMS;
 
   return (
     <header className="border-b border-zinc-200 bg-white">
@@ -43,7 +79,7 @@ export function AppNav() {
         </div>
 
         <nav className="flex flex-wrap items-center gap-2">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const active = isNavActive(item.href, pathname);
 
             return (

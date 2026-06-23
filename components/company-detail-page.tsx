@@ -19,6 +19,14 @@ import {
   type SalesStage,
 } from "@/lib/crmConstants";
 import { formatDate, formatSupabaseError } from "@/lib/crmFormat";
+import { reassignCompanyOwner } from "@/lib/adminStats";
+import {
+  fetchAllProfiles,
+  fetchUserProfile,
+  getProfileDisplayName,
+  isAdminProfile,
+  type UserProfile,
+} from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
 
 interface Company {
@@ -66,39 +74,70 @@ export function CompanyDetailPage() {
   const [updatingStage, setUpdatingStage] = useState(false);
   const [stageError, setStageError] = useState<string | null>(null);
   const [chronologyRefreshKey, setChronologyRefreshKey] = useState(0);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [brokers, setBrokers] = useState<UserProfile[]>([]);
+  const [ownerEmail, setOwnerEmail] = useState<string | null>(null);
+  const [reassignBrokerId, setReassignBrokerId] = useState("");
+  const [reassigning, setReassigning] = useState(false);
+  const [reassignError, setReassignError] = useState<string | null>(null);
+  const [reassignSuccess, setReassignSuccess] = useState<string | null>(null);
 
-  const fetchCompany = useCallback(async (userId: string, id: string) => {
-    setFetchError(null);
-    setNotFound(false);
+  const isAdmin = isAdminProfile(profile);
 
-    const { data, error } = await supabase
-      .from("companies")
-      .select(
-        "id, user_id, name, city, state, country, priority, sales_stage, general_notes, last_contact_at, next_follow_up_at, created_at",
-      )
-      .eq("id", id)
-      .eq("user_id", userId)
-      .maybeSingle();
+  const fetchCompany = useCallback(
+    async (userId: string, id: string, asAdmin: boolean) => {
+      setFetchError(null);
+      setNotFound(false);
 
-    if (error) {
-      setFetchError(formatSupabaseError(error));
-      setCompany(null);
-      return;
-    }
+      let query = supabase
+        .from("companies")
+        .select(
+          "id, user_id, name, city, state, country, priority, sales_stage, general_notes, last_contact_at, next_follow_up_at, created_at",
+        )
+        .eq("id", id);
 
-    if (!data) {
-      setNotFound(true);
-      setCompany(null);
-      return;
-    }
+      if (!asAdmin) {
+        query = query.eq("user_id", userId);
+      }
 
-    setCompany({
-      ...(data as Company),
-      sales_stage: isSalesStage((data as Company).sales_stage)
-        ? (data as Company).sales_stage
-        : DEFAULT_SALES_STAGE,
-    });
-  }, []);
+      const { data, error } = await query.maybeSingle();
+
+      if (error) {
+        setFetchError(formatSupabaseError(error));
+        setCompany(null);
+        return;
+      }
+
+      if (!data) {
+        setNotFound(true);
+        setCompany(null);
+        return;
+      }
+
+      const nextCompany = {
+        ...(data as Company),
+        sales_stage: isSalesStage((data as Company).sales_stage)
+          ? (data as Company).sales_stage
+          : DEFAULT_SALES_STAGE,
+      };
+
+      setCompany(nextCompany);
+      setReassignBrokerId(nextCompany.user_id);
+
+      if (asAdmin) {
+        const { data: ownerProfile } = await supabase
+          .from("profiles")
+          .select("email")
+          .eq("id", nextCompany.user_id)
+          .maybeSingle();
+
+        setOwnerEmail(ownerProfile?.email ?? null);
+      } else {
+        setOwnerEmail(null);
+      }
+    },
+    [],
+  );
 
   async function handleSalesStageChange(nextStage: SalesStage) {
     if (!user || !company || company.sales_stage === nextStage) return;
@@ -106,11 +145,16 @@ export function CompanyDetailPage() {
     setStageError(null);
     setUpdatingStage(true);
 
-    const { error } = await supabase
+    let updateQuery = supabase
       .from("companies")
       .update({ sales_stage: nextStage })
-      .eq("id", company.id)
-      .eq("user_id", user.id);
+      .eq("id", company.id);
+
+    if (!isAdmin) {
+      updateQuery = updateQuery.eq("user_id", user.id);
+    }
+
+    const { error } = await updateQuery;
 
     if (error) {
       setStageError(formatSupabaseError(error));
@@ -123,10 +167,36 @@ export function CompanyDetailPage() {
   }
 
   const handleCompanyUpdated = useCallback(() => {
-    if (user && companyId) {
-      fetchCompany(user.id, companyId);
+    if (user && companyId && profile) {
+      fetchCompany(user.id, companyId, isAdminProfile(profile));
     }
-  }, [user, companyId, fetchCompany]);
+  }, [user, companyId, profile, fetchCompany]);
+
+  async function handleReassignOwner() {
+    if (!company || !reassignBrokerId || reassignBrokerId === company.user_id) {
+      return;
+    }
+
+    setReassignError(null);
+    setReassignSuccess(null);
+    setReassigning(true);
+
+    const { error } = await reassignCompanyOwner(company.id, reassignBrokerId);
+
+    if (error) {
+      setReassignError(formatSupabaseError(error));
+      setReassigning(false);
+      return;
+    }
+
+    setReassignSuccess("Company ownership updated.");
+    if (user && companyId && profile) {
+      await fetchCompany(user.id, companyId, isAdminProfile(profile));
+      setChronologyRefreshKey((key) => key + 1);
+    }
+
+    setReassigning(false);
+  }
 
   useEffect(() => {
     if (!companyId) {
@@ -135,27 +205,47 @@ export function CompanyDetailPage() {
       return;
     }
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) {
         router.replace("/login");
         return;
       }
 
       setUser(session.user);
-      fetchCompany(session.user.id, companyId).finally(() => setLoading(false));
+
+      const { data: userProfile } = await fetchUserProfile(session.user.id);
+      setProfile(userProfile);
+
+      if (isAdminProfile(userProfile)) {
+        const { data: allProfiles } = await fetchAllProfiles();
+        setBrokers(allProfiles.filter((item) => item.role === "broker"));
+      }
+
+      fetchCompany(
+        session.user.id,
+        companyId,
+        isAdminProfile(userProfile),
+      ).finally(() => setLoading(false));
     });
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!session) {
         router.replace("/login");
         return;
       }
 
       setUser(session.user);
+      const { data: userProfile } = await fetchUserProfile(session.user.id);
+      setProfile(userProfile);
+
       if (companyId) {
-        fetchCompany(session.user.id, companyId);
+        fetchCompany(
+          session.user.id,
+          companyId,
+          isAdminProfile(userProfile),
+        );
       }
     });
 
@@ -252,6 +342,51 @@ export function CompanyDetailPage() {
                 <DetailField label="Created date">
                   {formatDate(company.created_at)}
                 </DetailField>
+                {isAdmin && (
+                  <>
+                    <DetailField label="Owner broker">
+                      {ownerEmail ?? "—"}
+                    </DetailField>
+                    <DetailField label="Reassign owner">
+                      <div className="space-y-2">
+                        <select
+                          value={reassignBrokerId}
+                          onChange={(event) =>
+                            setReassignBrokerId(event.target.value)
+                          }
+                          disabled={reassigning}
+                          className="block w-full max-w-md rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {brokers.map((broker) => (
+                            <option key={broker.id} value={broker.id}>
+                              {getProfileDisplayName(broker)} (
+                              {broker.email ?? "no email"})
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={handleReassignOwner}
+                          disabled={
+                            reassigning ||
+                            reassignBrokerId === company.user_id
+                          }
+                          className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {reassigning ? "Saving..." : "Save owner change"}
+                        </button>
+                        {reassignError && (
+                          <p className="text-sm text-red-600">{reassignError}</p>
+                        )}
+                        {reassignSuccess && (
+                          <p className="text-sm text-emerald-700">
+                            {reassignSuccess}
+                          </p>
+                        )}
+                      </div>
+                    </DetailField>
+                  </>
+                )}
               </dl>
 
               <div className="mt-6 border-t border-zinc-100 pt-6">
@@ -273,7 +408,7 @@ export function CompanyDetailPage() {
               <AiOutreachAssistantSection
                 companyId={company.id}
                 companyName={company.name}
-                userId={user.id}
+                userId={company.user_id}
                 onActivitySaved={() => {
                   setChronologyRefreshKey((key) => key + 1);
                   handleCompanyUpdated();
@@ -281,17 +416,17 @@ export function CompanyDetailPage() {
               />
               <CompanyContactsSection
                 companyId={company.id}
-                userId={user.id}
+                userId={company.user_id}
               />
               <CompanyLoadOpportunitiesSection
                 companyId={company.id}
-                userId={user.id}
+                userId={company.user_id}
                 currentSalesStage={company.sales_stage}
                 onCompanyUpdated={handleCompanyUpdated}
               />
               <CompanyChronologySection
                 companyId={company.id}
-                userId={user.id}
+                userId={company.user_id}
                 onCompanyUpdated={handleCompanyUpdated}
                 externalRefreshKey={chronologyRefreshKey}
               />
