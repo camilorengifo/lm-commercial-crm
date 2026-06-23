@@ -27,7 +27,7 @@ export function getAppBaseUrl(): string {
 }
 
 export function getInviteRedirectUrl(): string {
-  return `${getAppBaseUrl()}/login`;
+  return `${getAppBaseUrl()}/set-password`;
 }
 
 export function isLocalAppUrl(url: string): boolean {

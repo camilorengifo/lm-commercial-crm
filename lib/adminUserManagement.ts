@@ -9,6 +9,7 @@ import {
   assertSafeInviteRedirect,
   getInviteRedirectUrl,
 } from "@/lib/appUrl";
+import { INVITE_PASSWORD_SETUP_KEY } from "@/lib/invitationSession";
 
 export interface AdminUserListItem {
   id: string;
@@ -198,6 +199,7 @@ export async function inviteAdminUser(input: {
     data: {
       full_name: fullName,
       role,
+      [INVITE_PASSWORD_SETUP_KEY]: true,
     },
     redirectTo,
   });

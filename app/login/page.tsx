@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AuthError } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
+import { sessionNeedsPasswordSetup } from "@/lib/invitationSession";
 import {
   fetchUserProfile,
   isActiveProfile,
@@ -71,6 +72,11 @@ export default function LoginPage() {
         return;
       }
 
+      if (sessionNeedsPasswordSetup(session)) {
+        router.replace("/set-password");
+        return;
+      }
+
       router.replace("/");
     });
   }, [router]);
@@ -105,6 +111,11 @@ export default function LoginPage() {
             "Your CRM access is inactive. Please contact an administrator.",
           );
           setLoading(false);
+          return;
+        }
+
+        if (sessionNeedsPasswordSetup(session)) {
+          router.replace("/set-password");
           return;
         }
       }

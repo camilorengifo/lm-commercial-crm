@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { sessionNeedsPasswordSetup } from "@/lib/invitationSession";
 import {
   fetchUserProfile,
   isActiveProfile,
@@ -29,6 +30,11 @@ export function ActiveUserGuard({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      if (sessionNeedsPasswordSetup(session)) {
+        router.replace("/set-password");
+        return;
+      }
+
       setChecking(false);
     });
 
@@ -47,6 +53,11 @@ export function ActiveUserGuard({ children }: { children: React.ReactNode }) {
         await supabase.auth.signOut();
         setBlocked(true);
         router.replace("/login?inactive=1");
+        return;
+      }
+
+      if (sessionNeedsPasswordSetup(session)) {
+        router.replace("/set-password");
       }
     });
 

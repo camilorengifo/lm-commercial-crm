@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdminFromRequest } from "@/lib/adminAuthServer";
 import { inviteAdminUser } from "@/lib/adminUserManagement";
+import { getInviteRedirectUrl } from "@/lib/appUrl";
 import { USER_ROLES, type UserRole } from "@/lib/userProfile";
 
 interface InviteUserBody {
@@ -51,7 +52,10 @@ export async function POST(request: Request) {
 
   try {
     const result = await inviteAdminUser({ email, fullName, role });
-    return NextResponse.json(result);
+    return NextResponse.json({
+      ...result,
+      redirectTo: getInviteRedirectUrl(),
+    });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unable to invite user.";
