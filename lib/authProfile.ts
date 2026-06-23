@@ -13,7 +13,7 @@ export async function fetchProfileForUser(
 ): Promise<UserProfile | null> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, email, full_name, role")
+    .select("id, email, full_name, role, is_active")
     .eq("id", userId)
     .maybeSingle();
 
@@ -26,5 +26,6 @@ export async function fetchProfileForUser(
     email: data.email,
     full_name: data.full_name,
     role: normalizeUserRole(data.role),
+    is_active: data.is_active ?? true,
   };
 }

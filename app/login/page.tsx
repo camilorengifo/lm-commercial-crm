@@ -4,6 +4,10 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AuthError } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
+import {
+  fetchUserProfile,
+  isActiveProfile,
+} from "@/lib/userProfile";
 
 function formatSignInError(error: AuthError): string {
   const message = error.message ?? "";
@@ -40,6 +44,7 @@ function formatUnexpectedSignInError(error: unknown): string {
 
 export default function LoginPage() {
   const router = useRouter();
+  const [inactiveNotice, setInactiveNotice] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -47,12 +52,26 @@ export default function LoginPage() {
   const [checkingSession, setCheckingSession] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        router.replace("/");
-      } else {
+    setInactiveNotice(
+      new URLSearchParams(window.location.search).get("inactive") === "1",
+    );
+  }, []);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) {
         setCheckingSession(false);
+        return;
       }
+
+      const { data: profile } = await fetchUserProfile(session.user.id);
+      if (profile && !isActiveProfile(profile)) {
+        await supabase.auth.signOut();
+        setCheckingSession(false);
+        return;
+      }
+
+      router.replace("/");
     });
   }, [router]);
 
@@ -72,6 +91,22 @@ export default function LoginPage() {
         setError(formatSignInError(signInError));
         setLoading(false);
         return;
+      }
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (session) {
+        const { data: profile } = await fetchUserProfile(session.user.id);
+        if (profile && !isActiveProfile(profile)) {
+          await supabase.auth.signOut();
+          setError(
+            "Your CRM access is inactive. Please contact an administrator.",
+          );
+          setLoading(false);
+          return;
+        }
       }
 
       router.replace("/");
@@ -139,6 +174,12 @@ export default function LoginPage() {
               className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
             />
           </div>
+
+          {inactiveNotice && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Your CRM access is inactive. Please contact an administrator.
+            </p>
+          )}
 
           {error && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">

@@ -126,13 +126,22 @@ export function AdminPage() {
 
   return (
     <AuthenticatedLayout maxWidthClass="max-w-[1400px]">
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-          Admin
-        </h1>
-        <p className="mt-2 text-sm text-zinc-600">
-          Broker management and CRM activity across all accounts.
-        </p>
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+            Admin
+          </h1>
+          <p className="mt-2 text-sm text-zinc-600">
+            Broker management and CRM activity across all accounts.
+          </p>
+        </div>
+
+        <Link
+          href="/admin/users"
+          className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+        >
+          Users / Brokers
+        </Link>
       </div>
 
       {fetchError && (

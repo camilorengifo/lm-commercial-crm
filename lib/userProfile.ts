@@ -9,6 +9,7 @@ export interface UserProfile {
   email: string | null;
   full_name: string | null;
   role: UserRole;
+  is_active: boolean;
 }
 
 export function normalizeUserRole(value: string | null | undefined): UserRole {
@@ -19,12 +20,16 @@ export function isAdminProfile(profile: UserProfile | null | undefined): boolean
   return profile?.role === "admin";
 }
 
+export function isActiveProfile(profile: UserProfile | null | undefined): boolean {
+  return profile?.is_active !== false;
+}
+
 export async function fetchUserProfile(
   userId: string,
 ): Promise<{ data: UserProfile | null; error: { message?: string } | null }> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, email, full_name, role")
+    .select("id, email, full_name, role, is_active")
     .eq("id", userId)
     .maybeSingle();
 
@@ -42,6 +47,7 @@ export async function fetchUserProfile(
       email: data.email,
       full_name: data.full_name,
       role: normalizeUserRole(data.role),
+      is_active: data.is_active ?? true,
     },
     error: null,
   };
@@ -53,7 +59,7 @@ export async function fetchAllProfiles(): Promise<{
 }> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, email, full_name, role")
+    .select("id, email, full_name, role, is_active")
     .order("email", { ascending: true });
 
   if (error) {
@@ -61,12 +67,18 @@ export async function fetchAllProfiles(): Promise<{
   }
 
   return {
-    data: ((data ?? []) as Array<Omit<UserProfile, "role"> & { role: string }>).map(
-      (profile) => ({
-        ...profile,
-        role: normalizeUserRole(profile.role),
-      }),
-    ),
+    data: (
+      (data ?? []) as Array<
+        Omit<UserProfile, "role" | "is_active"> & {
+          role: string;
+          is_active: boolean | null;
+        }
+      >
+    ).map((profile) => ({
+      ...profile,
+      role: normalizeUserRole(profile.role),
+      is_active: profile.is_active ?? true,
+    })),
     error: null,
   };
 }

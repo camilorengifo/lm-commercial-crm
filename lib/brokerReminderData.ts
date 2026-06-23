@@ -127,10 +127,13 @@ export async function fetchBrokerProfiles(
 ): Promise<BrokerProfile[]> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, email, full_name");
+    .select("id, email, full_name, is_active")
+    .eq("is_active", true);
 
   if (error) throw error;
-  return (data as BrokerProfile[]) ?? [];
+  return ((data as Array<BrokerProfile & { is_active?: boolean }>) ?? [])
+    .filter((profile) => profile.is_active !== false)
+    .map(({ id, email, full_name }) => ({ id, email, full_name }));
 }
 
 export async function resolveBrokerEmail(
