@@ -4,12 +4,7 @@ import {
   type BrokerReminderData,
   buildRuleBasedSuggestedActions,
 } from "@/lib/brokerReminderData";
-
-function getAppBaseUrl(): string {
-  const url = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (url) return url.replace(/\/$/, "");
-  return "http://localhost:3000";
-}
+import { getAppBaseUrl } from "@/lib/appUrl";
 
 function escapeHtml(value: string): string {
   return value

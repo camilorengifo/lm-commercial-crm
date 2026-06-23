@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import {
+  deleteAdminUser,
   fetchAdminUsers,
   inviteAdminUser,
   updateAdminUser,
@@ -39,6 +40,11 @@ export function AdminUsersPage() {
   const [inviteMessage, setInviteMessage] = useState<string | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [deleteFeedback, setDeleteFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
 
   const loadUsers = useCallback(async () => {
     setFetchError(null);
@@ -131,6 +137,38 @@ export function AdminUsersPage() {
 
     await loadUsers();
     setUpdatingUserId(null);
+  }
+
+  async function handleDelete(targetUserId: string) {
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this user? This cannot be undone.",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingUserId(targetUserId);
+    setDeleteFeedback(null);
+    setFetchError(null);
+
+    const { data, error } = await deleteAdminUser(targetUserId);
+
+    if (error || !data) {
+      setDeleteFeedback({
+        type: "error",
+        message: error ?? "Unable to delete user.",
+      });
+      setDeletingUserId(null);
+      return;
+    }
+
+    setDeleteFeedback({
+      type: "success",
+      message: data.message,
+    });
+    await loadUsers();
+    setDeletingUserId(null);
   }
 
   if (loading) {
@@ -277,8 +315,20 @@ export function AdminUsersPage() {
       <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-medium text-zinc-900">All users</h2>
         <p className="mt-1 text-sm text-zinc-500">
-          Manage roles and active access for CRM users.
+          Manage roles, active access, and remove test users with no CRM records.
         </p>
+
+        {deleteFeedback && (
+          <p
+            className={`mt-4 rounded-lg px-3 py-2 text-sm ${
+              deleteFeedback.type === "success"
+                ? "bg-emerald-50 text-emerald-800"
+                : "bg-red-50 text-red-700"
+            }`}
+          >
+            {deleteFeedback.message}
+          </p>
+        )}
 
         <div className="mt-5 overflow-x-auto">
           <table className="min-w-full divide-y divide-zinc-200">
@@ -308,12 +358,16 @@ export function AdminUsersPage() {
                 <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-zinc-500">
                   Open opps
                 </th>
+                <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-zinc-500">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100 bg-white">
               {users.map((row) => {
                 const isSelf = row.id === user.id;
                 const isUpdating = updatingUserId === row.id;
+                const isDeleting = deletingUserId === row.id;
 
                 return (
                   <tr key={row.id}>
@@ -373,6 +427,16 @@ export function AdminUsersPage() {
                     </td>
                     <td className="px-3 py-3 text-sm text-zinc-700">
                       {row.openOpportunities}
+                    </td>
+                    <td className="px-3 py-3 text-sm">
+                      <button
+                        type="button"
+                        disabled={isSelf || isUpdating || isDeleting}
+                        onClick={() => handleDelete(row.id)}
+                        className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isDeleting ? "Deleting..." : "Delete"}
+                      </button>
                     </td>
                   </tr>
                 );

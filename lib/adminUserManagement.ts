@@ -5,6 +5,10 @@ import {
   type UserRole,
 } from "@/lib/userProfile";
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin";
+import {
+  assertSafeInviteRedirect,
+  getInviteRedirectUrl,
+} from "@/lib/appUrl";
 
 export interface AdminUserListItem {
   id: string;
@@ -187,9 +191,8 @@ export async function inviteAdminUser(input: {
     };
   }
 
-  const redirectTo = process.env.NEXT_PUBLIC_APP_URL
-    ? `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "")}/login`
-    : undefined;
+  assertSafeInviteRedirect();
+  const redirectTo = getInviteRedirectUrl();
 
   const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
     data: {
@@ -298,4 +301,106 @@ export async function updateAdminUser(input: {
   if (error) throw error;
 
   return { message: "User updated successfully." };
+}
+
+const CRM_OWNERSHIP_TABLES = [
+  "companies",
+  "contacts",
+  "activities",
+  "follow_ups",
+  "load_opportunities",
+  "broker_reminder_logs",
+] as const;
+
+export class UserDeleteBlockedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UserDeleteBlockedError";
+  }
+}
+
+async function userOwnsCrmRecords(
+  admin: SupabaseClient,
+  userId: string,
+): Promise<boolean> {
+  const counts = await Promise.all(
+    CRM_OWNERSHIP_TABLES.map(async (table) => {
+      const { count, error } = await admin
+        .from(table)
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId);
+
+      if (error) throw error;
+      return count ?? 0;
+    }),
+  );
+
+  return counts.some((count) => count > 0);
+}
+
+export async function deleteAdminUser(input: {
+  targetUserId: string;
+  actingAdminId: string;
+}): Promise<{ message: string }> {
+  const admin = createSupabaseAdminClient();
+  if (!admin) {
+    throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured.");
+  }
+
+  const targetUserId = input.targetUserId.trim();
+  if (!targetUserId) {
+    throw new Error("User ID is required.");
+  }
+
+  if (targetUserId === input.actingAdminId) {
+    throw new Error("You cannot delete your own account.");
+  }
+
+  const { data: targetProfile, error: targetError } = await admin
+    .from("profiles")
+    .select("id, role, email")
+    .eq("id", targetUserId)
+    .maybeSingle();
+
+  if (targetError) throw targetError;
+
+  if (targetProfile?.role === "admin") {
+    const { count, error: countError } = await admin
+      .from("profiles")
+      .select("id", { count: "exact", head: true })
+      .eq("role", "admin");
+
+    if (countError) throw countError;
+    if ((count ?? 0) <= 1) {
+      throw new Error("Cannot delete the last admin.");
+    }
+  }
+
+  const ownsRecords = await userOwnsCrmRecords(admin, targetUserId);
+  if (ownsRecords) {
+    throw new UserDeleteBlockedError(
+      "This user owns CRM records. Reassign or deactivate the user instead of deleting.",
+    );
+  }
+
+  const { error: authDeleteError } = await admin.auth.admin.deleteUser(
+    targetUserId,
+  );
+
+  if (authDeleteError) {
+    if (authDeleteError.message.toLowerCase().includes("not found")) {
+      const { error: profileDeleteError } = await admin
+        .from("profiles")
+        .delete()
+        .eq("id", targetUserId);
+
+      if (profileDeleteError) throw profileDeleteError;
+
+      return { message: "User deleted successfully." };
+    }
+
+    throw authDeleteError;
+  }
+
+  return { message: "User deleted successfully." };
 }

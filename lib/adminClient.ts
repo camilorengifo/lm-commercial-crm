@@ -71,3 +71,10 @@ export async function updateAdminUser(input: {
     body: JSON.stringify(input),
   });
 }
+
+export async function deleteAdminUser(userId: string) {
+  return adminRequest<{ message: string }>("/api/admin/delete-user", {
+    method: "DELETE",
+    body: JSON.stringify({ userId }),
+  });
+}
