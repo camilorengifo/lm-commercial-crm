@@ -8,6 +8,7 @@ import { AiAccountSummarySection } from "@/components/ai-account-summary-section
 import { AiOutreachAssistantSection } from "@/components/ai-outreach-assistant-section";
 import { CompanyChronologySection } from "@/components/company-chronology-section";
 import { CompanyContactsSection } from "@/components/company-contacts-section";
+import { CompanyFollowUpsSection } from "@/components/company-follow-ups-section";
 import { CompanyLoadOpportunitiesSection } from "@/components/company-load-opportunities-section";
 import {
   DEFAULT_SALES_STAGE,
@@ -74,6 +75,7 @@ export function CompanyDetailPage() {
   const [updatingStage, setUpdatingStage] = useState(false);
   const [stageError, setStageError] = useState<string | null>(null);
   const [chronologyRefreshKey, setChronologyRefreshKey] = useState(0);
+  const [followUpsRefreshKey, setFollowUpsRefreshKey] = useState(0);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [brokers, setBrokers] = useState<UserProfile[]>([]);
   const [ownerEmail, setOwnerEmail] = useState<string | null>(null);
@@ -171,6 +173,12 @@ export function CompanyDetailPage() {
       fetchCompany(user.id, companyId, isAdminProfile(profile));
     }
   }, [user, companyId, profile, fetchCompany]);
+
+  const refreshFollowUpSections = useCallback(() => {
+    setFollowUpsRefreshKey((key) => key + 1);
+    setChronologyRefreshKey((key) => key + 1);
+    handleCompanyUpdated();
+  }, [handleCompanyUpdated]);
 
   async function handleReassignOwner() {
     if (!company || !reassignBrokerId || reassignBrokerId === company.user_id) {
@@ -410,8 +418,7 @@ export function CompanyDetailPage() {
                 companyName={company.name}
                 userId={company.user_id}
                 onActivitySaved={() => {
-                  setChronologyRefreshKey((key) => key + 1);
-                  handleCompanyUpdated();
+                  refreshFollowUpSections();
                 }}
               />
               <CompanyContactsSection
@@ -425,11 +432,20 @@ export function CompanyDetailPage() {
                 canManage={!isAdmin}
                 onCompanyUpdated={handleCompanyUpdated}
               />
+              <CompanyFollowUpsSection
+                companyId={company.id}
+                userId={company.user_id}
+                companyPriority={company.priority}
+                canManage={!isAdmin}
+                onCompanyUpdated={refreshFollowUpSections}
+                externalRefreshKey={followUpsRefreshKey}
+              />
               <CompanyChronologySection
                 companyId={company.id}
                 userId={company.user_id}
-                onCompanyUpdated={handleCompanyUpdated}
+                onCompanyUpdated={refreshFollowUpSections}
                 externalRefreshKey={chronologyRefreshKey}
+                canManage={!isAdmin}
               />
             </div>
           </>

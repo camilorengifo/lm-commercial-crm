@@ -1,22 +1,15 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import {
   ACTIVITY_TYPE_LABELS,
   ACTIVITY_TYPES,
-  FOLLOW_UP_STATUS_LABELS,
   activityTypeBadgeClass,
   type ActivityType,
 } from "@/lib/crmConstants";
 import { formatDate, formatDateTime, formatSupabaseError } from "@/lib/crmFormat";
 import { supabase } from "@/lib/supabaseClient";
-import {
-  completeFollowUp,
-  createFollowUp,
-  fetchPendingFollowUpsForCompany,
-  type FollowUpRecord,
-} from "@/lib/followUps";
+import { createFollowUp } from "@/lib/followUps";
 
 interface Activity {
   id: string;
@@ -28,8 +21,6 @@ interface Activity {
   activity_at: string;
   created_at: string;
 }
-
-type FollowUp = FollowUpRecord;
 
 interface ActivityFormState {
   activity_type: ActivityType;
@@ -266,16 +257,16 @@ export function CompanyChronologySection({
   userId,
   onCompanyUpdated,
   externalRefreshKey,
+  canManage = true,
 }: {
   companyId: string;
   userId: string;
   onCompanyUpdated?: () => void;
   externalRefreshKey?: number;
+  canManage?: boolean;
 }) {
   const [activities, setActivities] = useState<Activity[]>([]);
-  const [followUps, setFollowUps] = useState<FollowUp[]>([]);
   const [loadingActivities, setLoadingActivities] = useState(true);
-  const [loadingFollowUps, setLoadingFollowUps] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -289,9 +280,6 @@ export function CompanyChronologySection({
   const [editError, setEditError] = useState<string | null>(null);
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [completingFollowUpId, setCompletingFollowUpId] = useState<string | null>(
-    null,
-  );
 
   const syncCompanyFields = useCallback(async () => {
     const { data: latestActivity } = await supabase
@@ -350,36 +338,21 @@ export function CompanyChronologySection({
     setActivities((data as Activity[]) ?? []);
   }, [companyId, userId]);
 
-  const fetchFollowUps = useCallback(async () => {
-    const { data, error } = await fetchPendingFollowUpsForCompany(
-      companyId,
-      userId,
-    );
-
-    if (error) {
-      throw error;
-    }
-
-    setFollowUps(data);
-  }, [companyId, userId]);
-
   const refreshAll = useCallback(async () => {
     setFetchError(null);
     try {
-      await Promise.all([fetchActivities(), fetchFollowUps()]);
+      await fetchActivities();
       await syncCompanyFields();
     } catch (error) {
       setFetchError(formatSupabaseError(error as { message?: string }));
     }
-  }, [fetchActivities, fetchFollowUps, syncCompanyFields]);
+  }, [fetchActivities, syncCompanyFields]);
 
   useEffect(() => {
     setLoadingActivities(true);
-    setLoadingFollowUps(true);
 
     refreshAll().finally(() => {
       setLoadingActivities(false);
-      setLoadingFollowUps(false);
     });
   }, [refreshAll]);
 
@@ -540,25 +513,6 @@ export function CompanyChronologySection({
     setDeletingId(null);
   }
 
-  async function handleCompleteFollowUp(followUp: FollowUp) {
-    setCompletingFollowUpId(followUp.id);
-
-    const { error } = await completeFollowUp(
-      followUp.id,
-      userId,
-      companyId,
-    );
-
-    if (error) {
-      setFetchError(formatSupabaseError(error));
-      setCompletingFollowUpId(null);
-      return;
-    }
-
-    await refreshAll();
-    setCompletingFollowUpId(null);
-  }
-
   return (
     <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -567,20 +521,22 @@ export function CompanyChronologySection({
             Commercial Timeline
           </h2>
           <p className="mt-1 text-sm text-zinc-500">
-            Interaction and follow-up history for this company
+            Activity and interaction history for this company
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setShowCreateForm((prev) => !prev);
-            setCreateError(null);
-            cancelEditing();
-          }}
-          className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800"
-        >
-          {showCreateForm ? "Cancel" : "Log Activity"}
-        </button>
+        {canManage && (
+          <button
+            type="button"
+            onClick={() => {
+              setShowCreateForm((prev) => !prev);
+              setCreateError(null);
+              cancelEditing();
+            }}
+            className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800"
+          >
+            {showCreateForm ? "Cancel" : "Log Activity"}
+          </button>
+        )}
       </div>
 
       {fetchError && (
@@ -589,7 +545,7 @@ export function CompanyChronologySection({
         </p>
       )}
 
-      {showCreateForm && (
+      {showCreateForm && canManage && (
         <div className="mb-8 rounded-lg border border-zinc-200 bg-zinc-50 p-5">
           <h3 className="mb-4 text-sm font-medium text-zinc-900">
             New Activity
@@ -631,76 +587,6 @@ export function CompanyChronologySection({
           </form>
         </div>
       )}
-
-      <div className="mb-8">
-        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
-            Upcoming Follow-ups
-          </h3>
-          <Link
-            href="/follow-ups"
-            className="text-sm font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
-          >
-            View all on Follow-ups agenda
-          </Link>
-        </div>
-        <p className="mb-4 text-sm text-zinc-500">
-          Pending follow-ups scheduled from this company&apos;s timeline. The
-          same records appear on your centralized Follow-ups page.
-        </p>
-
-        {loadingFollowUps ? (
-          <p className="text-sm text-zinc-500">Loading follow-ups...</p>
-        ) : followUps.length === 0 ? (
-          <p className="text-sm text-zinc-500">
-            There are no pending follow-ups for this company. Schedule one when
-            logging an activity above.
-          </p>
-        ) : (
-          <ul className="divide-y divide-zinc-100 rounded-lg border border-zinc-200">
-            {followUps.map((followUp) => {
-              const isCompleting = completingFollowUpId === followUp.id;
-
-              return (
-                <li
-                  key={followUp.id}
-                  className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between"
-                >
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-medium text-zinc-900">
-                        {followUp.title}
-                      </p>
-                      <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">
-                        {FOLLOW_UP_STATUS_LABELS[followUp.status]}
-                      </span>
-                    </div>
-                    <p className="text-sm text-zinc-600">
-                      <span className="font-medium">Due:</span>{" "}
-                      {formatDateTime(followUp.due_at)}
-                    </p>
-                    {followUp.notes && (
-                      <p className="text-sm text-zinc-600">
-                        <span className="font-medium">Notes:</span>{" "}
-                        {followUp.notes}
-                      </p>
-                    )}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => handleCompleteFollowUp(followUp)}
-                    disabled={isCompleting}
-                    className="inline-flex shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isCompleting ? "Saving..." : "Mark as Done"}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
 
       <div>
         <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-zinc-500">

@@ -1,5 +1,8 @@
-import type { FollowUpStatus } from "@/lib/crmConstants";
+import type { ActivityType, CompanyPriority, FollowUpStatus } from "@/lib/crmConstants";
 import { supabase } from "@/lib/supabaseClient";
+
+export const FOLLOW_UP_PENDING_LIMIT = 200;
+export const FOLLOW_UP_COMPLETED_LIMIT = 100;
 
 export type { FollowUpStatus };
 
@@ -20,6 +23,18 @@ export interface FollowUpRecord {
 
 export interface FollowUpWithCompany extends FollowUpRecord {
   companyName: string;
+}
+
+export interface FollowUpEnriched extends FollowUpWithCompany {
+  contactName: string | null;
+  companyPriority: CompanyPriority;
+  brokerName: string | null;
+  brokerEmail: string | null;
+}
+
+export interface FollowUpWorkcenterData {
+  pending: FollowUpEnriched[];
+  completed: FollowUpEnriched[];
 }
 
 export type FollowUpBucket = "overdue" | "today" | "upcoming";
@@ -45,12 +60,12 @@ export function getFollowUpBucket(dueAt: string): FollowUpBucket {
   return "upcoming";
 }
 
-export function bucketFollowUpsWithCompanies(
-  followUps: FollowUpWithCompany[],
-): Record<FollowUpBucket, FollowUpWithCompany[]> {
-  const overdue: FollowUpWithCompany[] = [];
-  const today: FollowUpWithCompany[] = [];
-  const upcoming: FollowUpWithCompany[] = [];
+export function bucketFollowUpsWithCompanies<T extends FollowUpWithCompany>(
+  followUps: T[],
+): Record<FollowUpBucket, T[]> {
+  const overdue: T[] = [];
+  const today: T[] = [];
+  const upcoming: T[] = [];
 
   for (const followUp of followUps) {
     const bucket = getFollowUpBucket(followUp.due_at);
@@ -59,7 +74,7 @@ export function bucketFollowUpsWithCompanies(
     else upcoming.push(followUp);
   }
 
-  const byDueAsc = (a: FollowUpWithCompany, b: FollowUpWithCompany) =>
+  const byDueAsc = (a: T, b: T) =>
     new Date(a.due_at).getTime() - new Date(b.due_at).getTime();
 
   overdue.sort(byDueAsc);
@@ -67,6 +82,256 @@ export function bucketFollowUpsWithCompanies(
   upcoming.sort(byDueAsc);
 
   return { overdue, today, upcoming };
+}
+
+export function getWeekBounds(reference: Date = new Date()) {
+  const start = new Date(reference);
+  const day = start.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  start.setDate(start.getDate() + mondayOffset);
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  end.setHours(23, 59, 59, 999);
+
+  return { start, end };
+}
+
+export function isDueThisWeek(dueAt: string): boolean {
+  const due = new Date(dueAt);
+  if (Number.isNaN(due.getTime())) return false;
+
+  const { start, end } = getWeekBounds();
+  return due >= start && due <= end;
+}
+
+export function isCompletedThisWeek(completedAt: string | null): boolean {
+  if (!completedAt) return false;
+
+  const completed = new Date(completedAt);
+  if (Number.isNaN(completed.getTime())) return false;
+
+  const { start, end } = getWeekBounds();
+  return completed >= start && completed <= end;
+}
+
+export function fromDatetimeLocalValue(value: string): string | null {
+  if (!value.trim()) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+export function toDatetimeLocalValue(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
+}
+
+interface CompanyJoinRow {
+  id: string;
+  name: string;
+  priority: CompanyPriority;
+  user_id: string;
+}
+
+interface ContactJoinRow {
+  company_id: string;
+  first_name: string;
+  last_name: string | null;
+  is_primary: boolean;
+}
+
+interface ProfileJoinRow {
+  id: string;
+  email: string | null;
+  full_name: string | null;
+}
+
+function formatContactName(firstName: string, lastName: string | null): string {
+  return [firstName, lastName].filter(Boolean).join(" ").trim();
+}
+
+function buildContactNameByCompany(
+  contacts: ContactJoinRow[],
+): Map<string, string> {
+  const byCompany = new Map<string, ContactJoinRow[]>();
+
+  for (const contact of contacts) {
+    const existing = byCompany.get(contact.company_id) ?? [];
+    existing.push(contact);
+    byCompany.set(contact.company_id, existing);
+  }
+
+  const result = new Map<string, string>();
+
+  for (const [companyId, companyContacts] of byCompany) {
+    const primary =
+      companyContacts.find((contact) => contact.is_primary) ??
+      companyContacts[0];
+
+    if (primary) {
+      result.set(
+        companyId,
+        formatContactName(primary.first_name, primary.last_name),
+      );
+    }
+  }
+
+  return result;
+}
+
+function getProfileDisplayName(profile: ProfileJoinRow): string {
+  return profile.full_name?.trim() || profile.email?.trim() || profile.id;
+}
+
+async function fetchCompaniesForFollowUps(
+  companyIds: string[],
+  userId: string,
+  asAdmin: boolean,
+): Promise<{
+  data: CompanyJoinRow[];
+  error: { message?: string } | null;
+}> {
+  if (companyIds.length === 0) {
+    return { data: [], error: null };
+  }
+
+  let query = supabase
+    .from("companies")
+    .select("id, name, priority, user_id")
+    .in("id", companyIds);
+
+  if (!asAdmin) {
+    query = query.eq("user_id", userId);
+  }
+
+  const { data, error } = await query;
+
+  return {
+    data: (data as CompanyJoinRow[]) ?? [],
+    error,
+  };
+}
+
+async function fetchContactsForCompanies(
+  companyIds: string[],
+  userId: string,
+  asAdmin: boolean,
+): Promise<{
+  data: ContactJoinRow[];
+  error: { message?: string } | null;
+}> {
+  if (companyIds.length === 0) {
+    return { data: [], error: null };
+  }
+
+  let query = supabase
+    .from("contacts")
+    .select("company_id, first_name, last_name, is_primary")
+    .in("company_id", companyIds);
+
+  if (!asAdmin) {
+    query = query.eq("user_id", userId);
+  }
+
+  const { data, error } = await query;
+
+  return {
+    data: (data as ContactJoinRow[]) ?? [],
+    error,
+  };
+}
+
+async function fetchProfilesForUsers(
+  userIds: string[],
+): Promise<{
+  data: ProfileJoinRow[];
+  error: { message?: string } | null;
+}> {
+  if (userIds.length === 0) {
+    return { data: [], error: null };
+  }
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, email, full_name")
+    .in("id", userIds);
+
+  return {
+    data: (data as ProfileJoinRow[]) ?? [],
+    error,
+  };
+}
+
+function enrichFollowUpRows(
+  rows: FollowUpRecord[],
+  companyById: Map<string, CompanyJoinRow>,
+  contactNameByCompany: Map<string, string>,
+  profileById: Map<string, ProfileJoinRow>,
+): FollowUpEnriched[] {
+  return rows.map((row) => {
+    const company = companyById.get(row.company_id);
+    const profile = profileById.get(row.user_id);
+
+    return {
+      ...row,
+      companyName: company?.name ?? "Unknown company",
+      contactName: contactNameByCompany.get(row.company_id) ?? null,
+      companyPriority: company?.priority ?? ("Medium" as CompanyPriority),
+      brokerName: profile ? getProfileDisplayName(profile) : null,
+      brokerEmail: profile?.email ?? null,
+    };
+  });
+}
+
+async function enrichFollowUpRecords(
+  rows: FollowUpRecord[],
+  userId: string,
+  asAdmin: boolean,
+): Promise<{ data: FollowUpEnriched[]; error: { message?: string } | null }> {
+  if (rows.length === 0) {
+    return { data: [], error: null };
+  }
+
+  const companyIds = [...new Set(rows.map((row) => row.company_id))];
+  const ownerIds = [...new Set(rows.map((row) => row.user_id))];
+
+  const [companiesResult, contactsResult, profilesResult] = await Promise.all([
+    fetchCompaniesForFollowUps(companyIds, userId, asAdmin),
+    fetchContactsForCompanies(companyIds, userId, asAdmin),
+    asAdmin ? fetchProfilesForUsers(ownerIds) : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (companiesResult.error) {
+    return { data: [], error: companiesResult.error };
+  }
+  if (contactsResult.error) {
+    return { data: [], error: contactsResult.error };
+  }
+  if (profilesResult.error) {
+    return { data: [], error: profilesResult.error };
+  }
+
+  const companyById = new Map(
+    companiesResult.data.map((company) => [company.id, company]),
+  );
+  const contactNameByCompany = buildContactNameByCompany(contactsResult.data);
+  const profileById = new Map(
+    profilesResult.data.map((profile) => [profile.id, profile]),
+  );
+
+  return {
+    data: enrichFollowUpRows(
+      rows,
+      companyById,
+      contactNameByCompany,
+      profileById,
+    ),
+    error: null,
+  };
 }
 
 export interface CreateFollowUpInput {
@@ -153,6 +418,115 @@ export async function fetchPendingFollowUpsWithCompanies(
   };
 }
 
+export async function fetchFollowUpWorkcenterData(
+  userId: string,
+  asAdmin = false,
+): Promise<{
+  data: FollowUpWorkcenterData;
+  error: { message?: string } | null;
+}> {
+  const { start: weekStart } = getWeekBounds();
+
+  let pendingQuery = supabase
+    .from("follow_ups")
+    .select(FOLLOW_UP_SELECT_FIELDS)
+    .eq("status", "pending")
+    .order("due_at", { ascending: true })
+    .limit(FOLLOW_UP_PENDING_LIMIT);
+
+  if (!asAdmin) {
+    pendingQuery = pendingQuery.eq("user_id", userId);
+  }
+
+  let completedQuery = supabase
+    .from("follow_ups")
+    .select(FOLLOW_UP_SELECT_FIELDS)
+    .eq("status", "completed")
+    .gte("completed_at", weekStart.toISOString())
+    .order("completed_at", { ascending: false })
+    .limit(FOLLOW_UP_COMPLETED_LIMIT);
+
+  if (!asAdmin) {
+    completedQuery = completedQuery.eq("user_id", userId);
+  }
+
+  const [pendingResult, completedResult] = await Promise.all([
+    pendingQuery,
+    completedQuery,
+  ]);
+
+  if (pendingResult.error) {
+    return {
+      data: { pending: [], completed: [] },
+      error: pendingResult.error,
+    };
+  }
+
+  if (completedResult.error) {
+    return {
+      data: { pending: [], completed: [] },
+      error: completedResult.error,
+    };
+  }
+
+  const pendingRows = (pendingResult.data as FollowUpRecord[]) ?? [];
+  const completedRows = (completedResult.data as FollowUpRecord[]) ?? [];
+
+  const [pendingEnriched, completedEnriched] = await Promise.all([
+    enrichFollowUpRecords(pendingRows, userId, asAdmin),
+    enrichFollowUpRecords(completedRows, userId, asAdmin),
+  ]);
+
+  if (pendingEnriched.error) {
+    return {
+      data: { pending: [], completed: [] },
+      error: pendingEnriched.error,
+    };
+  }
+
+  if (completedEnriched.error) {
+    return {
+      data: { pending: [], completed: [] },
+      error: completedEnriched.error,
+    };
+  }
+
+  return {
+    data: {
+      pending: pendingEnriched.data,
+      completed: completedEnriched.data,
+    },
+    error: null,
+  };
+}
+
+export async function fetchCancelledFollowUps(
+  userId: string,
+  asAdmin = false,
+): Promise<{
+  data: FollowUpEnriched[];
+  error: { message?: string } | null;
+}> {
+  let query = supabase
+    .from("follow_ups")
+    .select(FOLLOW_UP_SELECT_FIELDS)
+    .eq("status", "cancelled")
+    .order("updated_at", { ascending: false })
+    .limit(FOLLOW_UP_COMPLETED_LIMIT);
+
+  if (!asAdmin) {
+    query = query.eq("user_id", userId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    return { data: [], error };
+  }
+
+  return enrichFollowUpRecords((data as FollowUpRecord[]) ?? [], userId, asAdmin);
+}
+
 export async function createFollowUp(
   input: CreateFollowUpInput,
 ): Promise<{ error: { message?: string } | null }> {
@@ -165,7 +539,11 @@ export async function createFollowUp(
     status: "pending" as FollowUpStatus,
   });
 
-  return { error };
+  if (error) {
+    return { error };
+  }
+
+  return syncCompanyNextFollowUpAt(input.companyId, input.userId);
 }
 
 export async function syncCompanyNextFollowUpAt(
@@ -215,4 +593,118 @@ export async function completeFollowUp(
   }
 
   return syncCompanyNextFollowUpAt(companyId, userId);
+}
+
+export interface RescheduleFollowUpInput {
+  followUpId: string;
+  ownerUserId: string;
+  companyId: string;
+  dueAt: string;
+  title?: string;
+  notes?: string | null;
+}
+
+export async function rescheduleFollowUp(
+  input: RescheduleFollowUpInput,
+): Promise<{ error: { message?: string } | null }> {
+  const updates: Record<string, string | null> = {
+    due_at: input.dueAt,
+    status: "pending",
+  };
+
+  if (input.title !== undefined) {
+    updates.title = input.title.trim();
+  }
+
+  if (input.notes !== undefined) {
+    updates.notes = input.notes?.trim() || null;
+  }
+
+  const { error } = await supabase
+    .from("follow_ups")
+    .update(updates)
+    .eq("id", input.followUpId)
+    .eq("user_id", input.ownerUserId)
+    .eq("company_id", input.companyId);
+
+  if (error) {
+    return { error };
+  }
+
+  return syncCompanyNextFollowUpAt(input.companyId, input.ownerUserId);
+}
+
+export interface CreateActivityNoteInput {
+  userId: string;
+  companyId: string;
+  notes: string;
+  subject?: string | null;
+  activityType?: ActivityType;
+}
+
+export async function createActivityNote(
+  input: CreateActivityNoteInput,
+): Promise<{ error: { message?: string } | null }> {
+  const trimmedNotes = input.notes.trim();
+  if (!trimmedNotes) {
+    return { error: { message: "Activity notes are required." } };
+  }
+
+  const { error } = await supabase.from("activities").insert({
+    user_id: input.userId,
+    company_id: input.companyId,
+    activity_type: input.activityType ?? "note",
+    subject: input.subject?.trim() || "Follow-up contact",
+    notes: trimmedNotes,
+    activity_at: new Date().toISOString(),
+  });
+
+  if (error) {
+    return { error };
+  }
+
+  return syncCompanyCommercialDates(input.companyId, input.userId);
+}
+
+export async function syncCompanyCommercialDates(
+  companyId: string,
+  userId: string,
+): Promise<{ error: { message?: string } | null }> {
+  const { data: latestActivity, error: activityError } = await supabase
+    .from("activities")
+    .select("activity_at")
+    .eq("company_id", companyId)
+    .eq("user_id", userId)
+    .order("activity_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (activityError) {
+    return { error: activityError };
+  }
+
+  const { data: nextFollowUp, error: followUpError } = await supabase
+    .from("follow_ups")
+    .select("due_at")
+    .eq("company_id", companyId)
+    .eq("user_id", userId)
+    .eq("status", "pending")
+    .order("due_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (followUpError) {
+    return { error: followUpError };
+  }
+
+  const { error } = await supabase
+    .from("companies")
+    .update({
+      last_contact_at: latestActivity?.activity_at ?? null,
+      next_follow_up_at: nextFollowUp?.due_at ?? null,
+    })
+    .eq("id", companyId)
+    .eq("user_id", userId);
+
+  return { error };
 }
