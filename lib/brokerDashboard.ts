@@ -1,6 +1,7 @@
 import {
   DEFAULT_SALES_STAGE,
   isSalesStage,
+  type ActivityType,
   type CompanyPriority,
   type LoadOpportunityStatus,
   type SalesStage,
@@ -20,7 +21,8 @@ import {
 import { supabase } from "@/lib/supabaseClient";
 
 const HIGH_PRIORITY_INACTIVITY_DAYS = 7;
-const LIST_LIMIT = 8;
+const RECENT_ACTIVITY_DAYS = 7;
+const LIST_LIMIT = 10;
 const OPEN_OPPORTUNITY_STATUSES: LoadOpportunityStatus[] = [
   "New",
   "Quoted",
@@ -41,6 +43,16 @@ export interface CompanyDashboardRow {
 export interface FollowUpDashboardItem extends FollowUpWithCompany {
   contactName: string | null;
   followUpNote: string;
+  companyPriority: CompanyPriority;
+}
+
+export interface RecentActivityItem {
+  id: string;
+  companyId: string;
+  companyName: string;
+  activityType: ActivityType | string;
+  activityAt: string;
+  preview: string;
 }
 
 export interface HighPriorityCompanyItem {
@@ -77,6 +89,7 @@ export interface BrokerDashboardData {
   dueToday: FollowUpDashboardItem[];
   highPriorityCompanies: HighPriorityCompanyItem[];
   openOpportunities: OpenOpportunityDashboardItem[];
+  recentActivities: RecentActivityItem[];
   actionPlan: ActionPlanItem[];
   metrics: {
     companyCount: number;
@@ -84,12 +97,17 @@ export interface BrokerDashboardData {
     overdueCount: number;
     openOpportunityCount: number;
     hotPriorityCount: number;
+    recentActivityCount7d: number;
     lastActivityDate: string | null;
   };
 }
 
 interface ActivityRow {
+  id: string;
   company_id: string;
+  activity_type: string;
+  subject: string | null;
+  notes: string | null;
   activity_at: string;
 }
 
@@ -171,14 +189,44 @@ function buildContactNameByCompany(
   return result;
 }
 
+function getRecentActivityCutoff(): Date {
+  return getInactivityCutoff(RECENT_ACTIVITY_DAYS);
+}
+
+function buildActivityPreview(activity: ActivityRow): string {
+  const subject = activity.subject?.trim();
+  const notes = activity.notes?.trim();
+
+  if (subject && notes) {
+    return `${subject} — ${notes}`;
+  }
+
+  return subject || notes || "Sin detalle registrado";
+}
+
+function buildCompanyMaps(companies: CompanyDashboardRow[]) {
+  const priorityByCompany = new Map<string, CompanyPriority>();
+  const nameByCompany = new Map<string, string>();
+
+  for (const company of companies) {
+    priorityByCompany.set(company.id, company.priority);
+    nameByCompany.set(company.id, company.name);
+  }
+
+  return { priorityByCompany, nameByCompany };
+}
+
 function enrichFollowUps(
   followUps: FollowUpWithCompany[],
   contactNameByCompany: Map<string, string>,
+  priorityByCompany: Map<string, CompanyPriority>,
 ): FollowUpDashboardItem[] {
   return followUps.map((followUp) => ({
     ...followUp,
     contactName: contactNameByCompany.get(followUp.company_id) ?? null,
     followUpNote: followUp.notes?.trim() || followUp.title,
+    companyPriority:
+      priorityByCompany.get(followUp.company_id) ?? ("Medium" as CompanyPriority),
   }));
 }
 
@@ -351,9 +399,10 @@ export async function fetchBrokerDashboardData(
     fetchPendingFollowUpsWithCompanies(userId),
     supabase
       .from("activities")
-      .select("company_id, activity_at")
+      .select("id, company_id, activity_type, subject, notes, activity_at")
       .eq("user_id", userId)
-      .order("activity_at", { ascending: false }),
+      .order("activity_at", { ascending: false })
+      .limit(50),
     supabase
       .from("contacts")
       .select("company_id, first_name, last_name, is_primary")
@@ -393,6 +442,7 @@ export async function fetchBrokerDashboardData(
       : DEFAULT_SALES_STAGE,
   }));
 
+  const { priorityByCompany, nameByCompany } = buildCompanyMaps(companies);
   const activities = (activitiesResult.data as ActivityRow[]) ?? [];
   const contactNameByCompany = buildContactNameByCompany(
     (contactsResult.data as ContactRow[]) ?? [],
@@ -400,10 +450,19 @@ export async function fetchBrokerDashboardData(
   const followUps = enrichFollowUps(
     followUpsResult.data,
     contactNameByCompany,
+    priorityByCompany,
   );
   const buckets = bucketFollowUpsWithCompanies(followUps);
-  const overdue = enrichFollowUps(buckets.overdue, contactNameByCompany);
-  const dueToday = enrichFollowUps(buckets.today, contactNameByCompany);
+  const overdue = enrichFollowUps(
+    buckets.overdue,
+    contactNameByCompany,
+    priorityByCompany,
+  );
+  const dueToday = enrichFollowUps(
+    buckets.today,
+    contactNameByCompany,
+    priorityByCompany,
+  );
 
   const activityByCompany = new Map<string, string>();
   for (const activity of activities) {
@@ -411,6 +470,22 @@ export async function fetchBrokerDashboardData(
       activityByCompany.set(activity.company_id, activity.activity_at);
     }
   }
+
+  const recentActivityCutoff = getRecentActivityCutoff();
+  const recentActivityCount7d = activities.filter(
+    (activity) => new Date(activity.activity_at) >= recentActivityCutoff,
+  ).length;
+
+  const recentActivities: RecentActivityItem[] = activities
+    .slice(0, 20)
+    .map((activity) => ({
+      id: activity.id,
+      companyId: activity.company_id,
+      companyName: nameByCompany.get(activity.company_id) ?? "Empresa desconocida",
+      activityType: activity.activity_type,
+      activityAt: activity.activity_at,
+      preview: buildActivityPreview(activity),
+    }));
 
   const pendingFollowUpCompanyIds = new Set(
     followUps.map((followUp) => followUp.company_id),
@@ -460,13 +535,17 @@ export async function fetchBrokerDashboardData(
       dueToday,
       highPriorityCompanies,
       openOpportunities,
+      recentActivities,
       actionPlan,
       metrics: {
         companyCount: companies.length,
         dueTodayCount: dueToday.length,
         overdueCount: overdue.length,
         openOpportunityCount: openOpportunities.length,
-        hotPriorityCount: highPriorityCompanies.length,
+        hotPriorityCount: companies.filter((company) =>
+          isHighPriorityLevel(company.priority),
+        ).length,
+        recentActivityCount7d,
         lastActivityDate,
       },
     },
@@ -475,7 +554,7 @@ export async function fetchBrokerDashboardData(
 }
 
 export function getTodayHeading(): string {
-  return new Date().toLocaleDateString("en-US", {
+  return new Date().toLocaleDateString("es-ES", {
     weekday: "long",
     month: "long",
     day: "numeric",

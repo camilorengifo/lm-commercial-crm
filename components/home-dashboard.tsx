@@ -7,8 +7,16 @@ import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { AiBrokerAssistantSection } from "@/components/ai-broker-assistant-section";
 import {
+  fetchAdminDashboardStats,
+  type AdminDashboardStats,
+} from "@/lib/adminStats";
+import {
+  ACTIVITY_TYPE_LABELS,
+  FOLLOW_UP_STATUS_LABELS,
   priorityBadgeClass,
   loadOpportunityStatusBadgeClass,
+  type ActivityType,
+  type FollowUpStatus,
 } from "@/lib/crmConstants";
 import { formatDate, formatDateTime, formatSupabaseError } from "@/lib/crmFormat";
 import {
@@ -21,6 +29,7 @@ import {
   type FollowUpDashboardItem,
   type HighPriorityCompanyItem,
   type OpenOpportunityDashboardItem,
+  type RecentActivityItem,
 } from "@/lib/brokerDashboard";
 import { completeFollowUp } from "@/lib/followUps";
 import {
@@ -29,6 +38,21 @@ import {
   type UserProfile,
 } from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
+
+const FOLLOW_UP_STATUS_ES: Record<FollowUpStatus, string> = {
+  pending: "Pendiente",
+  completed: "Completado",
+  cancelled: "Cancelado",
+};
+
+const ACTIVITY_TYPE_ES: Record<ActivityType, string> = {
+  call: "Llamada",
+  email: "Email",
+  meeting: "Reunión",
+  visit: "Visita",
+  note: "Nota",
+  other: "Otro",
+};
 
 function SummaryCard({
   label,
@@ -59,14 +83,27 @@ function SummaryCard({
   );
 }
 
-function QuickActionButton({ href, label }: { href: string; label: string }) {
+function QuickNav({ isAdmin }: { isAdmin: boolean }) {
+  const links = [
+    { href: "/companies", label: "Empresas" },
+    { href: "/opportunities", label: "Oportunidades" },
+    { href: "/pipeline", label: "Pipeline" },
+    { href: "/follow-ups", label: "Follow-ups" },
+    ...(isAdmin ? [{ href: "/admin", label: "Admin" }] : []),
+  ];
+
   return (
-    <Link
-      href={href}
-      className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800"
-    >
-      {label}
-    </Link>
+    <div className="flex flex-wrap gap-2">
+      {links.map((link) => (
+        <Link
+          key={link.href}
+          href={link.href}
+          className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+        >
+          {link.label}
+        </Link>
+      ))}
+    </div>
   );
 }
 
@@ -86,14 +123,26 @@ function actionPlanBadgeClass(kind: ActionPlanItem["kind"]): string {
 function actionPlanLabel(kind: ActionPlanItem["kind"]): string {
   switch (kind) {
     case "overdue":
-      return "Overdue";
+      return "Vencido";
     case "today":
-      return "Due today";
+      return "Para hoy";
     case "high_priority":
-      return "High priority";
+      return "Alta prioridad";
     case "opportunity":
-      return "Opportunity";
+      return "Oportunidad";
   }
+}
+
+function formatActivityType(value: string): string {
+  if (value in ACTIVITY_TYPE_ES) {
+    return ACTIVITY_TYPE_ES[value as ActivityType];
+  }
+
+  if (value in ACTIVITY_TYPE_LABELS) {
+    return ACTIVITY_TYPE_LABELS[value as ActivityType];
+  }
+
+  return value;
 }
 
 function FollowUpRow({
@@ -112,34 +161,45 @@ function FollowUpRow({
       ? "border-red-200 bg-red-50/60"
       : "border-amber-200 bg-amber-50/50";
 
+  const statusLabel =
+    FOLLOW_UP_STATUS_ES[followUp.status] ??
+    FOLLOW_UP_STATUS_LABELS[followUp.status];
+
   return (
-    <li
-      className={`rounded-lg border p-4 ${variantClass}`}
-    >
+    <li className={`rounded-lg border p-4 ${variantClass}`}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1">
-          <p className="text-sm font-semibold text-zinc-900">
-            <Link
-              href={`/companies/${followUp.company_id}`}
-              className="underline-offset-2 hover:underline"
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold text-zinc-900">
+              <Link
+                href={`/companies/${followUp.company_id}`}
+                className="underline-offset-2 hover:underline"
+              >
+                {followUp.companyName}
+              </Link>
+            </p>
+            <span
+              className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${priorityBadgeClass(followUp.companyPriority)}`}
             >
-              {followUp.companyName}
-            </Link>
-          </p>
+              {followUp.companyPriority}
+            </span>
+          </div>
           {followUp.contactName && (
             <p className="text-sm text-zinc-700">
-              <span className="font-medium">Contact:</span> {followUp.contactName}
+              <span className="font-medium">Contacto:</span> {followUp.contactName}
             </p>
           )}
           <p className="text-sm text-zinc-700">
             <span className="font-medium">Follow-up:</span> {followUp.followUpNote}
           </p>
           <p className="text-sm text-zinc-600">
-            <span className="font-medium">Due:</span> {formatDateTime(followUp.due_at)}
+            <span className="font-medium">Vence:</span>{" "}
+            {formatDateTime(followUp.due_at)}
+            <span className="ml-2 text-zinc-500">· {statusLabel}</span>
             {variant === "overdue" && (
               <span className="ml-2 font-medium text-red-700">
-                ({getDaysOverdue(followUp.due_at)} day
-                {getDaysOverdue(followUp.due_at) === 1 ? "" : "s"} overdue)
+                ({getDaysOverdue(followUp.due_at)} día
+                {getDaysOverdue(followUp.due_at) === 1 ? "" : "s"} vencido)
               </span>
             )}
           </p>
@@ -152,13 +212,13 @@ function FollowUpRow({
             disabled={completing}
             className="inline-flex items-center justify-center rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {completing ? "Saving..." : "Mark as Done"}
+            {completing ? "Guardando..." : "Marcar hecho"}
           </button>
           <Link
             href={`/companies/${followUp.company_id}`}
             className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
           >
-            Open Company
+            Ver empresa
           </Link>
         </div>
       </div>
@@ -166,177 +226,287 @@ function FollowUpRow({
   );
 }
 
-export function HomeDashboard() {
-  const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState<string | null>(null);
-  const [dashboard, setDashboard] = useState<BrokerDashboardData | null>(null);
-  const [completingId, setCompletingId] = useState<string | null>(null);
-
-  const loadDashboard = useCallback(async (userId: string) => {
-    setFetchError(null);
-
-    const { data, error } = await fetchBrokerDashboardData(userId);
-
-    if (error || !data) {
-      setFetchError(formatSupabaseError(error ?? { message: "Unable to load dashboard." }));
-      return;
-    }
-
-    setDashboard(data);
-  }, []);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!session) {
-        router.replace("/login");
-        return;
-      }
-
-      setUser(session.user);
-
-      const { data: userProfile } = await fetchUserProfile(session.user.id);
-      setProfile(userProfile);
-
-      await loadDashboard(session.user.id);
-      setLoading(false);
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (!session) {
-        router.replace("/login");
-        return;
-      }
-
-      setUser(session.user);
-      const { data: userProfile } = await fetchUserProfile(session.user.id);
-      setProfile(userProfile);
-      await loadDashboard(session.user.id);
-    });
-
-    return () => subscription.unsubscribe();
-  }, [router, loadDashboard]);
-
-  async function handleMarkDone(followUp: FollowUpDashboardItem) {
-    if (!user) return;
-
-    setCompletingId(followUp.id);
-
-    const { error } = await completeFollowUp(
-      followUp.id,
-      user.id,
-      followUp.company_id,
-    );
-
-    if (error) {
-      setFetchError(formatSupabaseError(error));
-      setCompletingId(null);
-      return;
-    }
-
-    await loadDashboard(user.id);
-    setCompletingId(null);
-  }
-
-  if (loading) {
-    return (
-      <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50">
-        <p className="text-sm text-zinc-500">Loading...</p>
+function HighPriorityCompanyRow({
+  company,
+}: {
+  company: HighPriorityCompanyItem;
+}) {
+  return (
+    <li className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0 space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm font-semibold text-zinc-900">{company.name}</p>
+          <span
+            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${priorityBadgeClass(company.priority)}`}
+          >
+            {company.priority}
+          </span>
+        </div>
+        <p className="text-sm text-zinc-600">{company.reason}</p>
+        <p className="text-sm text-zinc-500">
+          Último contacto:{" "}
+          {company.lastActivityAt
+            ? formatDate(company.lastActivityAt)
+            : "Sin actividad registrada"}
+        </p>
+        <p className="text-sm text-zinc-500">
+          Próximo follow-up:{" "}
+          {company.nextFollowUpAt
+            ? formatDate(company.nextFollowUpAt)
+            : "Sin follow-up programado"}
+        </p>
       </div>
-    );
-  }
 
-  if (!user || !dashboard) {
-    return null;
-  }
+      <Link
+        href={`/companies/${company.id}`}
+        className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+      >
+        Ver empresa
+      </Link>
+    </li>
+  );
+}
 
-  const { metrics, actionPlan, dueToday, overdue, highPriorityCompanies, openOpportunities } =
-    dashboard;
+function OpenOpportunityRow({
+  opportunity,
+}: {
+  opportunity: OpenOpportunityDashboardItem;
+}) {
+  return (
+    <li className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0 space-y-1">
+        <p className="text-sm font-semibold text-zinc-900">
+          {opportunity.companyName}
+        </p>
+        <p className="text-sm text-zinc-700">{opportunity.title}</p>
+        {opportunity.laneLabel && opportunity.laneLabel !== "—" && (
+          <p className="text-sm text-zinc-600">
+            <span className="font-medium">Ruta:</span> {opportunity.laneLabel}
+          </p>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${loadOpportunityStatusBadgeClass(opportunity.status)}`}
+          >
+            {opportunity.status}
+          </span>
+          {opportunity.estimatedValue && (
+            <span className="text-sm text-zinc-600">
+              Valor est.: {opportunity.estimatedValue}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <Link
+        href={`/companies/${opportunity.companyId}`}
+        className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+      >
+        Ver empresa
+      </Link>
+    </li>
+  );
+}
+
+function RecentActivityRow({ activity }: { activity: RecentActivityItem }) {
+  return (
+    <li className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="min-w-0 space-y-1">
+        <p className="text-sm font-semibold text-zinc-900">
+          <Link
+            href={`/companies/${activity.companyId}`}
+            className="underline-offset-2 hover:underline"
+          >
+            {activity.companyName}
+          </Link>
+        </p>
+        <p className="text-sm text-zinc-600">
+          <span className="font-medium">
+            {formatActivityType(activity.activityType)}
+          </span>
+          {" · "}
+          {formatDateTime(activity.activityAt)}
+        </p>
+        <p className="line-clamp-2 text-sm text-zinc-700">{activity.preview}</p>
+      </div>
+
+      <Link
+        href={`/companies/${activity.companyId}`}
+        className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+      >
+        Ver empresa
+      </Link>
+    </li>
+  );
+}
+
+function AdminDashboardView({ stats }: { stats: AdminDashboardStats }) {
+  return (
+    <>
+      <div className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+        <SummaryCard label="Total empresas" value={stats.totalCompanies} />
+        <SummaryCard label="Total brokers" value={stats.totalBrokers} />
+        <SummaryCard
+          label="Follow-ups para hoy"
+          value={stats.followUpsDueToday}
+          highlight={stats.followUpsDueToday > 0 ? "warning" : undefined}
+        />
+        <SummaryCard
+          label="Follow-ups vencidos"
+          value={stats.overdueFollowUps}
+          highlight={stats.overdueFollowUps > 0 ? "danger" : undefined}
+        />
+        <SummaryCard
+          label="Empresas alta prioridad"
+          value={stats.highPriorityCompanies}
+          highlight={
+            stats.highPriorityCompanies > 0 ? "warning" : undefined
+          }
+        />
+        <SummaryCard
+          label="Oportunidades abiertas"
+          value={stats.openOpportunities}
+        />
+      </div>
+
+      <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-medium text-zinc-900">
+          Resumen de actividad por broker
+        </h2>
+        <p className="mt-1 text-sm text-zinc-500">
+          Vista global de carga comercial y actividad reciente por broker.
+        </p>
+
+        {stats.brokerRows.length === 0 ? (
+          <p className="mt-4 text-sm text-zinc-500">
+            No hay brokers registrados todavía.
+          </p>
+        ) : (
+          <div className="mt-4 overflow-x-auto rounded-lg border border-zinc-200">
+            <table className="min-w-full divide-y divide-zinc-200 text-sm">
+              <thead className="bg-zinc-50">
+                <tr>
+                  <th className="px-4 py-3 text-left font-medium text-zinc-600">
+                    Broker
+                  </th>
+                  <th className="px-4 py-3 text-left font-medium text-zinc-600">
+                    Email
+                  </th>
+                  <th className="px-4 py-3 text-right font-medium text-zinc-600">
+                    Empresas
+                  </th>
+                  <th className="px-4 py-3 text-right font-medium text-zinc-600">
+                    Follow-ups hoy
+                  </th>
+                  <th className="px-4 py-3 text-right font-medium text-zinc-600">
+                    Vencidos
+                  </th>
+                  <th className="px-4 py-3 text-right font-medium text-zinc-600">
+                    Actividad 7 días
+                  </th>
+                  <th className="px-4 py-3 text-left font-medium text-zinc-600">
+                    Última actividad
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100 bg-white">
+                {stats.brokerRows.map((row) => (
+                  <tr key={row.userId}>
+                    <td className="px-4 py-3 font-medium text-zinc-900">
+                      {row.name}
+                    </td>
+                    <td className="px-4 py-3 text-zinc-600">{row.email}</td>
+                    <td className="px-4 py-3 text-right text-zinc-900">
+                      {row.companies}
+                    </td>
+                    <td className="px-4 py-3 text-right text-zinc-900">
+                      {row.followUpsDueToday}
+                    </td>
+                    <td className="px-4 py-3 text-right text-zinc-900">
+                      {row.overdueFollowUps}
+                    </td>
+                    <td className="px-4 py-3 text-right text-zinc-900">
+                      {row.activityCount7d}
+                    </td>
+                    <td className="px-4 py-3 text-zinc-600">
+                      {row.lastActivityAt
+                        ? formatDate(row.lastActivityAt)
+                        : "Sin actividad"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
+function BrokerDashboardView({
+  dashboard,
+  completingId,
+  onMarkDone,
+}: {
+  dashboard: BrokerDashboardData;
+  completingId: string | null;
+  onMarkDone: (followUp: FollowUpDashboardItem) => void;
+}) {
+  const {
+    metrics,
+    actionPlan,
+    dueToday,
+    overdue,
+    highPriorityCompanies,
+    openOpportunities,
+    recentActivities,
+  } = dashboard;
 
   return (
-    <AuthenticatedLayout maxWidthClass="max-w-[1400px]">
-      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-            Today
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">
-            {getTodayHeading()}
-          </h1>
-          <p className="mt-2 text-sm text-zinc-600">
-            Your action plan for the day. Signed in as{" "}
-            <span className="font-medium text-zinc-900">{user.email}</span>
-            {isAdminProfile(profile) && (
-              <>
-                {" "}
-                · Company-wide metrics:{" "}
-                <Link
-                  href="/admin"
-                  className="text-zinc-700 underline-offset-2 hover:underline"
-                >
-                  Admin
-                </Link>
-              </>
-            )}
-          </p>
-        </div>
-
-        <QuickActionButton href="/companies" label="Add Company" />
-      </div>
-
-      {fetchError && (
-        <p className="mb-6 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-          {fetchError}
-        </p>
-      )}
-
+    <>
       <div className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        <SummaryCard label="Companies" value={metrics.companyCount} />
+        <SummaryCard label="Total empresas" value={metrics.companyCount} />
         <SummaryCard
-          label="Follow-ups due today"
-          value={metrics.dueTodayCount}
-          highlight={metrics.dueTodayCount > 0 ? "warning" : undefined}
-        />
-        <SummaryCard
-          label="Overdue follow-ups"
-          value={metrics.overdueCount}
-          highlight={metrics.overdueCount > 0 ? "danger" : undefined}
-        />
-        <SummaryCard
-          label="Open opportunities"
-          value={metrics.openOpportunityCount}
-        />
-        <SummaryCard
-          label="Hot / high priority companies"
+          label="Alta prioridad / hot"
           value={metrics.hotPriorityCount}
           highlight={metrics.hotPriorityCount > 0 ? "warning" : undefined}
         />
         <SummaryCard
-          label="Last activity date"
-          value={formatDate(metrics.lastActivityDate)}
+          label="Follow-ups para hoy"
+          value={metrics.dueTodayCount}
+          highlight={metrics.dueTodayCount > 0 ? "warning" : undefined}
+        />
+        <SummaryCard
+          label="Follow-ups vencidos"
+          value={metrics.overdueCount}
+          highlight={metrics.overdueCount > 0 ? "danger" : undefined}
+        />
+        <SummaryCard
+          label="Oportunidades abiertas"
+          value={metrics.openOpportunityCount}
+        />
+        <SummaryCard
+          label="Actividad últimos 7 días"
+          value={metrics.recentActivityCount7d}
           subtext={
-            metrics.lastActivityDate ? "Most recent CRM activity" : "No activity yet"
+            metrics.lastActivityDate
+              ? `Última actividad: ${formatDate(metrics.lastActivityDate)}`
+              : "Sin actividad registrada"
           }
         />
       </div>
 
       <section className="mb-8 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-medium text-zinc-900">
-          Today&apos;s Action Plan
-        </h2>
+        <h2 className="text-lg font-medium text-zinc-900">Plan de acción de hoy</h2>
         <p className="mt-1 text-sm text-zinc-500">
-          Your highest-priority tasks across follow-ups, accounts, and
-          opportunities.
+          Tareas prioritarias entre follow-ups, cuentas y oportunidades.
         </p>
 
         {actionPlan.length === 0 ? (
           <p className="mt-4 text-sm text-zinc-500">
-            No urgent tasks right now. Review your companies or pipeline to plan
-            your day.
+            No hay tareas urgentes ahora. Revisa tus empresas o pipeline para
+            planificar el día.
           </p>
         ) : (
           <ul className="mt-4 divide-y divide-zinc-100 rounded-lg border border-zinc-200">
@@ -363,7 +533,7 @@ export function HomeDashboard() {
                   href={item.href}
                   className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
                 >
-                  Open
+                  Abrir
                 </Link>
               </li>
             ))}
@@ -377,21 +547,25 @@ export function HomeDashboard() {
         <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-medium text-zinc-900">Due Today</h2>
+              <h2 className="text-lg font-medium text-zinc-900">
+                Follow-ups de hoy
+              </h2>
               <p className="mt-1 text-sm text-zinc-500">
-                Follow-ups scheduled for today
+                Seguimientos programados para hoy
               </p>
             </div>
             <Link
               href="/follow-ups"
               className="text-sm font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
             >
-              View all
+              Ver todos
             </Link>
           </div>
 
           {dueToday.length === 0 ? (
-            <p className="text-sm text-zinc-500">No follow-ups due today.</p>
+            <p className="text-sm text-zinc-500">
+              No tienes follow-ups para hoy.
+            </p>
           ) : (
             <ul className="space-y-3">
               {dueToday.slice(0, LIST_LIMIT).map((followUp) => (
@@ -400,7 +574,7 @@ export function HomeDashboard() {
                   followUp={followUp}
                   variant="today"
                   completing={completingId === followUp.id}
-                  onMarkDone={handleMarkDone}
+                  onMarkDone={onMarkDone}
                 />
               ))}
             </ul>
@@ -408,7 +582,7 @@ export function HomeDashboard() {
 
           {dueToday.length > LIST_LIMIT && (
             <p className="mt-4 text-sm text-zinc-500">
-              Showing {LIST_LIMIT} of {dueToday.length}.
+              Mostrando {LIST_LIMIT} de {dueToday.length}.
             </p>
           )}
         </section>
@@ -416,21 +590,25 @@ export function HomeDashboard() {
         <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-medium text-zinc-900">Overdue</h2>
+              <h2 className="text-lg font-medium text-zinc-900">
+                Follow-ups vencidos
+              </h2>
               <p className="mt-1 text-sm text-zinc-500">
-                Past-due follow-ups that need attention
+                Seguimientos atrasados que requieren atención
               </p>
             </div>
             <Link
               href="/follow-ups"
               className="text-sm font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
             >
-              View all
+              Ver todos
             </Link>
           </div>
 
           {overdue.length === 0 ? (
-            <p className="text-sm text-zinc-500">No overdue follow-ups.</p>
+            <p className="text-sm text-zinc-500">
+              No tienes follow-ups vencidos.
+            </p>
           ) : (
             <ul className="space-y-3">
               {overdue.slice(0, LIST_LIMIT).map((followUp) => (
@@ -439,7 +617,7 @@ export function HomeDashboard() {
                   followUp={followUp}
                   variant="overdue"
                   completing={completingId === followUp.id}
-                  onMarkDone={handleMarkDone}
+                  onMarkDone={onMarkDone}
                 />
               ))}
             </ul>
@@ -447,34 +625,35 @@ export function HomeDashboard() {
 
           {overdue.length > LIST_LIMIT && (
             <p className="mt-4 text-sm text-zinc-500">
-              Showing {LIST_LIMIT} of {overdue.length}.
+              Mostrando {LIST_LIMIT} de {overdue.length}.
             </p>
           )}
         </section>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="mb-8 grid gap-6 xl:grid-cols-2">
         <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-medium text-zinc-900">
-                High Priority Companies
+                Empresas calientes para atacar
               </h2>
               <p className="mt-1 text-sm text-zinc-500">
-                Hot accounts, missing follow-ups, or no recent activity
+                Alta prioridad, sin actividad reciente o sin follow-up
+                programado
               </p>
             </div>
             <Link
               href="/companies"
               className="text-sm font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
             >
-              View all
+              Ver todas
             </Link>
           </div>
 
           {highPriorityCompanies.length === 0 ? (
             <p className="text-sm text-zinc-500">
-              No high priority companies need attention right now.
+              No hay empresas calientes que requieran atención ahora.
             </p>
           ) : (
             <ul className="divide-y divide-zinc-100 rounded-lg border border-zinc-200">
@@ -486,7 +665,7 @@ export function HomeDashboard() {
 
           {highPriorityCompanies.length > LIST_LIMIT && (
             <p className="mt-4 text-sm text-zinc-500">
-              Showing {LIST_LIMIT} of {highPriorityCompanies.length}.
+              Mostrando {LIST_LIMIT} de {highPriorityCompanies.length}.
             </p>
           )}
         </section>
@@ -495,22 +674,24 @@ export function HomeDashboard() {
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-medium text-zinc-900">
-                Open Opportunities
+                Oportunidades activas
               </h2>
               <p className="mt-1 text-sm text-zinc-500">
-                Active load opportunities across your accounts
+                Oportunidades de carga abiertas en tus cuentas
               </p>
             </div>
             <Link
               href="/opportunities"
               className="text-sm font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
             >
-              View all
+              Ver todas
             </Link>
           </div>
 
           {openOpportunities.length === 0 ? (
-            <p className="text-sm text-zinc-500">No open opportunities yet.</p>
+            <p className="text-sm text-zinc-500">
+              No tienes oportunidades abiertas todavía.
+            </p>
           ) : (
             <ul className="divide-y divide-zinc-100 rounded-lg border border-zinc-200">
               {openOpportunities.slice(0, LIST_LIMIT).map((opportunity) => (
@@ -524,87 +705,201 @@ export function HomeDashboard() {
 
           {openOpportunities.length > LIST_LIMIT && (
             <p className="mt-4 text-sm text-zinc-500">
-              Showing {LIST_LIMIT} of {openOpportunities.length}.
+              Mostrando {LIST_LIMIT} de {openOpportunities.length}.
             </p>
           )}
         </section>
       </div>
-    </AuthenticatedLayout>
-  );
-}
 
-function HighPriorityCompanyRow({
-  company,
-}: {
-  company: HighPriorityCompanyItem;
-}) {
-  return (
-    <li className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0 space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm font-semibold text-zinc-900">{company.name}</p>
-          <span
-            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${priorityBadgeClass(company.priority)}`}
-          >
-            {company.priority}
-          </span>
+      <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-medium text-zinc-900">
+              Actividad reciente
+            </h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              Últimas notas y actividades registradas en el CRM
+            </p>
+          </div>
         </div>
-        <p className="text-sm text-zinc-600">{company.reason}</p>
-        <p className="text-sm text-zinc-500">
-          Last activity:{" "}
-          {company.lastActivityAt
-            ? formatDate(company.lastActivityAt)
-            : "No activity recorded"}
-        </p>
-      </div>
 
-      <Link
-        href={`/companies/${company.id}`}
-        className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
-      >
-        Open Company
-      </Link>
-    </li>
+        {recentActivities.length === 0 ? (
+          <p className="text-sm text-zinc-500">No hay actividad reciente.</p>
+        ) : (
+          <ul className="divide-y divide-zinc-100 rounded-lg border border-zinc-200">
+            {recentActivities.map((activity) => (
+              <RecentActivityRow key={activity.id} activity={activity} />
+            ))}
+          </ul>
+        )}
+      </section>
+    </>
   );
 }
 
-function OpenOpportunityRow({
-  opportunity,
-}: {
-  opportunity: OpenOpportunityDashboardItem;
-}) {
+export function HomeDashboard() {
+  const router = useRouter();
+  const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [brokerDashboard, setBrokerDashboard] =
+    useState<BrokerDashboardData | null>(null);
+  const [adminStats, setAdminStats] = useState<AdminDashboardStats | null>(
+    null,
+  );
+  const [completingId, setCompletingId] = useState<string | null>(null);
+
+  const isAdmin = isAdminProfile(profile);
+
+  const loadDashboard = useCallback(async (userId: string, asAdmin: boolean) => {
+    setFetchError(null);
+
+    if (asAdmin) {
+      const { data, error } = await fetchAdminDashboardStats();
+
+      if (error || !data) {
+        setFetchError(
+          formatSupabaseError(error ?? { message: "No se pudo cargar el panel." }),
+        );
+        return;
+      }
+
+      setAdminStats(data);
+      setBrokerDashboard(null);
+      return;
+    }
+
+    const { data, error } = await fetchBrokerDashboardData(userId);
+
+    if (error || !data) {
+      setFetchError(
+        formatSupabaseError(error ?? { message: "No se pudo cargar el panel." }),
+      );
+      return;
+    }
+
+    setBrokerDashboard(data);
+    setAdminStats(null);
+  }, []);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) {
+        router.replace("/login");
+        return;
+      }
+
+      setUser(session.user);
+
+      const { data: userProfile } = await fetchUserProfile(session.user.id);
+      setProfile(userProfile);
+
+      await loadDashboard(
+        session.user.id,
+        isAdminProfile(userProfile),
+      );
+      setLoading(false);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!session) {
+        router.replace("/login");
+        return;
+      }
+
+      setUser(session.user);
+      const { data: userProfile } = await fetchUserProfile(session.user.id);
+      setProfile(userProfile);
+      await loadDashboard(session.user.id, isAdminProfile(userProfile));
+    });
+
+    return () => subscription.unsubscribe();
+  }, [router, loadDashboard]);
+
+  async function handleMarkDone(followUp: FollowUpDashboardItem) {
+    if (!user) return;
+
+    setCompletingId(followUp.id);
+
+    const { error } = await completeFollowUp(
+      followUp.id,
+      user.id,
+      followUp.company_id,
+    );
+
+    if (error) {
+      setFetchError(formatSupabaseError(error));
+      setCompletingId(null);
+      return;
+    }
+
+    await loadDashboard(user.id, false);
+    setCompletingId(null);
+  }
+
+  if (loading) {
+    return (
+      <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50">
+        <p className="text-sm text-zinc-500">Cargando...</p>
+      </div>
+    );
+  }
+
+  if (!user || (!brokerDashboard && !adminStats)) {
+    return null;
+  }
+
   return (
-    <li className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0 space-y-1">
-        <p className="text-sm font-semibold text-zinc-900">
-          {opportunity.companyName}
-        </p>
-        <p className="text-sm text-zinc-700">{opportunity.title}</p>
-        {opportunity.laneLabel && opportunity.laneLabel !== "—" && (
-          <p className="text-sm text-zinc-600">
-            <span className="font-medium">Lane:</span> {opportunity.laneLabel}
+    <AuthenticatedLayout maxWidthClass="max-w-[1400px]">
+      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+            Hoy
           </p>
-        )}
-        <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${loadOpportunityStatusBadgeClass(opportunity.status)}`}
-          >
-            {opportunity.status}
-          </span>
-          {opportunity.estimatedValue && (
-            <span className="text-sm text-zinc-600">
-              Est. value: {opportunity.estimatedValue}
-            </span>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">
+            {getTodayHeading()}
+          </h1>
+          <p className="mt-2 text-sm text-zinc-600">
+            {isAdmin
+              ? "Vista operativa global para administradores."
+              : "Tu panel operativo del día. Sesión iniciada como "}
+            {!isAdmin && (
+              <span className="font-medium text-zinc-900">{user.email}</span>
+            )}
+          </p>
+        </div>
+
+        <div className="flex flex-col items-stretch gap-3 sm:items-end">
+          <QuickNav isAdmin={isAdmin} />
+          {!isAdmin && (
+            <Link
+              href="/companies"
+              className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800"
+            >
+              Agregar empresa
+            </Link>
           )}
         </div>
       </div>
 
-      <Link
-        href={`/companies/${opportunity.companyId}`}
-        className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
-      >
-        Open Company
-      </Link>
-    </li>
+      {fetchError && (
+        <p className="mb-6 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+          {fetchError}
+        </p>
+      )}
+
+      {isAdmin && adminStats ? (
+        <AdminDashboardView stats={adminStats} />
+      ) : brokerDashboard ? (
+        <BrokerDashboardView
+          dashboard={brokerDashboard}
+          completingId={completingId}
+          onMarkDone={handleMarkDone}
+        />
+      ) : null}
+    </AuthenticatedLayout>
   );
 }

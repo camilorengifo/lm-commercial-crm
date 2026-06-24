@@ -14,6 +14,7 @@ export interface BrokerPerformanceRow {
   followUpsDueToday: number;
   overdueFollowUps: number;
   openOpportunities: number;
+  activityCount7d: number;
   lastActivityAt: string | null;
 }
 
@@ -22,6 +23,7 @@ export interface AdminDashboardStats {
   totalCompanies: number;
   followUpsDueToday: number;
   overdueFollowUps: number;
+  highPriorityCompanies: number;
   openOpportunities: number;
   brokerRows: BrokerPerformanceRow[];
 }
@@ -45,6 +47,17 @@ function isOpenOpportunityStatus(status: string): boolean {
   return status !== "Won" && status !== "Lost";
 }
 
+function isHighPriority(priority: string): boolean {
+  return priority === "High" || priority === "Hot Lead";
+}
+
+function getActivityCutoff7d(): Date {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 7);
+  cutoff.setHours(0, 0, 0, 0);
+  return cutoff;
+}
+
 export async function fetchAdminDashboardStats(): Promise<{
   data: AdminDashboardStats | null;
   error: { message?: string } | null;
@@ -58,7 +71,7 @@ export async function fetchAdminDashboardStats(): Promise<{
     activitiesResult,
   ] = await Promise.all([
     supabase.from("profiles").select("id, email, full_name, role"),
-    supabase.from("companies").select("id, user_id, last_contact_at"),
+    supabase.from("companies").select("id, user_id, last_contact_at, priority"),
     supabase.from("contacts").select("id, user_id"),
     supabase
       .from("follow_ups")
@@ -111,6 +124,24 @@ export async function fetchAdminDashboardStats(): Promise<{
     isOpenOpportunityStatus(opportunity.status),
   ).length;
 
+  const highPriorityCompanies = companies.filter((company) =>
+    isHighPriority(company.priority as string),
+  ).length;
+
+  const activityCutoff7d = getActivityCutoff7d();
+  const activityCount7dByUser = new Map<string, number>();
+
+  for (const activity of activities) {
+    if (new Date(activity.activity_at) < activityCutoff7d) {
+      continue;
+    }
+
+    activityCount7dByUser.set(
+      activity.user_id,
+      (activityCount7dByUser.get(activity.user_id) ?? 0) + 1,
+    );
+  }
+
   const lastActivityByUser = new Map<string, string>();
   for (const activity of activities) {
     if (!lastActivityByUser.has(activity.user_id)) {
@@ -154,6 +185,7 @@ export async function fetchAdminDashboardStats(): Promise<{
           opportunity.user_id === userId &&
           isOpenOpportunityStatus(opportunity.status),
       ).length,
+      activityCount7d: activityCount7dByUser.get(userId) ?? 0,
       lastActivityAt: lastActivityByUser.get(userId) ?? null,
     };
   });
@@ -166,6 +198,7 @@ export async function fetchAdminDashboardStats(): Promise<{
       totalCompanies: companies.length,
       followUpsDueToday,
       overdueFollowUps,
+      highPriorityCompanies,
       openOpportunities,
       brokerRows,
     },
