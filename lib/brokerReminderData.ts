@@ -297,7 +297,7 @@ export async function buildBrokerReminderData(
 
   const quotedOpportunities = limit(
     opportunities
-      .filter((opportunity) => opportunity.status === "Quoted")
+      .filter((opportunity) => opportunity.status === "quoted")
       .map((opportunity) => ({
         companyId: opportunity.company_id,
         companyName:
@@ -315,7 +315,7 @@ export async function buildBrokerReminderData(
 
   const newOpportunities = limit(
     opportunities
-      .filter((opportunity) => opportunity.status === "New")
+      .filter((opportunity) => opportunity.status === "prospecting")
       .map((opportunity) => ({
         companyId: opportunity.company_id,
         companyName:

@@ -4,6 +4,7 @@ import {
   normalizeUserRole,
   type UserRole,
 } from "@/lib/userProfile";
+import { isOpenOpportunityStage } from "@/lib/crmConstants";
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin";
 import {
   assertSafeInviteRedirect,
@@ -25,7 +26,7 @@ export interface AdminUserListItem {
 }
 
 function isOpenOpportunityStatus(status: string): boolean {
-  return status !== "Won" && status !== "Lost";
+  return isOpenOpportunityStage(status);
 }
 
 function normalizeEmail(email: string): string {

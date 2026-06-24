@@ -371,7 +371,7 @@ export async function buildBrokerCrmSummary(
 
   const quotedOpportunities = limit(
     opportunities
-      .filter((opportunity) => opportunity.status === "Quoted")
+      .filter((opportunity) => opportunity.status === "quoted")
       .map((opportunity) => ({
         companyName: unwrapName(opportunity.companies),
         lane: formatLane(
@@ -386,7 +386,7 @@ export async function buildBrokerCrmSummary(
 
   const newOpportunities = limit(
     opportunities
-      .filter((opportunity) => opportunity.status === "New")
+      .filter((opportunity) => opportunity.status === "prospecting")
       .map((opportunity) => ({
         companyName: unwrapName(opportunity.companies),
         lane: formatLane(

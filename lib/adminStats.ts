@@ -1,4 +1,5 @@
 import { getFollowUpBucket } from "@/lib/followUps";
+import { isOpenOpportunityStage } from "@/lib/crmConstants";
 import { supabase } from "@/lib/supabaseClient";
 import {
   getProfileDisplayName,
@@ -44,7 +45,7 @@ export interface AdminBrokerDetailSummary {
 }
 
 function isOpenOpportunityStatus(status: string): boolean {
-  return status !== "Won" && status !== "Lost";
+  return isOpenOpportunityStage(status);
 }
 
 function isHighPriority(priority: string): boolean {

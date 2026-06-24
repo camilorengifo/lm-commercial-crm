@@ -485,6 +485,7 @@ function BrokerDashboardView({
         <SummaryCard
           label="Oportunidades abiertas"
           value={metrics.openOpportunityCount}
+          subtext={`Ganadas: ${metrics.wonOpportunityCount} · Perdidas: ${metrics.lostOpportunityCount}`}
         />
         <SummaryCard
           label="Actividad últimos 7 días"

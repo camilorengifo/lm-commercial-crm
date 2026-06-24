@@ -1,6 +1,8 @@
 import {
   DEFAULT_SALES_STAGE,
   isSalesStage,
+  OPEN_OPPORTUNITY_STATUSES,
+  normalizeOpportunityStage,
   type ActivityType,
   type CompanyPriority,
   type LoadOpportunityStatus,
@@ -23,11 +25,6 @@ import { supabase } from "@/lib/supabaseClient";
 const HIGH_PRIORITY_INACTIVITY_DAYS = 7;
 const RECENT_ACTIVITY_DAYS = 7;
 const LIST_LIMIT = 10;
-const OPEN_OPPORTUNITY_STATUSES: LoadOpportunityStatus[] = [
-  "New",
-  "Quoted",
-  "On Hold",
-];
 
 export { LIST_LIMIT };
 
@@ -96,6 +93,8 @@ export interface BrokerDashboardData {
     dueTodayCount: number;
     overdueCount: number;
     openOpportunityCount: number;
+    wonOpportunityCount: number;
+    lostOpportunityCount: number;
     hotPriorityCount: number;
     recentActivityCount7d: number;
     lastActivityDate: string | null;
@@ -309,11 +308,7 @@ function mapOpenOpportunity(
     opportunity.lane_origin,
     opportunity.lane_destination,
   );
-  const title =
-    opportunity.commodity?.trim() ||
-    laneLabel ||
-    opportunity.notes?.trim() ||
-    "Load opportunity";
+  const title = opportunity.name?.trim() || opportunity.commodity?.trim() || laneLabel;
   const estimatedValue =
     opportunity.quoted_rate ?? opportunity.target_rate ?? null;
 
@@ -499,7 +494,9 @@ export async function fetchBrokerDashboardData(
 
   const openOpportunities = (opportunitiesResult.data ?? [])
     .filter((opportunity) =>
-      OPEN_OPPORTUNITY_STATUSES.includes(opportunity.status),
+      OPEN_OPPORTUNITY_STATUSES.includes(
+        normalizeOpportunityStage(opportunity.status),
+      ),
     )
     .map(mapOpenOpportunity);
 
@@ -542,6 +539,14 @@ export async function fetchBrokerDashboardData(
         dueTodayCount: dueToday.length,
         overdueCount: overdue.length,
         openOpportunityCount: openOpportunities.length,
+        wonOpportunityCount: (opportunitiesResult.data ?? []).filter(
+          (opportunity) =>
+            normalizeOpportunityStage(opportunity.status) === "won",
+        ).length,
+        lostOpportunityCount: (opportunitiesResult.data ?? []).filter(
+          (opportunity) =>
+            normalizeOpportunityStage(opportunity.status) === "lost",
+        ).length,
         hotPriorityCount: companies.filter((company) =>
           isHighPriorityLevel(company.priority),
         ).length,

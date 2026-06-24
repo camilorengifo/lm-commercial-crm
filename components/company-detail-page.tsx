@@ -422,6 +422,7 @@ export function CompanyDetailPage() {
                 companyId={company.id}
                 userId={company.user_id}
                 currentSalesStage={company.sales_stage}
+                canManage={!isAdmin}
                 onCompanyUpdated={handleCompanyUpdated}
               />
               <CompanyChronologySection

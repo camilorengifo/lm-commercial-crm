@@ -52,16 +52,58 @@ export const FOLLOW_UP_STATUS_LABELS: Record<FollowUpStatus, string> = {
 };
 
 export const LOAD_OPPORTUNITY_STATUSES = [
-  "New",
-  "Quoted",
-  "Won",
-  "Lost",
-  "On Hold",
+  "prospecting",
+  "contacted",
+  "quoted",
+  "negotiating",
+  "won",
+  "lost",
 ] as const;
 
 export type LoadOpportunityStatus = (typeof LOAD_OPPORTUNITY_STATUSES)[number];
 
-export const DEFAULT_LOAD_OPPORTUNITY_STATUS: LoadOpportunityStatus = "New";
+export const DEFAULT_LOAD_OPPORTUNITY_STATUS: LoadOpportunityStatus = "prospecting";
+
+export const OPEN_OPPORTUNITY_STATUSES: LoadOpportunityStatus[] = [
+  "prospecting",
+  "contacted",
+  "quoted",
+  "negotiating",
+];
+
+export const OPPORTUNITY_STAGE_LABELS_ES: Record<LoadOpportunityStatus, string> = {
+  prospecting: "Prospectando",
+  contacted: "Contactado",
+  quoted: "Cotizado",
+  negotiating: "Negociando",
+  won: "Ganado",
+  lost: "Perdido",
+};
+
+const LEGACY_OPPORTUNITY_STATUS_MAP: Record<string, LoadOpportunityStatus> = {
+  New: "prospecting",
+  Quoted: "quoted",
+  "On Hold": "negotiating",
+  Won: "won",
+  Lost: "lost",
+};
+
+export function normalizeOpportunityStage(value: string): LoadOpportunityStatus {
+  if (isLoadOpportunityStatus(value)) {
+    return value;
+  }
+
+  return LEGACY_OPPORTUNITY_STATUS_MAP[value] ?? DEFAULT_LOAD_OPPORTUNITY_STATUS;
+}
+
+export function isOpenOpportunityStage(status: string): boolean {
+  const stage = normalizeOpportunityStage(status);
+  return stage !== "won" && stage !== "lost";
+}
+
+export function getOpportunityStageLabelEs(status: string): string {
+  return OPPORTUNITY_STAGE_LABELS_ES[normalizeOpportunityStage(status)];
+}
 
 export const SALES_STAGES_PROTECTED_FROM_QUOTE: SalesStage[] = [
   "Customer",
@@ -76,19 +118,21 @@ export function isLoadOpportunityStatus(
 }
 
 export function loadOpportunityStatusBadgeClass(
-  status: LoadOpportunityStatus,
+  status: LoadOpportunityStatus | string,
 ): string {
-  switch (status) {
-    case "New":
+  switch (normalizeOpportunityStage(status)) {
+    case "prospecting":
       return "bg-sky-100 text-sky-800";
-    case "Quoted":
+    case "contacted":
+      return "bg-violet-100 text-violet-800";
+    case "quoted":
       return "bg-blue-100 text-blue-800";
-    case "Won":
-      return "bg-emerald-100 text-emerald-800";
-    case "Lost":
-      return "bg-red-100 text-red-800";
-    case "On Hold":
+    case "negotiating":
       return "bg-amber-100 text-amber-800";
+    case "won":
+      return "bg-emerald-100 text-emerald-800";
+    case "lost":
+      return "bg-red-100 text-red-800";
   }
 }
 
