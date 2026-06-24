@@ -20,7 +20,7 @@ export function AiBrokerAssistantSection() {
     const { data, error: requestError } = await fetchBrokerRecommendations();
 
     if (requestError || !data) {
-      setError(AI_CLIENT_ERROR_MESSAGE);
+      setError(requestError ?? AI_CLIENT_ERROR_MESSAGE);
       setLoading(false);
       return;
     }

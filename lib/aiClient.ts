@@ -11,6 +11,11 @@ import type {
   OutreachType,
 } from "@/lib/aiPrompts";
 
+interface AiApiResponse {
+  success?: boolean;
+  error?: string;
+}
+
 async function getAccessToken(): Promise<string | null> {
   const {
     data: { session },
@@ -19,7 +24,7 @@ async function getAccessToken(): Promise<string | null> {
   return session?.access_token ?? null;
 }
 
-async function postAiRequest<T>(
+async function postAiRequest<T extends AiApiResponse>(
   path: string,
   body?: Record<string, string | null | undefined>,
 ): Promise<{ data: T | null; error: string | null }> {
@@ -39,9 +44,9 @@ async function postAiRequest<T>(
       body: body ? JSON.stringify(body) : undefined,
     });
 
-    const payload = (await response.json()) as T & { error?: string };
+    const payload = (await response.json()) as T;
 
-    if (!response.ok) {
+    if (!response.ok || payload.success === false) {
       return {
         data: null,
         error: sanitizeClientAiError(payload.error, response.status),
@@ -56,6 +61,7 @@ async function postAiRequest<T>(
 
 export async function fetchBrokerRecommendations() {
   return postAiRequest<{
+    success: true;
     recommendations: BrokerRecommendationsResponse;
     generatedAt: string;
   }>("/api/ai/broker-recommendations");
@@ -63,6 +69,7 @@ export async function fetchBrokerRecommendations() {
 
 export async function fetchAccountSummary(companyId: string) {
   return postAiRequest<{
+    success: true;
     summary: AccountSummaryResponse;
     companyName: string;
     generatedAt: string;
@@ -77,7 +84,9 @@ export async function fetchOutreachDraft(input: {
   goal: string | null;
 }) {
   return postAiRequest<{
+    success: true;
     draft: OutreachDraftResponse;
+    message: string;
     companyName: string;
     generatedAt: string;
   }>("/api/ai/outreach", {

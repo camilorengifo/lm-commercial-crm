@@ -95,6 +95,13 @@ export function getOpenAIClient(): OpenAI {
   return new OpenAI({ apiKey: getOpenAIKey() });
 }
 
+const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
+
+export function getOpenAIModel(): string {
+  const configured = process.env.OPENAI_MODEL?.trim();
+  return configured || DEFAULT_OPENAI_MODEL;
+}
+
 function redactSecrets(value: string): string {
   return value
     .replace(/sk-[A-Za-z0-9_-]+/g, "[REDACTED_OPENAI_KEY]")
@@ -120,28 +127,26 @@ export function sanitizeAiError(error: unknown, context?: string): string {
   return AI_CLIENT_ERROR_MESSAGE;
 }
 
-export function logAiRequestStarted(route: string): void {
-  console.info(`[openai] AI request started (${route})`);
-  logOpenAIKeyDiagnostics("request_started");
-}
-
 export async function generateJsonCompletion<T>(input: {
   systemPrompt: string;
   userPrompt: string;
   model?: string;
+  context?: string;
 }): Promise<{ data: T | null; error: string | null }> {
   let client: OpenAI;
 
   try {
     client = getOpenAIClient();
   } catch (error) {
-    sanitizeAiError(error, "getOpenAIClient");
+    sanitizeAiError(error, input.context ?? "getOpenAIClient");
     return { data: null, error: AI_CLIENT_ERROR_MESSAGE };
   }
 
+  const model = input.model ?? getOpenAIModel();
+
   try {
     const response = await client.chat.completions.create({
-      model: input.model ?? "gpt-4o-mini",
+      model,
       temperature: 0.3,
       response_format: { type: "json_object" },
       messages: [
@@ -162,7 +167,7 @@ export async function generateJsonCompletion<T>(input: {
   } catch (error) {
     return {
       data: null,
-      error: sanitizeAiError(error, "generateJsonCompletion"),
+      error: sanitizeAiError(error, input.context ?? "generateJsonCompletion"),
     };
   }
 }

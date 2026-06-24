@@ -464,7 +464,7 @@ export async function buildBrokerCrmSummary(
 
 export async function buildAccountCrmSummary(
   supabase: SupabaseClient,
-  userId: string,
+  dataOwnerUserId: string,
   companyId: string,
 ): Promise<AccountCrmSummary | null> {
   const { data: company, error: companyError } = await supabase
@@ -473,7 +473,7 @@ export async function buildAccountCrmSummary(
       "id, name, sales_stage, priority, city, state, country, general_notes, last_contact_at, next_follow_up_at",
     )
     .eq("id", companyId)
-    .eq("user_id", userId)
+    .eq("user_id", dataOwnerUserId)
     .maybeSingle();
 
   if (companyError) throw companyError;
@@ -485,20 +485,20 @@ export async function buildAccountCrmSummary(
         .from("contacts")
         .select("id, first_name, last_name, email, phone, job_title, is_primary")
         .eq("company_id", companyId)
-        .eq("user_id", userId)
+        .eq("user_id", dataOwnerUserId)
         .order("is_primary", { ascending: false }),
       supabase
         .from("follow_ups")
         .select("title, notes, due_at, status")
         .eq("company_id", companyId)
-        .eq("user_id", userId)
+        .eq("user_id", dataOwnerUserId)
         .eq("status", "pending")
         .order("due_at", { ascending: true }),
       supabase
         .from("activities")
         .select("activity_type, subject, notes, activity_at")
         .eq("company_id", companyId)
-        .eq("user_id", userId)
+        .eq("user_id", dataOwnerUserId)
         .order("activity_at", { ascending: false })
         .limit(12),
       supabase
@@ -507,7 +507,7 @@ export async function buildAccountCrmSummary(
           "status, lane_origin, lane_destination, equipment_type, commodity, target_rate, quoted_rate, notes, updated_at",
         )
         .eq("company_id", companyId)
-        .eq("user_id", userId)
+        .eq("user_id", dataOwnerUserId)
         .order("updated_at", { ascending: false }),
     ]);
 
@@ -600,7 +600,7 @@ export interface OutreachCrmContext {
 
 export async function buildOutreachCrmContext(
   supabase: SupabaseClient,
-  userId: string,
+  dataOwnerUserId: string,
   companyId: string,
   input: {
     outreachType: string;
@@ -609,14 +609,18 @@ export async function buildOutreachCrmContext(
     contactId: string | null;
   },
 ): Promise<OutreachCrmContext | null> {
-  const baseSummary = await buildAccountCrmSummary(supabase, userId, companyId);
+  const baseSummary = await buildAccountCrmSummary(
+    supabase,
+    dataOwnerUserId,
+    companyId,
+  );
   if (!baseSummary) return null;
 
   const { data: allFollowUps, error: followUpsError } = await supabase
     .from("follow_ups")
     .select("title, notes, due_at, status, completed_at")
     .eq("company_id", companyId)
-    .eq("user_id", userId)
+    .eq("user_id", dataOwnerUserId)
     .order("due_at", { ascending: false })
     .limit(20);
 
@@ -630,7 +634,7 @@ export async function buildOutreachCrmContext(
       .select("first_name, last_name, email, phone, job_title")
       .eq("id", input.contactId)
       .eq("company_id", companyId)
-      .eq("user_id", userId)
+      .eq("user_id", dataOwnerUserId)
       .maybeSingle();
 
     if (contactError) throw contactError;

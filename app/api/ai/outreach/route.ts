@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 // Assistive only: returns draft text. No sending or automated outreach.
 import { buildOutreachCrmContext } from "@/lib/aiCrmContext";
 import {
@@ -12,11 +11,20 @@ import {
   type OutreachType,
 } from "@/lib/aiPrompts";
 import {
-  AI_CLIENT_ERROR_MESSAGE,
-  generateJsonCompletion,
-  logAiRequestStarted,
-} from "@/lib/openaiServer";
-import { getAuthenticatedUser } from "@/lib/supabaseServer";
+  aiClientErrorResponse,
+  aiGenerationErrorResponse,
+  aiSuccessResponse,
+  authenticateAiRequest,
+  createAiLogContext,
+  logAiFailed,
+  logAiStart,
+  logAiSuccess,
+  resolveCompanyAccess,
+} from "@/lib/aiRouteHelpers";
+import { generateJsonCompletion } from "@/lib/openaiServer";
+
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
 interface OutreachRequestBody {
   companyId?: string;
@@ -35,22 +43,20 @@ function isOutreachTone(value: string): value is OutreachTone {
 }
 
 export async function POST(request: Request) {
-  const { user, supabase, error: authError } =
-    await getAuthenticatedUser(request);
+  const auth = await authenticateAiRequest(request);
 
-  if (authError || !user || !supabase) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (auth.error || !auth.context) {
+    return aiClientErrorResponse(auth.error ?? "Unauthorized", auth.status ?? 401);
   }
+
+  const { user, supabase, isAdmin } = auth.context;
 
   let body: OutreachRequestBody;
 
   try {
     body = (await request.json()) as OutreachRequestBody;
   } catch {
-    return NextResponse.json(
-      { error: "Invalid request body." },
-      { status: 400 },
-    );
+    return aiClientErrorResponse("Invalid request body.", 400);
   }
 
   const companyId = body.companyId?.trim();
@@ -58,64 +64,74 @@ export async function POST(request: Request) {
   const tone = body.tone?.trim() ?? "";
 
   if (!companyId) {
-    return NextResponse.json(
-      { error: "Company ID is required." },
-      { status: 400 },
-    );
+    return aiClientErrorResponse("Company ID is required.", 400);
   }
 
   if (!isOutreachType(outreachType)) {
-    return NextResponse.json(
-      { error: "A valid outreach type is required." },
-      { status: 400 },
-    );
+    return aiClientErrorResponse("A valid outreach type is required.", 400);
   }
 
   if (!isOutreachTone(tone)) {
-    return NextResponse.json(
-      { error: "A valid tone is required." },
-      { status: 400 },
-    );
+    return aiClientErrorResponse("A valid tone is required.", 400);
   }
 
   const contactId = body.contactId?.trim() || null;
   const goal = body.goal?.trim() || null;
 
-  try {
-    logAiRequestStarted("outreach");
+  const logContext = createAiLogContext("AI_OUTREACH", user.id, companyId);
+  logAiStart(logContext);
 
-    const context = await buildOutreachCrmContext(supabase, user.id, companyId, {
-      outreachType,
-      tone,
-      goal,
-      contactId,
-    });
+  try {
+    const access = await resolveCompanyAccess(
+      supabase,
+      user.id,
+      companyId,
+      isAdmin,
+    );
+
+    if (!access) {
+      return aiClientErrorResponse("Company not found.", 404);
+    }
+
+    const context = await buildOutreachCrmContext(
+      supabase,
+      access.dataOwnerUserId,
+      companyId,
+      {
+        outreachType,
+        tone,
+        goal,
+        contactId,
+      },
+    );
 
     if (!context) {
-      return NextResponse.json({ error: "Company not found." }, { status: 404 });
+      return aiClientErrorResponse("Company not found.", 404);
     }
 
     const { data, error } = await generateJsonCompletion<OutreachDraftResponse>({
       systemPrompt: OUTREACH_SYSTEM_PROMPT,
       userPrompt: buildOutreachUserPrompt(context),
+      context: "AI_OUTREACH",
     });
 
     if (error || !data) {
-      return NextResponse.json(
-        { error: error ?? AI_CLIENT_ERROR_MESSAGE },
-        { status: 500 },
-      );
+      logAiFailed(logContext, new Error("openai_generation_failed"));
+      return aiGenerationErrorResponse();
     }
 
-    return NextResponse.json({
-      draft: normalizeOutreachDraft(data),
+    const draft = normalizeOutreachDraft(data);
+
+    logAiSuccess(logContext, { companyName: context.company.name });
+
+    return aiSuccessResponse({
+      draft,
+      message: draft.fullDraft,
       companyName: context.company.name,
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {
-    return NextResponse.json(
-      { error: AI_CLIENT_ERROR_MESSAGE },
-      { status: 500 },
-    );
+    logAiFailed(logContext, error);
+    return aiGenerationErrorResponse();
   }
 }
