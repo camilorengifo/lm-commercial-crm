@@ -200,7 +200,7 @@ function buildActivityPreview(activity: ActivityRow): string {
     return `${subject} — ${notes}`;
   }
 
-  return subject || notes || "Sin detalle registrado";
+  return subject || notes || "No details recorded";
 }
 
 function buildCompanyMaps(companies: CompanyDashboardRow[]) {
@@ -476,7 +476,7 @@ export async function fetchBrokerDashboardData(
     .map((activity) => ({
       id: activity.id,
       companyId: activity.company_id,
-      companyName: nameByCompany.get(activity.company_id) ?? "Empresa desconocida",
+      companyName: nameByCompany.get(activity.company_id) ?? "Unknown company",
       activityType: activity.activity_type,
       activityAt: activity.activity_at,
       preview: buildActivityPreview(activity),
@@ -559,7 +559,7 @@ export async function fetchBrokerDashboardData(
 }
 
 export function getTodayHeading(): string {
-  return new Date().toLocaleDateString("es-ES", {
+  return new Date().toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
     day: "numeric",

@@ -117,7 +117,7 @@ export function OpportunityNewPage() {
 
     const selectedCompany = companies.find((company) => company.id === companyId);
     if (!selectedCompany) {
-      setError("Selecciona una empresa válida.");
+      setError("Select a valid company.");
       return;
     }
 
@@ -134,12 +134,12 @@ export function OpportunityNewPage() {
     });
 
     if (createError || !data) {
-      setError(formatSupabaseError(createError ?? { message: "No se pudo guardar." }));
+      setError(formatSupabaseError(createError ?? { message: "Unable to save." }));
       setSubmitting(false);
       return;
     }
 
-    setSuccess("Oportunidad creada correctamente.");
+    setSuccess("Opportunity created successfully.");
     setSubmitting(false);
     router.push(`/opportunities/${data.id}`);
   }
@@ -147,7 +147,7 @@ export function OpportunityNewPage() {
   if (loading) {
     return (
       <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50">
-        <p className="text-sm text-zinc-500">Cargando...</p>
+        <p className="text-sm text-zinc-500">Loading...</p>
       </div>
     );
   }
@@ -163,13 +163,13 @@ export function OpportunityNewPage() {
           href="/opportunities"
           className="text-sm font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
         >
-          ← Volver a oportunidades
+          ← Back to opportunities
         </Link>
         <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-900">
-          Nueva oportunidad
+          New Opportunity
         </h1>
         <p className="mt-2 text-sm text-zinc-600">
-          Registra una oportunidad de carga conectada a una empresa.
+          Record a load opportunity connected to a company.
         </p>
       </div>
 
@@ -192,7 +192,7 @@ export function OpportunityNewPage() {
               htmlFor="opportunity-company"
               className="mb-1.5 block text-sm font-medium text-zinc-700"
             >
-              Empresa <span className="text-red-600">*</span>
+              Company <span className="text-red-600">*</span>
             </label>
             <select
               id="opportunity-company"
@@ -202,7 +202,7 @@ export function OpportunityNewPage() {
               className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
             >
               <option value="" disabled>
-                Selecciona una empresa
+                Select a company
               </option>
               {companies.map((company) => (
                 <option key={company.id} value={company.id}>
@@ -225,13 +225,13 @@ export function OpportunityNewPage() {
               disabled={submitting || !companyId}
               className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {submitting ? "Guardando..." : "Guardar oportunidad"}
+              {submitting ? "Saving..." : "Save opportunity"}
             </button>
             <Link
               href="/opportunities"
               className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
             >
-              Cancelar
+              Cancel
             </Link>
           </div>
         </form>

@@ -154,7 +154,7 @@ function mapOpportunityRow(
     notes: row.notes,
     created_at: row.created_at,
     updated_at: row.updated_at,
-    companyName: company?.name ?? "Empresa desconocida",
+    companyName: company?.name ?? "Unknown company",
     companySalesStage: isSalesStage(company?.sales_stage ?? "")
       ? (company!.sales_stage as SalesStage)
       : DEFAULT_SALES_STAGE,
@@ -169,7 +169,7 @@ function mapOpportunityRecord(row: Record<string, unknown>): LoadOpportunity {
     user_id: row.user_id as string,
     company_id: row.company_id as string,
     contact_id: (row.contact_id as string | null) ?? null,
-    name: (row.name as string) || "Oportunidad de carga",
+    name: (row.name as string) || "Load opportunity",
     lane_origin: (row.lane_origin as string | null) ?? null,
     lane_destination: (row.lane_destination as string | null) ?? null,
     equipment_type: (row.equipment_type as string | null) ?? null,
@@ -209,7 +209,7 @@ export function formatLane(
 
 export function formatOpportunityRate(value: number | null): string {
   if (value === null || Number.isNaN(value)) return "—";
-  return new Intl.NumberFormat("es-US", {
+  return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     maximumFractionDigits: 2,
@@ -240,7 +240,7 @@ export function validateOpportunityForm(
   form: OpportunityFormState,
 ): string | null {
   if (!form.name.trim()) {
-    return "El nombre de la oportunidad es obligatorio.";
+    return "Opportunity name is required.";
   }
 
   return null;
@@ -299,30 +299,30 @@ export function buildOpportunitySummary(
   payload: ReturnType<typeof buildOpportunityPayload>,
 ): string {
   const lines = [
-    `Nombre: ${payload.name}`,
-    `Etapa: ${payload.status}`,
+    `Name: ${payload.name}`,
+    `Stage: ${payload.status}`,
     `Lane: ${formatLane(payload.lane_origin, payload.lane_destination)}`,
   ];
 
-  if (payload.equipment_type) lines.push(`Equipo: ${payload.equipment_type}`);
+  if (payload.equipment_type) lines.push(`Equipment: ${payload.equipment_type}`);
   if (payload.commodity) lines.push(`Commodity: ${payload.commodity}`);
-  if (payload.frequency) lines.push(`Frecuencia: ${payload.frequency}`);
-  if (payload.estimated_loads) lines.push(`Cargas est.: ${payload.estimated_loads}`);
+  if (payload.frequency) lines.push(`Frequency: ${payload.frequency}`);
+  if (payload.estimated_loads) lines.push(`Est. loads: ${payload.estimated_loads}`);
   if (payload.estimated_loads_per_week !== null) {
-    lines.push(`Cargas/semana: ${payload.estimated_loads_per_week}`);
+    lines.push(`Loads/week: ${payload.estimated_loads_per_week}`);
   }
   if (payload.estimated_revenue_usd !== null) {
     lines.push(
-      `Ingreso est.: ${formatOpportunityRate(payload.estimated_revenue_usd)}`,
+      `Est. revenue: ${formatOpportunityRate(payload.estimated_revenue_usd)}`,
     );
   }
   if (payload.estimated_margin_usd !== null) {
     lines.push(
-      `Margen est.: ${formatOpportunityRate(payload.estimated_margin_usd)}`,
+      `Est. margin: ${formatOpportunityRate(payload.estimated_margin_usd)}`,
     );
   }
-  if (payload.next_step) lines.push(`Próximo paso: ${payload.next_step}`);
-  if (payload.notes) lines.push(`Notas: ${payload.notes}`);
+  if (payload.next_step) lines.push(`Next step: ${payload.next_step}`);
+  if (payload.notes) lines.push(`Notes: ${payload.notes}`);
 
   return lines.join("\n");
 }
@@ -742,7 +742,7 @@ async function createLoadOpportunityTimelineActivity(input: {
     user_id: input.userId,
     company_id: input.companyId,
     activity_type: "note",
-    subject: "Oportunidad de carga creada",
+    subject: "Load opportunity created",
     notes: buildOpportunitySummary(input.payload),
     activity_at: new Date().toISOString(),
   });

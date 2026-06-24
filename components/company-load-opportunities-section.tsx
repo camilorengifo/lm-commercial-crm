@@ -4,7 +4,7 @@ import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { LoadOpportunityFormFields } from "@/components/load-opportunity-form-fields";
 import {
-  getOpportunityStageLabelEs,
+  getOpportunityStageLabel,
   loadOpportunityStatusBadgeClass,
   type SalesStage,
 } from "@/lib/crmConstants";
@@ -120,7 +120,7 @@ export function CompanyLoadOpportunitiesSection({
 
   async function handleDelete(opportunity: LoadOpportunity) {
     const confirmed = window.confirm(
-      `¿Eliminar la oportunidad "${opportunity.name}"? Esta acción no se puede deshacer.`,
+      `Delete opportunity "${opportunity.name}"? This action cannot be undone.`,
     );
 
     if (!confirmed) return;
@@ -151,9 +151,9 @@ export function CompanyLoadOpportunitiesSection({
     <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
       <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-medium text-zinc-900">Oportunidades</h2>
+          <h2 className="text-lg font-medium text-zinc-900">Opportunities</h2>
           <p className="mt-1 text-sm text-zinc-500">
-            Oportunidades de carga y cotizaciones para esta empresa
+            Load opportunities and quotes for this company
           </p>
         </div>
         {canManage && (
@@ -161,7 +161,7 @@ export function CompanyLoadOpportunitiesSection({
             href={`/opportunities/new?companyId=${companyId}`}
             className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800"
           >
-            Nueva oportunidad para esta compañía
+            New opportunity for this company
           </Link>
         )}
       </div>
@@ -173,10 +173,10 @@ export function CompanyLoadOpportunitiesSection({
       )}
 
       {loading ? (
-        <p className="text-sm text-zinc-500">Cargando oportunidades...</p>
+        <p className="text-sm text-zinc-500">Loading opportunities...</p>
       ) : opportunities.length === 0 ? (
         <p className="text-sm text-zinc-500">
-          No hay oportunidades registradas para esta empresa todavía.
+          No opportunities recorded for this company yet.
         </p>
       ) : (
         <ul className="divide-y divide-zinc-100">
@@ -189,7 +189,7 @@ export function CompanyLoadOpportunitiesSection({
                 {isEditing && canManage ? (
                   <form onSubmit={handleEdit} className="space-y-4">
                     <h3 className="text-sm font-medium text-zinc-900">
-                      Editar oportunidad
+                      Edit opportunity
                     </h3>
                     <LoadOpportunityFormFields
                       form={editForm}
@@ -210,14 +210,14 @@ export function CompanyLoadOpportunitiesSection({
                         disabled={editSubmitting}
                         className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        {editSubmitting ? "Guardando..." : "Guardar cambios"}
+                        {editSubmitting ? "Saving..." : "Save changes"}
                       </button>
                       <button
                         type="button"
                         onClick={cancelEditing}
                         className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
                       >
-                        Cancelar
+                        Cancel
                       </button>
                     </div>
                   </form>
@@ -234,7 +234,7 @@ export function CompanyLoadOpportunitiesSection({
                         <span
                           className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${loadOpportunityStatusBadgeClass(opportunity.status)}`}
                         >
-                          {getOpportunityStageLabelEs(opportunity.status)}
+                          {getOpportunityStageLabel(opportunity.status)}
                         </span>
                         <span className="text-xs text-zinc-500">
                           {opportunity.probability}% prob.
@@ -251,7 +251,7 @@ export function CompanyLoadOpportunitiesSection({
                       <div className="grid gap-1 text-sm text-zinc-700 sm:grid-cols-2">
                         <p>
                           <span className="font-medium text-zinc-600">
-                            Equipo:
+                            Equipment:
                           </span>{" "}
                           {opportunity.equipment_type || "—"}
                         </p>
@@ -263,7 +263,7 @@ export function CompanyLoadOpportunitiesSection({
                         </p>
                         <p>
                           <span className="font-medium text-zinc-600">
-                            Cargas est.:
+                            Est. loads:
                           </span>{" "}
                           {opportunity.estimated_loads ||
                             opportunity.estimated_loads_per_week ||
@@ -271,19 +271,19 @@ export function CompanyLoadOpportunitiesSection({
                         </p>
                         <p>
                           <span className="font-medium text-zinc-600">
-                            Ingreso est.:
+                            Est. revenue:
                           </span>{" "}
                           {formatOpportunityRate(opportunity.estimated_revenue_usd)}
                         </p>
                         <p>
                           <span className="font-medium text-zinc-600">
-                            Próximo paso:
+                            Next step:
                           </span>{" "}
                           {opportunity.next_step || "—"}
                         </p>
                         <p>
                           <span className="font-medium text-zinc-600">
-                            Contacto:
+                            Contact:
                           </span>{" "}
                           {opportunity.contact_id
                             ? contactNameById.get(opportunity.contact_id) ?? "—"
@@ -298,7 +298,7 @@ export function CompanyLoadOpportunitiesSection({
                       )}
 
                       <p className="text-xs text-zinc-500">
-                        Creada {formatDate(opportunity.created_at)}
+                        Created {formatDate(opportunity.created_at)}
                       </p>
                     </div>
 
@@ -310,7 +310,7 @@ export function CompanyLoadOpportunitiesSection({
                           disabled={isDeleting}
                           className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          Editar
+                          Edit
                         </button>
                         <button
                           type="button"
@@ -318,7 +318,7 @@ export function CompanyLoadOpportunitiesSection({
                           disabled={isDeleting}
                           className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          {isDeleting ? "Eliminando..." : "Eliminar"}
+                          {isDeleting ? "Deleting..." : "Delete"}
                         </button>
                       </div>
                     )}

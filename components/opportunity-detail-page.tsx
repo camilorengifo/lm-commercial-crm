@@ -7,7 +7,7 @@ import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { LoadOpportunityFormFields } from "@/components/load-opportunity-form-fields";
 import {
-  getOpportunityStageLabelEs,
+  getOpportunityStageLabel,
   loadOpportunityStatusBadgeClass,
 } from "@/lib/crmConstants";
 import { formatDate, formatDateTime, formatSupabaseError } from "@/lib/crmFormat";
@@ -142,7 +142,7 @@ export function OpportunityDetailPage() {
       return;
     }
 
-    setSuccess("Oportunidad actualizada.");
+    setSuccess("Opportunity updated.");
     await loadOpportunity();
     setSubmitting(false);
   }
@@ -151,7 +151,7 @@ export function OpportunityDetailPage() {
     if (!user || !opportunity || !canEdit) return;
 
     const confirmed = window.confirm(
-      `¿Eliminar la oportunidad "${opportunity.name}"? Esta acción no se puede deshacer.`,
+      `Delete opportunity "${opportunity.name}"? This action cannot be undone.`,
     );
 
     if (!confirmed) return;
@@ -177,7 +177,7 @@ export function OpportunityDetailPage() {
   if (loading) {
     return (
       <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50">
-        <p className="text-sm text-zinc-500">Cargando...</p>
+        <p className="text-sm text-zinc-500">Loading...</p>
       </div>
     );
   }
@@ -189,12 +189,12 @@ export function OpportunityDetailPage() {
   if (notFound) {
     return (
       <AuthenticatedLayout>
-        <p className="text-sm text-zinc-600">Oportunidad no encontrada.</p>
+        <p className="text-sm text-zinc-600">Opportunity not found.</p>
         <Link
           href="/opportunities"
           className="mt-4 inline-block text-sm font-medium text-zinc-700 underline-offset-2 hover:underline"
         >
-          Volver a oportunidades
+          Back to opportunities
         </Link>
       </AuthenticatedLayout>
     );
@@ -211,7 +211,7 @@ export function OpportunityDetailPage() {
           href="/opportunities"
           className="text-sm font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
         >
-          ← Volver a oportunidades
+          ← Back to opportunities
         </Link>
         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -222,11 +222,11 @@ export function OpportunityDetailPage() {
               <span
                 className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${loadOpportunityStatusBadgeClass(opportunity.status)}`}
               >
-                {getOpportunityStageLabelEs(opportunity.status)}
+                {getOpportunityStageLabel(opportunity.status)}
               </span>
             </div>
             <p className="mt-2 text-sm text-zinc-600">
-              Empresa:{" "}
+              Company:{" "}
               <Link
                 href={`/companies/${opportunity.company_id}`}
                 className="font-medium text-zinc-900 underline-offset-2 hover:underline"
@@ -234,10 +234,10 @@ export function OpportunityDetailPage() {
                 {opportunity.companyName}
               </Link>
               {" · "}
-              Ruta: {formatLane(opportunity.lane_origin, opportunity.lane_destination)}
+              Lane: {formatLane(opportunity.lane_origin, opportunity.lane_destination)}
             </p>
             <p className="mt-1 text-xs text-zinc-500">
-              Creada {formatDate(opportunity.created_at)} · Actualizada{" "}
+              Created {formatDate(opportunity.created_at)} · Updated{" "}
               {formatDateTime(opportunity.updated_at)}
             </p>
           </div>
@@ -249,7 +249,7 @@ export function OpportunityDetailPage() {
               disabled={deleting || submitting}
               className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {deleting ? "Eliminando..." : "Eliminar"}
+              {deleting ? "Deleting..." : "Delete"}
             </button>
           )}
         </div>
@@ -257,8 +257,8 @@ export function OpportunityDetailPage() {
 
       {isAdmin && (
         <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
-          Vista de administrador: puedes ver esta oportunidad, pero solo el broker
-          dueño puede editarla o eliminarla.
+          Admin view: you can see this opportunity, but only the owning
+          broker can edit or delete it.
         </p>
       )}
 
@@ -289,14 +289,14 @@ export function OpportunityDetailPage() {
               disabled={submitting}
               className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {submitting ? "Guardando..." : "Guardar cambios"}
+              {submitting ? "Saving..." : "Save changes"}
             </button>
           </form>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
-            <DetailItem label="Probabilidad" value={`${opportunity.probability}%`} />
+            <DetailItem label="Probability" value={`${opportunity.probability}%`} />
             <DetailItem
-              label="Cierre estimado"
+              label="Expected close"
               value={
                 opportunity.expected_close_date
                   ? formatDate(opportunity.expected_close_date)
@@ -304,15 +304,15 @@ export function OpportunityDetailPage() {
               }
             />
             <DetailItem
-              label="Ingreso estimado"
+              label="Estimated revenue"
               value={formatOpportunityRate(opportunity.estimated_revenue_usd)}
             />
             <DetailItem
-              label="Margen estimado"
+              label="Estimated margin"
               value={formatOpportunityRate(opportunity.estimated_margin_usd)}
             />
-            <DetailItem label="Próximo paso" value={opportunity.next_step || "—"} />
-            <DetailItem label="Notas" value={opportunity.notes || "—"} />
+            <DetailItem label="Next step" value={opportunity.next_step || "—"} />
+            <DetailItem label="Notes" value={opportunity.notes || "—"} />
           </div>
         )}
       </section>

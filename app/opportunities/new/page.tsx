@@ -6,7 +6,7 @@ export default function NewOpportunityPage() {
     <Suspense
       fallback={
         <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50">
-          <p className="text-sm text-zinc-500">Cargando...</p>
+          <p className="text-sm text-zinc-500">Loading...</p>
         </div>
       }
     >

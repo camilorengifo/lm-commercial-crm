@@ -7,7 +7,7 @@ import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import {
   LOAD_OPPORTUNITY_STATUSES,
-  getOpportunityStageLabelEs,
+  getOpportunityStageLabel,
   loadOpportunityStatusBadgeClass,
   type LoadOpportunityStatus,
 } from "@/lib/crmConstants";
@@ -159,7 +159,7 @@ export function OpportunitiesPage() {
   if (loading) {
     return (
       <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50">
-        <p className="text-sm text-zinc-500">Cargando...</p>
+        <p className="text-sm text-zinc-500">Loading...</p>
       </div>
     );
   }
@@ -173,12 +173,12 @@ export function OpportunitiesPage() {
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-            Oportunidades
+            Opportunities
           </h1>
           <p className="mt-2 text-sm text-zinc-600">
             {isAdmin
-              ? "Vista global de oportunidades de carga de todos los brokers."
-              : "Seguimiento de oportunidades de carga conectadas a tus empresas."}
+              ? "Global view of load opportunities across all brokers."
+              : "Track load opportunities connected to your companies."}
           </p>
         </div>
 
@@ -187,7 +187,7 @@ export function OpportunitiesPage() {
             href="/opportunities/new"
             className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800"
           >
-            Nueva oportunidad
+            New Opportunity
           </Link>
         )}
       </div>
@@ -200,20 +200,20 @@ export function OpportunitiesPage() {
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
-          label="Oportunidades abiertas"
+          label="Open Opportunities"
           value={metrics.openCount}
-          subtext={`Ganadas: ${metrics.wonCount} · Perdidas: ${metrics.lostCount}`}
+          subtext={`Won: ${metrics.wonCount} · Lost: ${metrics.lostCount}`}
         />
         <SummaryCard
-          label="Ingreso estimado"
+          label="Estimated revenue"
           value={formatOpportunityRate(metrics.estimatedRevenue)}
         />
         <SummaryCard
-          label="Margen estimado"
+          label="Estimated margin"
           value={formatOpportunityRate(metrics.estimatedMargin)}
         />
         <SummaryCard
-          label="Alta probabilidad (≥70%)"
+          label="High probability (≥70%)"
           value={metrics.highProbabilityCount}
         />
       </div>
@@ -225,14 +225,14 @@ export function OpportunitiesPage() {
               htmlFor="opportunity-search"
               className="mb-1.5 block text-sm font-medium text-zinc-700"
             >
-              Buscar
+              Search
             </label>
             <input
               id="opportunity-search"
               type="search"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Nombre, empresa, ruta, commodity..."
+              placeholder="Name, company, lane, commodity..."
               className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
             />
           </div>
@@ -242,7 +242,7 @@ export function OpportunitiesPage() {
               htmlFor="opportunity-stage-filter"
               className="mb-1.5 block text-sm font-medium text-zinc-700"
             >
-              Etapa
+              Stage
             </label>
             <select
               id="opportunity-stage-filter"
@@ -252,10 +252,10 @@ export function OpportunitiesPage() {
               }
               className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
             >
-              <option value="all">Todas las etapas</option>
+              <option value="all">All stages</option>
               {LOAD_OPPORTUNITY_STATUSES.map((status) => (
                 <option key={status} value={status}>
-                  {getOpportunityStageLabelEs(status)}
+                  {getOpportunityStageLabel(status)}
                 </option>
               ))}
             </select>
@@ -266,7 +266,7 @@ export function OpportunitiesPage() {
               htmlFor="opportunity-company-filter"
               className="mb-1.5 block text-sm font-medium text-zinc-700"
             >
-              Empresa
+              Company
             </label>
             <select
               id="opportunity-company-filter"
@@ -274,7 +274,7 @@ export function OpportunitiesPage() {
               onChange={(event) => setCompanyFilter(event.target.value)}
               className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
             >
-              <option value="all">Todas las empresas</option>
+              <option value="all">All companies</option>
               {companyOptions.map((company) => (
                 <option key={company.id} value={company.id}>
                   {company.name}
@@ -288,16 +288,16 @@ export function OpportunitiesPage() {
       <section className="rounded-xl border border-zinc-200 bg-white shadow-sm">
         <div className="border-b border-zinc-100 px-6 py-4">
           <p className="text-sm text-zinc-600">
-            Mostrando {filteredOpportunities.length} de {opportunities.length}{" "}
-            oportunidades
+            Showing {filteredOpportunities.length} of {opportunities.length}{" "}
+            opportunities
           </p>
         </div>
 
         {filteredOpportunities.length === 0 ? (
           <p className="px-6 py-8 text-sm text-zinc-500">
             {opportunities.length === 0
-              ? "No hay oportunidades todavía. Crea una desde aquí o desde el detalle de una empresa."
-              : "No hay oportunidades que coincidan con los filtros actuales."}
+              ? "No opportunities yet. Create one here or from a company detail page."
+              : "No opportunities match your current filters."}
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -305,28 +305,28 @@ export function OpportunitiesPage() {
               <thead className="bg-zinc-50">
                 <tr>
                   <th className="px-4 py-3 text-left font-medium text-zinc-600">
-                    Oportunidad
+                    Opportunity
                   </th>
                   <th className="px-4 py-3 text-left font-medium text-zinc-600">
-                    Empresa
+                    Company
                   </th>
                   <th className="px-4 py-3 text-left font-medium text-zinc-600">
-                    Ruta
+                    Lane
                   </th>
                   <th className="px-4 py-3 text-left font-medium text-zinc-600">
-                    Etapa
+                    Stage
                   </th>
                   <th className="px-4 py-3 text-right font-medium text-zinc-600">
                     Prob.
                   </th>
                   <th className="px-4 py-3 text-right font-medium text-zinc-600">
-                    Ingreso est.
+                    Est. revenue
                   </th>
                   <th className="px-4 py-3 text-left font-medium text-zinc-600">
-                    Cierre est.
+                    Est. close
                   </th>
                   <th className="px-4 py-3 text-left font-medium text-zinc-600">
-                    Actualizada
+                    Updated
                   </th>
                 </tr>
               </thead>
@@ -367,7 +367,7 @@ export function OpportunitiesPage() {
                         <span
                           className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${loadOpportunityStatusBadgeClass(opportunity.status)}`}
                         >
-                          {getOpportunityStageLabelEs(opportunity.status)}
+                          {getOpportunityStageLabel(opportunity.status)}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right text-zinc-900">

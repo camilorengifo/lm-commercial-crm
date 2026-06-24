@@ -71,13 +71,13 @@ export const OPEN_OPPORTUNITY_STATUSES: LoadOpportunityStatus[] = [
   "negotiating",
 ];
 
-export const OPPORTUNITY_STAGE_LABELS_ES: Record<LoadOpportunityStatus, string> = {
-  prospecting: "Prospectando",
-  contacted: "Contactado",
-  quoted: "Cotizado",
-  negotiating: "Negociando",
-  won: "Ganado",
-  lost: "Perdido",
+export const OPPORTUNITY_STAGE_LABELS: Record<LoadOpportunityStatus, string> = {
+  prospecting: "Prospecting",
+  contacted: "Contacted",
+  quoted: "Quoted",
+  negotiating: "Negotiating",
+  won: "Won",
+  lost: "Lost",
 };
 
 const LEGACY_OPPORTUNITY_STATUS_MAP: Record<string, LoadOpportunityStatus> = {
@@ -101,8 +101,8 @@ export function isOpenOpportunityStage(status: string): boolean {
   return stage !== "won" && stage !== "lost";
 }
 
-export function getOpportunityStageLabelEs(status: string): string {
-  return OPPORTUNITY_STAGE_LABELS_ES[normalizeOpportunityStage(status)];
+export function getOpportunityStageLabel(status: string): string {
+  return OPPORTUNITY_STAGE_LABELS[normalizeOpportunityStage(status)];
 }
 
 export const SALES_STAGES_PROTECTED_FROM_QUOTE: SalesStage[] = [

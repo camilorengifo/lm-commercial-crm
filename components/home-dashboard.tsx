@@ -16,7 +16,6 @@ import {
   priorityBadgeClass,
   loadOpportunityStatusBadgeClass,
   type ActivityType,
-  type FollowUpStatus,
 } from "@/lib/crmConstants";
 import { formatDate, formatDateTime, formatSupabaseError } from "@/lib/crmFormat";
 import {
@@ -38,21 +37,6 @@ import {
   type UserProfile,
 } from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
-
-const FOLLOW_UP_STATUS_ES: Record<FollowUpStatus, string> = {
-  pending: "Pendiente",
-  completed: "Completado",
-  cancelled: "Cancelado",
-};
-
-const ACTIVITY_TYPE_ES: Record<ActivityType, string> = {
-  call: "Llamada",
-  email: "Email",
-  meeting: "Reunión",
-  visit: "Visita",
-  note: "Nota",
-  other: "Otro",
-};
 
 function SummaryCard({
   label,
@@ -85,8 +69,8 @@ function SummaryCard({
 
 function QuickNav({ isAdmin }: { isAdmin: boolean }) {
   const links = [
-    { href: "/companies", label: "Empresas" },
-    { href: "/opportunities", label: "Oportunidades" },
+    { href: "/companies", label: "Companies" },
+    { href: "/opportunities", label: "Opportunities" },
     { href: "/pipeline", label: "Pipeline" },
     { href: "/follow-ups", label: "Follow-ups" },
     ...(isAdmin ? [{ href: "/admin", label: "Admin" }] : []),
@@ -123,21 +107,17 @@ function actionPlanBadgeClass(kind: ActionPlanItem["kind"]): string {
 function actionPlanLabel(kind: ActionPlanItem["kind"]): string {
   switch (kind) {
     case "overdue":
-      return "Vencido";
+      return "Overdue";
     case "today":
-      return "Para hoy";
+      return "Due today";
     case "high_priority":
-      return "Alta prioridad";
+      return "High priority";
     case "opportunity":
-      return "Oportunidad";
+      return "Opportunity";
   }
 }
 
 function formatActivityType(value: string): string {
-  if (value in ACTIVITY_TYPE_ES) {
-    return ACTIVITY_TYPE_ES[value as ActivityType];
-  }
-
   if (value in ACTIVITY_TYPE_LABELS) {
     return ACTIVITY_TYPE_LABELS[value as ActivityType];
   }
@@ -161,9 +141,7 @@ function FollowUpRow({
       ? "border-red-200 bg-red-50/60"
       : "border-amber-200 bg-amber-50/50";
 
-  const statusLabel =
-    FOLLOW_UP_STATUS_ES[followUp.status] ??
-    FOLLOW_UP_STATUS_LABELS[followUp.status];
+  const statusLabel = FOLLOW_UP_STATUS_LABELS[followUp.status];
 
   return (
     <li className={`rounded-lg border p-4 ${variantClass}`}>
@@ -186,20 +164,20 @@ function FollowUpRow({
           </div>
           {followUp.contactName && (
             <p className="text-sm text-zinc-700">
-              <span className="font-medium">Contacto:</span> {followUp.contactName}
+              <span className="font-medium">Contact:</span> {followUp.contactName}
             </p>
           )}
           <p className="text-sm text-zinc-700">
             <span className="font-medium">Follow-up:</span> {followUp.followUpNote}
           </p>
           <p className="text-sm text-zinc-600">
-            <span className="font-medium">Vence:</span>{" "}
+            <span className="font-medium">Due:</span>{" "}
             {formatDateTime(followUp.due_at)}
             <span className="ml-2 text-zinc-500">· {statusLabel}</span>
             {variant === "overdue" && (
               <span className="ml-2 font-medium text-red-700">
-                ({getDaysOverdue(followUp.due_at)} día
-                {getDaysOverdue(followUp.due_at) === 1 ? "" : "s"} vencido)
+                ({getDaysOverdue(followUp.due_at)} day
+                {getDaysOverdue(followUp.due_at) === 1 ? "" : "s"} overdue)
               </span>
             )}
           </p>
@@ -212,13 +190,13 @@ function FollowUpRow({
             disabled={completing}
             className="inline-flex items-center justify-center rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {completing ? "Guardando..." : "Marcar hecho"}
+            {completing ? "Saving..." : "Mark as Done"}
           </button>
           <Link
             href={`/companies/${followUp.company_id}`}
             className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
           >
-            Ver empresa
+            Open Company
           </Link>
         </div>
       </div>
@@ -244,16 +222,16 @@ function HighPriorityCompanyRow({
         </div>
         <p className="text-sm text-zinc-600">{company.reason}</p>
         <p className="text-sm text-zinc-500">
-          Último contacto:{" "}
+          Last contact:{" "}
           {company.lastActivityAt
             ? formatDate(company.lastActivityAt)
-            : "Sin actividad registrada"}
+            : "No activity recorded"}
         </p>
         <p className="text-sm text-zinc-500">
-          Próximo follow-up:{" "}
+          Next follow-up:{" "}
           {company.nextFollowUpAt
             ? formatDate(company.nextFollowUpAt)
-            : "Sin follow-up programado"}
+            : "No follow-up scheduled"}
         </p>
       </div>
 
@@ -261,7 +239,7 @@ function HighPriorityCompanyRow({
         href={`/companies/${company.id}`}
         className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
       >
-        Ver empresa
+        Open Company
       </Link>
     </li>
   );
@@ -281,7 +259,7 @@ function OpenOpportunityRow({
         <p className="text-sm text-zinc-700">{opportunity.title}</p>
         {opportunity.laneLabel && opportunity.laneLabel !== "—" && (
           <p className="text-sm text-zinc-600">
-            <span className="font-medium">Ruta:</span> {opportunity.laneLabel}
+            <span className="font-medium">Lane:</span> {opportunity.laneLabel}
           </p>
         )}
         <div className="flex flex-wrap items-center gap-2">
@@ -302,7 +280,7 @@ function OpenOpportunityRow({
         href={`/companies/${opportunity.companyId}`}
         className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
       >
-        Ver empresa
+        Open Company
       </Link>
     </li>
   );
@@ -334,7 +312,7 @@ function RecentActivityRow({ activity }: { activity: RecentActivityItem }) {
         href={`/companies/${activity.companyId}`}
         className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
       >
-        Ver empresa
+        Open Company
       </Link>
     </li>
   );
@@ -344,42 +322,42 @@ function AdminDashboardView({ stats }: { stats: AdminDashboardStats }) {
   return (
     <>
       <div className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        <SummaryCard label="Total empresas" value={stats.totalCompanies} />
+        <SummaryCard label="Total companies" value={stats.totalCompanies} />
         <SummaryCard label="Total brokers" value={stats.totalBrokers} />
         <SummaryCard
-          label="Follow-ups para hoy"
+          label="Follow-ups due today"
           value={stats.followUpsDueToday}
           highlight={stats.followUpsDueToday > 0 ? "warning" : undefined}
         />
         <SummaryCard
-          label="Follow-ups vencidos"
+          label="Overdue follow-ups"
           value={stats.overdueFollowUps}
           highlight={stats.overdueFollowUps > 0 ? "danger" : undefined}
         />
         <SummaryCard
-          label="Empresas alta prioridad"
+          label="High priority companies"
           value={stats.highPriorityCompanies}
           highlight={
             stats.highPriorityCompanies > 0 ? "warning" : undefined
           }
         />
         <SummaryCard
-          label="Oportunidades abiertas"
+          label="Open opportunities"
           value={stats.openOpportunities}
         />
       </div>
 
       <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-medium text-zinc-900">
-          Resumen de actividad por broker
+          Broker activity overview
         </h2>
         <p className="mt-1 text-sm text-zinc-500">
-          Vista global de carga comercial y actividad reciente por broker.
+          Global commercial workload and recent activity by broker.
         </p>
 
         {stats.brokerRows.length === 0 ? (
           <p className="mt-4 text-sm text-zinc-500">
-            No hay brokers registrados todavía.
+            No brokers registered yet.
           </p>
         ) : (
           <div className="mt-4 overflow-x-auto rounded-lg border border-zinc-200">
@@ -393,19 +371,19 @@ function AdminDashboardView({ stats }: { stats: AdminDashboardStats }) {
                     Email
                   </th>
                   <th className="px-4 py-3 text-right font-medium text-zinc-600">
-                    Empresas
+                    Companies
                   </th>
                   <th className="px-4 py-3 text-right font-medium text-zinc-600">
-                    Follow-ups hoy
+                    Follow-ups today
                   </th>
                   <th className="px-4 py-3 text-right font-medium text-zinc-600">
-                    Vencidos
+                    Overdue
                   </th>
                   <th className="px-4 py-3 text-right font-medium text-zinc-600">
-                    Actividad 7 días
+                    Activity 7 days
                   </th>
                   <th className="px-4 py-3 text-left font-medium text-zinc-600">
-                    Última actividad
+                    Last activity
                   </th>
                 </tr>
               </thead>
@@ -431,7 +409,7 @@ function AdminDashboardView({ stats }: { stats: AdminDashboardStats }) {
                     <td className="px-4 py-3 text-zinc-600">
                       {row.lastActivityAt
                         ? formatDate(row.lastActivityAt)
-                        : "Sin actividad"}
+                        : "No activity"}
                     </td>
                   </tr>
                 ))}
@@ -466,48 +444,48 @@ function BrokerDashboardView({
   return (
     <>
       <div className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        <SummaryCard label="Total empresas" value={metrics.companyCount} />
+        <SummaryCard label="Total companies" value={metrics.companyCount} />
         <SummaryCard
-          label="Alta prioridad / hot"
+          label="High priority / hot"
           value={metrics.hotPriorityCount}
           highlight={metrics.hotPriorityCount > 0 ? "warning" : undefined}
         />
         <SummaryCard
-          label="Follow-ups para hoy"
+          label="Follow-ups due today"
           value={metrics.dueTodayCount}
           highlight={metrics.dueTodayCount > 0 ? "warning" : undefined}
         />
         <SummaryCard
-          label="Follow-ups vencidos"
+          label="Overdue follow-ups"
           value={metrics.overdueCount}
           highlight={metrics.overdueCount > 0 ? "danger" : undefined}
         />
         <SummaryCard
-          label="Oportunidades abiertas"
+          label="Open opportunities"
           value={metrics.openOpportunityCount}
-          subtext={`Ganadas: ${metrics.wonOpportunityCount} · Perdidas: ${metrics.lostOpportunityCount}`}
+          subtext={`Won: ${metrics.wonOpportunityCount} · Lost: ${metrics.lostOpportunityCount}`}
         />
         <SummaryCard
-          label="Actividad últimos 7 días"
+          label="Activity last 7 days"
           value={metrics.recentActivityCount7d}
           subtext={
             metrics.lastActivityDate
-              ? `Última actividad: ${formatDate(metrics.lastActivityDate)}`
-              : "Sin actividad registrada"
+              ? `Last activity: ${formatDate(metrics.lastActivityDate)}`
+              : "No activity recorded"
           }
         />
       </div>
 
       <section className="mb-8 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-medium text-zinc-900">Plan de acción de hoy</h2>
+        <h2 className="text-lg font-medium text-zinc-900">Today&apos;s action plan</h2>
         <p className="mt-1 text-sm text-zinc-500">
-          Tareas prioritarias entre follow-ups, cuentas y oportunidades.
+          Priority tasks across follow-ups, accounts, and opportunities.
         </p>
 
         {actionPlan.length === 0 ? (
           <p className="mt-4 text-sm text-zinc-500">
-            No hay tareas urgentes ahora. Revisa tus empresas o pipeline para
-            planificar el día.
+            No urgent tasks right now. Review your companies or pipeline to plan
+            your day.
           </p>
         ) : (
           <ul className="mt-4 divide-y divide-zinc-100 rounded-lg border border-zinc-200">
@@ -534,7 +512,7 @@ function BrokerDashboardView({
                   href={item.href}
                   className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
                 >
-                  Abrir
+                  Open
                 </Link>
               </li>
             ))}
@@ -549,23 +527,23 @@ function BrokerDashboardView({
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-medium text-zinc-900">
-                Follow-ups de hoy
+                Today&apos;s follow-ups
               </h2>
               <p className="mt-1 text-sm text-zinc-500">
-                Seguimientos programados para hoy
+                Follow-ups scheduled for today
               </p>
             </div>
             <Link
               href="/follow-ups"
               className="text-sm font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
             >
-              Ver todos
+              View all
             </Link>
           </div>
 
           {dueToday.length === 0 ? (
             <p className="text-sm text-zinc-500">
-              No tienes follow-ups para hoy.
+              You have no follow-ups due today.
             </p>
           ) : (
             <ul className="space-y-3">
@@ -583,7 +561,7 @@ function BrokerDashboardView({
 
           {dueToday.length > LIST_LIMIT && (
             <p className="mt-4 text-sm text-zinc-500">
-              Mostrando {LIST_LIMIT} de {dueToday.length}.
+              Showing {LIST_LIMIT} of {dueToday.length}.
             </p>
           )}
         </section>
@@ -592,23 +570,23 @@ function BrokerDashboardView({
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-medium text-zinc-900">
-                Follow-ups vencidos
+                Overdue follow-ups
               </h2>
               <p className="mt-1 text-sm text-zinc-500">
-                Seguimientos atrasados que requieren atención
+                Past-due follow-ups that need attention
               </p>
             </div>
             <Link
               href="/follow-ups"
               className="text-sm font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
             >
-              Ver todos
+              View all
             </Link>
           </div>
 
           {overdue.length === 0 ? (
             <p className="text-sm text-zinc-500">
-              No tienes follow-ups vencidos.
+              You have no overdue follow-ups.
             </p>
           ) : (
             <ul className="space-y-3">
@@ -626,7 +604,7 @@ function BrokerDashboardView({
 
           {overdue.length > LIST_LIMIT && (
             <p className="mt-4 text-sm text-zinc-500">
-              Mostrando {LIST_LIMIT} de {overdue.length}.
+              Showing {LIST_LIMIT} of {overdue.length}.
             </p>
           )}
         </section>
@@ -637,24 +615,23 @@ function BrokerDashboardView({
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-medium text-zinc-900">
-                Empresas calientes para atacar
+                Hot companies to pursue
               </h2>
               <p className="mt-1 text-sm text-zinc-500">
-                Alta prioridad, sin actividad reciente o sin follow-up
-                programado
+                High priority, no recent activity, or no follow-up scheduled
               </p>
             </div>
             <Link
               href="/companies"
               className="text-sm font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
             >
-              Ver todas
+              View all
             </Link>
           </div>
 
           {highPriorityCompanies.length === 0 ? (
             <p className="text-sm text-zinc-500">
-              No hay empresas calientes que requieran atención ahora.
+              No hot companies need attention right now.
             </p>
           ) : (
             <ul className="divide-y divide-zinc-100 rounded-lg border border-zinc-200">
@@ -666,7 +643,7 @@ function BrokerDashboardView({
 
           {highPriorityCompanies.length > LIST_LIMIT && (
             <p className="mt-4 text-sm text-zinc-500">
-              Mostrando {LIST_LIMIT} de {highPriorityCompanies.length}.
+              Showing {LIST_LIMIT} of {highPriorityCompanies.length}.
             </p>
           )}
         </section>
@@ -675,23 +652,23 @@ function BrokerDashboardView({
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-medium text-zinc-900">
-                Oportunidades activas
+                Active opportunities
               </h2>
               <p className="mt-1 text-sm text-zinc-500">
-                Oportunidades de carga abiertas en tus cuentas
+                Open load opportunities across your accounts
               </p>
             </div>
             <Link
               href="/opportunities"
               className="text-sm font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
             >
-              Ver todas
+              View all
             </Link>
           </div>
 
           {openOpportunities.length === 0 ? (
             <p className="text-sm text-zinc-500">
-              No tienes oportunidades abiertas todavía.
+              You have no open opportunities yet.
             </p>
           ) : (
             <ul className="divide-y divide-zinc-100 rounded-lg border border-zinc-200">
@@ -706,7 +683,7 @@ function BrokerDashboardView({
 
           {openOpportunities.length > LIST_LIMIT && (
             <p className="mt-4 text-sm text-zinc-500">
-              Mostrando {LIST_LIMIT} de {openOpportunities.length}.
+              Showing {LIST_LIMIT} of {openOpportunities.length}.
             </p>
           )}
         </section>
@@ -716,16 +693,16 @@ function BrokerDashboardView({
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-medium text-zinc-900">
-              Actividad reciente
+              Recent activity
             </h2>
             <p className="mt-1 text-sm text-zinc-500">
-              Últimas notas y actividades registradas en el CRM
+              Latest notes and activities recorded in the CRM
             </p>
           </div>
         </div>
 
         {recentActivities.length === 0 ? (
-          <p className="text-sm text-zinc-500">No hay actividad reciente.</p>
+          <p className="text-sm text-zinc-500">No recent activity.</p>
         ) : (
           <ul className="divide-y divide-zinc-100 rounded-lg border border-zinc-200">
             {recentActivities.map((activity) => (
@@ -761,7 +738,7 @@ export function HomeDashboard() {
 
       if (error || !data) {
         setFetchError(
-          formatSupabaseError(error ?? { message: "No se pudo cargar el panel." }),
+          formatSupabaseError(error ?? { message: "Unable to load dashboard." }),
         );
         return;
       }
@@ -775,7 +752,7 @@ export function HomeDashboard() {
 
     if (error || !data) {
       setFetchError(
-        formatSupabaseError(error ?? { message: "No se pudo cargar el panel." }),
+        formatSupabaseError(error ?? { message: "Unable to load dashboard." }),
       );
       return;
     }
@@ -844,7 +821,7 @@ export function HomeDashboard() {
   if (loading) {
     return (
       <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50">
-        <p className="text-sm text-zinc-500">Cargando...</p>
+        <p className="text-sm text-zinc-500">Loading...</p>
       </div>
     );
   }
@@ -858,15 +835,15 @@ export function HomeDashboard() {
       <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-            Hoy
+            Today
           </p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">
             {getTodayHeading()}
           </h1>
           <p className="mt-2 text-sm text-zinc-600">
             {isAdmin
-              ? "Vista operativa global para administradores."
-              : "Tu panel operativo del día. Sesión iniciada como "}
+              ? "Global operational view for administrators."
+              : "Your operational dashboard for the day. Signed in as "}
             {!isAdmin && (
               <span className="font-medium text-zinc-900">{user.email}</span>
             )}
@@ -880,7 +857,7 @@ export function HomeDashboard() {
               href="/companies"
               className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800"
             >
-              Agregar empresa
+              Add Company
             </Link>
           )}
         </div>

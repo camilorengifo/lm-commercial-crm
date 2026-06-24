@@ -2,7 +2,7 @@
 
 import {
   LOAD_OPPORTUNITY_STATUSES,
-  getOpportunityStageLabelEs,
+  getOpportunityStageLabel,
   type LoadOpportunityStatus,
 } from "@/lib/crmConstants";
 import {
@@ -29,7 +29,7 @@ export function LoadOpportunityFormFields({
           htmlFor={`${idPrefix}-name`}
           className="mb-1.5 block text-sm font-medium text-zinc-700"
         >
-          Nombre de la oportunidad <span className="text-red-600">*</span>
+          Opportunity name <span className="text-red-600">*</span>
         </label>
         <input
           id={`${idPrefix}-name`}
@@ -40,7 +40,7 @@ export function LoadOpportunityFormFields({
             setForm((prev) => ({ ...prev, name: event.target.value }))
           }
           className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
-          placeholder="Ej. Lane Chicago-Dallas, produce reefer..."
+          placeholder="e.g. Chicago-Dallas produce reefer..."
         />
       </div>
 
@@ -49,7 +49,7 @@ export function LoadOpportunityFormFields({
           htmlFor={`${idPrefix}-contact_id`}
           className="mb-1.5 block text-sm font-medium text-zinc-700"
         >
-          Contacto
+          Contact
         </label>
         <select
           id={`${idPrefix}-contact_id`}
@@ -59,7 +59,7 @@ export function LoadOpportunityFormFields({
           }
           className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
         >
-          <option value="">Sin contacto específico</option>
+          <option value="">No specific contact</option>
           {contacts.map((contact) => (
             <option key={contact.id} value={contact.id}>
               {formatContactName(contact)}
@@ -73,7 +73,7 @@ export function LoadOpportunityFormFields({
           htmlFor={`${idPrefix}-lane_origin`}
           className="mb-1.5 block text-sm font-medium text-zinc-700"
         >
-          Origen
+          Origin
         </label>
         <input
           id={`${idPrefix}-lane_origin`}
@@ -92,7 +92,7 @@ export function LoadOpportunityFormFields({
           htmlFor={`${idPrefix}-lane_destination`}
           className="mb-1.5 block text-sm font-medium text-zinc-700"
         >
-          Destino
+          Destination
         </label>
         <input
           id={`${idPrefix}-lane_destination`}
@@ -114,7 +114,7 @@ export function LoadOpportunityFormFields({
           htmlFor={`${idPrefix}-equipment_type`}
           className="mb-1.5 block text-sm font-medium text-zinc-700"
         >
-          Tipo de equipo
+          Equipment type
         </label>
         <input
           id={`${idPrefix}-equipment_type`}
@@ -143,7 +143,7 @@ export function LoadOpportunityFormFields({
             setForm((prev) => ({ ...prev, commodity: event.target.value }))
           }
           className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
-          placeholder="Carga general, produce..."
+          placeholder="General freight, produce..."
         />
       </div>
 
@@ -152,7 +152,7 @@ export function LoadOpportunityFormFields({
           htmlFor={`${idPrefix}-estimated_loads`}
           className="mb-1.5 block text-sm font-medium text-zinc-700"
         >
-          Cargas estimadas
+          Estimated loads
         </label>
         <input
           id={`${idPrefix}-estimated_loads`}
@@ -165,7 +165,7 @@ export function LoadOpportunityFormFields({
             }))
           }
           className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
-          placeholder="5/semana, 20/mes, spot..."
+          placeholder="5/week, 20/month, spot..."
         />
       </div>
 
@@ -174,7 +174,7 @@ export function LoadOpportunityFormFields({
           htmlFor={`${idPrefix}-estimated_loads_per_week`}
           className="mb-1.5 block text-sm font-medium text-zinc-700"
         >
-          Cargas por semana (número)
+          Loads per week (number)
         </label>
         <input
           id={`${idPrefix}-estimated_loads_per_week`}
@@ -197,7 +197,7 @@ export function LoadOpportunityFormFields({
           htmlFor={`${idPrefix}-target_rate`}
           className="mb-1.5 block text-sm font-medium text-zinc-700"
         >
-          Tarifa objetivo (USD)
+          Target rate (USD)
         </label>
         <input
           id={`${idPrefix}-target_rate`}
@@ -217,7 +217,7 @@ export function LoadOpportunityFormFields({
           htmlFor={`${idPrefix}-quoted_rate`}
           className="mb-1.5 block text-sm font-medium text-zinc-700"
         >
-          Tarifa cotizada (USD)
+          Quoted rate (USD)
         </label>
         <input
           id={`${idPrefix}-quoted_rate`}
@@ -237,7 +237,7 @@ export function LoadOpportunityFormFields({
           htmlFor={`${idPrefix}-estimated_revenue_usd`}
           className="mb-1.5 block text-sm font-medium text-zinc-700"
         >
-          Ingreso estimado (USD)
+          Estimated revenue (USD)
         </label>
         <input
           id={`${idPrefix}-estimated_revenue_usd`}
@@ -260,7 +260,7 @@ export function LoadOpportunityFormFields({
           htmlFor={`${idPrefix}-estimated_margin_usd`}
           className="mb-1.5 block text-sm font-medium text-zinc-700"
         >
-          Margen estimado (USD)
+          Estimated margin (USD)
         </label>
         <input
           id={`${idPrefix}-estimated_margin_usd`}
@@ -283,7 +283,7 @@ export function LoadOpportunityFormFields({
           htmlFor={`${idPrefix}-status`}
           className="mb-1.5 block text-sm font-medium text-zinc-700"
         >
-          Etapa <span className="text-red-600">*</span>
+          Stage <span className="text-red-600">*</span>
         </label>
         <select
           id={`${idPrefix}-status`}
@@ -299,7 +299,7 @@ export function LoadOpportunityFormFields({
         >
           {LOAD_OPPORTUNITY_STATUSES.map((status) => (
             <option key={status} value={status}>
-              {getOpportunityStageLabelEs(status)}
+              {getOpportunityStageLabel(status)}
             </option>
           ))}
         </select>
@@ -310,7 +310,7 @@ export function LoadOpportunityFormFields({
           htmlFor={`${idPrefix}-probability`}
           className="mb-1.5 block text-sm font-medium text-zinc-700"
         >
-          Probabilidad (%)
+          Probability (%)
         </label>
         <input
           id={`${idPrefix}-probability`}
@@ -331,7 +331,7 @@ export function LoadOpportunityFormFields({
           htmlFor={`${idPrefix}-expected_close_date`}
           className="mb-1.5 block text-sm font-medium text-zinc-700"
         >
-          Fecha estimada de cierre
+          Expected close date
         </label>
         <input
           id={`${idPrefix}-expected_close_date`}
@@ -352,7 +352,7 @@ export function LoadOpportunityFormFields({
           htmlFor={`${idPrefix}-next_step`}
           className="mb-1.5 block text-sm font-medium text-zinc-700"
         >
-          Próximo paso
+          Next step
         </label>
         <input
           id={`${idPrefix}-next_step`}
@@ -362,7 +362,7 @@ export function LoadOpportunityFormFields({
             setForm((prev) => ({ ...prev, next_step: event.target.value }))
           }
           className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
-          placeholder="Enviar cotización, llamar al shipper..."
+          placeholder="Send quote, call shipper..."
         />
       </div>
 
@@ -371,7 +371,7 @@ export function LoadOpportunityFormFields({
           htmlFor={`${idPrefix}-notes`}
           className="mb-1.5 block text-sm font-medium text-zinc-700"
         >
-          Notas
+          Notes
         </label>
         <textarea
           id={`${idPrefix}-notes`}
@@ -381,7 +381,7 @@ export function LoadOpportunityFormFields({
             setForm((prev) => ({ ...prev, notes: event.target.value }))
           }
           className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
-          placeholder="Volumen esperado, estacionalidad, requisitos especiales..."
+          placeholder="Volume expectations, seasonality, special requirements..."
         />
       </div>
     </div>
