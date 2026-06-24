@@ -10,82 +10,15 @@ export class OpenAIConfigurationError extends Error {
   }
 }
 
-export interface OpenAIKeyDiagnostics {
-  exists: boolean;
-  containsNewline: boolean;
-  containsSpace: boolean;
-  containsResendLiteral: boolean;
-  containsOpenaiLiteral: boolean;
-  startsWithSk: boolean;
-}
-
-function readRawOpenAIApiKey(): string {
-  return process.env.OPENAI_API_KEY ?? "";
-}
-
-export function getOpenAIKeyDiagnostics(): OpenAIKeyDiagnostics {
-  const raw = readRawOpenAIApiKey();
-  const trimmed = raw.trim();
-
-  return {
-    exists: trimmed.length > 0,
-    containsNewline: /[\r\n]/.test(raw),
-    containsSpace: /\s/.test(trimmed),
-    containsResendLiteral: trimmed.includes("RESEND_API_KEY"),
-    containsOpenaiLiteral: trimmed.includes("OPENAI_API_KEY="),
-    startsWithSk: trimmed.startsWith("sk-"),
-  };
-}
-
-export function logOpenAIKeyDiagnostics(context?: string): void {
-  const diagnostics = getOpenAIKeyDiagnostics();
-
-  console.error(
-    `[openai] API key diagnostics${context ? ` (${context})` : ""}:`,
-    {
-      exists: diagnostics.exists,
-      startsWithSk: diagnostics.startsWithSk,
-      containsResendLiteral: diagnostics.containsResendLiteral,
-      containsOpenaiLiteral: diagnostics.containsOpenaiLiteral,
-      containsNewline: diagnostics.containsNewline,
-      containsSpace: diagnostics.containsSpace,
-    },
-  );
+export function openAiKeyExists(): boolean {
+  return Boolean(process.env.OPENAI_API_KEY);
 }
 
 export function getOpenAIKey(): string {
-  const raw = readRawOpenAIApiKey();
-  const trimmed = raw.trim();
-  const diagnostics = getOpenAIKeyDiagnostics();
+  const trimmed = (process.env.OPENAI_API_KEY ?? "").trim();
 
   if (!trimmed) {
-    logOpenAIKeyDiagnostics("missing");
     throw new OpenAIConfigurationError("OPENAI_API_KEY is missing.");
-  }
-
-  if (diagnostics.containsNewline) {
-    logOpenAIKeyDiagnostics("contains_newline");
-    throw new OpenAIConfigurationError("OPENAI_API_KEY is invalid.");
-  }
-
-  if (diagnostics.containsSpace) {
-    logOpenAIKeyDiagnostics("contains_space");
-    throw new OpenAIConfigurationError("OPENAI_API_KEY is invalid.");
-  }
-
-  if (diagnostics.containsResendLiteral) {
-    logOpenAIKeyDiagnostics("contains_resend_literal");
-    throw new OpenAIConfigurationError("OPENAI_API_KEY is invalid.");
-  }
-
-  if (diagnostics.containsOpenaiLiteral) {
-    logOpenAIKeyDiagnostics("contains_openai_literal");
-    throw new OpenAIConfigurationError("OPENAI_API_KEY is invalid.");
-  }
-
-  if (!diagnostics.startsWithSk) {
-    logOpenAIKeyDiagnostics("invalid_prefix");
-    throw new OpenAIConfigurationError("OPENAI_API_KEY is invalid.");
   }
 
   return trimmed;

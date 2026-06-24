@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { fetchProfileForUser } from "@/lib/authProfile";
 import { AI_CLIENT_ERROR_MESSAGE } from "@/lib/aiConstants";
-import { getOpenAIKeyDiagnostics } from "@/lib/openaiServer";
+import { openAiKeyExists } from "@/lib/openaiServer";
 import { getAuthenticatedUser } from "@/lib/supabaseServer";
 import { isActiveProfile, isAdminProfile } from "@/lib/userProfile";
 
@@ -45,7 +45,7 @@ export function createAiLogContext(
     route,
     userId,
     companyId,
-    openAiKeyExists: getOpenAIKeyDiagnostics().exists,
+    openAiKeyExists: openAiKeyExists(),
   };
 }
 
