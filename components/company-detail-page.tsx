@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
@@ -409,6 +410,20 @@ export function CompanyDetailPage() {
             </div>
 
             <div className="space-y-6">
+              <div className="flex flex-wrap gap-2 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
+                <Link
+                  href="/ai-broker-assistant"
+                  className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                >
+                  Open in AI Broker Assistant
+                </Link>
+                <Link
+                  href={`/ai-broker-assistant?company=${company.id}`}
+                  className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                >
+                  Draft next outreach
+                </Link>
+              </div>
               <AiAccountSummarySection
                 companyId={company.id}
                 companyName={company.name}

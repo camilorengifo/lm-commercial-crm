@@ -5,6 +5,8 @@ import {
 } from "@/lib/aiConstants";
 import type { AccountSummaryResponse } from "@/lib/aiPrompts";
 import type { BrokerRecommendationsResponse } from "@/lib/aiPrompts";
+import type { BrokerActionPlanResponse } from "@/lib/aiPrompts";
+import type { AccountOutreachQuickResponse } from "@/lib/aiPrompts";
 import type {
   OutreachDraftResponse,
   OutreachTone,
@@ -65,6 +67,23 @@ export async function fetchBrokerRecommendations() {
     recommendations: BrokerRecommendationsResponse;
     generatedAt: string;
   }>("/api/ai/broker-recommendations");
+}
+
+export async function fetchBrokerActionPlan() {
+  return postAiRequest<{
+    success: true;
+    plan: BrokerActionPlanResponse;
+    generatedAt: string;
+  }>("/api/ai/broker-assistant");
+}
+
+export async function fetchAccountOutreachDraft(companyId: string) {
+  return postAiRequest<{
+    success: true;
+    draft: AccountOutreachQuickResponse;
+    companyName: string;
+    generatedAt: string;
+  }>("/api/ai/account-outreach", { companyId });
 }
 
 export async function fetchAccountSummary(companyId: string) {

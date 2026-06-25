@@ -9,7 +9,9 @@ import { isActiveProfile, isAdminProfile } from "@/lib/userProfile";
 export type AiRouteName =
   | "AI_ACCOUNT_SUMMARY"
   | "AI_OUTREACH"
-  | "AI_BROKER_ASSISTANT";
+  | "AI_BROKER_ASSISTANT"
+  | "AI_BROKER_ACTION_PLAN"
+  | "AI_ACCOUNT_OUTREACH";
 
 export interface AiLogContext {
   route: AiRouteName;

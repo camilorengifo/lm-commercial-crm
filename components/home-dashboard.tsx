@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
-import { AiBrokerAssistantSection } from "@/components/ai-broker-assistant-section";
+import { BrokerAssistantDashboardCard } from "@/components/broker-assistant-dashboard-card";
 import {
   fetchAdminDashboardStats,
   type AdminDashboardStats,
@@ -89,6 +89,7 @@ function QuickNav({ isAdmin }: { isAdmin: boolean }) {
     { href: "/opportunities", label: "Opportunities" },
     { href: "/pipeline", label: "Pipeline" },
     { href: "/follow-ups", label: "Follow-ups" },
+    { href: "/ai-broker-assistant", label: "AI Broker Assistant" },
     ...(isAdmin ? [{ href: "/admin", label: "Admin" }] : []),
   ];
 
@@ -538,7 +539,7 @@ function BrokerDashboardView({
         )}
       </section>
 
-      <AiBrokerAssistantSection />
+      <BrokerAssistantDashboardCard />
 
       <div className="mb-8 grid gap-6 xl:grid-cols-2">
         <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">

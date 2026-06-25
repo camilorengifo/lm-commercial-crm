@@ -77,6 +77,175 @@ function normalizeStringArray(value: unknown): string[] {
     .filter(Boolean);
 }
 
+export interface BrokerActionPlanAccount {
+  companyName: string;
+  whyItMatters: string;
+  recommendedAction: string;
+  emailDraft: string;
+  callOpener: string;
+}
+
+export interface BrokerActionPlanResponse {
+  dailySummary: string[];
+  topAccountsToday: BrokerActionPlanAccount[];
+  riskWarnings: string[];
+  quickWins: string[];
+  followUpDisciplineReminders: string[];
+}
+
+export interface AccountOutreachQuickResponse {
+  suggestedEmailSubject: string;
+  suggestedEmailBody: string;
+  linkedInMessage: string;
+  callOpener: string;
+  followUpReason: string;
+}
+
+export const BROKER_ACTION_PLAN_SYSTEM_PROMPT = `${SHARED_RULES}
+
+This is an ASSISTIVE sales planning tool only. You draft suggestions for the broker to review and execute manually.
+You do NOT send email, messages, or calls. You do NOT claim anything was already sent or that outreach will happen automatically.
+If CRM data is missing, say what is missing and suggest logging better notes or contact info.
+
+Return JSON with exactly these keys:
+- dailySummary (array of 2 to 5 concise strings summarizing the broker's day)
+- topAccountsToday (array of up to 5 objects, each with: companyName, whyItMatters, recommendedAction, emailDraft, callOpener)
+- riskWarnings (array of strings)
+- quickWins (array of strings)
+- followUpDisciplineReminders (array of strings)`;
+
+export const ACCOUNT_OUTREACH_QUICK_SYSTEM_PROMPT = `
+You are the AI outreach assistant for a freight broker CRM called Logistics Masters AI Commercial Assistant.
+This tool is ASSISTIVE ONLY. You produce drafts for the broker to review and use manually.
+You do NOT send email, WhatsApp, SMS, LinkedIn messages, or any outreach.
+Use ONLY the CRM context provided. Do not invent facts, lanes, rates, or prior conversations.
+If data is limited, write honest general outreach and note what is missing.
+Do not claim emails or messages were sent.
+Return valid JSON only with these keys:
+- suggestedEmailSubject (string)
+- suggestedEmailBody (string)
+- linkedInMessage (string)
+- callOpener (string)
+- followUpReason (string)
+`.trim();
+
+export function buildBrokerActionPlanUserPrompt(input: {
+  focus: import("@/lib/brokerAssistant").BrokerAssistantFocus;
+  prioritizedAccounts: Array<Record<string, unknown>>;
+}): string {
+  return `Generate a daily freight brokerage action plan from this prioritized CRM snapshot.
+
+Today's focus metrics:
+${JSON.stringify(input.focus, null, 2)}
+
+Top prioritized accounts (deterministic scoring — use these as your primary guide):
+${JSON.stringify(input.prioritizedAccounts, null, 2)}
+
+Requirements:
+- Pick the top 5 accounts from the data that deserve work today
+- whyItMatters must reference real CRM signals (follow-ups, opportunities, inactivity, priority)
+- emailDraft and callOpener are DRAFTS for manual use — never imply they were sent
+- Be direct, professional, and freight-broker focused
+- quickWins should be same-day actions with low friction
+- followUpDisciplineReminders should coach on overdue items and scheduling discipline`;
+}
+
+export function buildAccountOutreachQuickUserPrompt(
+  context: import("@/lib/aiCrmContext").OutreachCrmContext,
+): string {
+  return `Generate outreach DRAFTS for company "${context.company.name}".
+The broker will review and reach out manually. Do not imply anything will be sent automatically.
+
+CRM context:
+${JSON.stringify(
+  {
+    company: context.company,
+    contacts: context.contacts,
+    pendingFollowUps: context.pendingFollowUps,
+    recentActivities: context.recentActivities,
+    opportunities: context.opportunities,
+  },
+  null,
+  2,
+)}
+
+Primary contact: ${context.contacts.find((c) => c.isPrimary)?.name ?? context.contacts[0]?.name ?? "No contact on file"}
+
+Write practical freight brokerage outreach. If contact info is missing, say so in followUpReason.`;
+}
+
+function normalizeString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeAccountPlanItem(value: unknown): BrokerActionPlanAccount | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const companyName = normalizeString(record.companyName);
+  if (!companyName) return null;
+
+  return {
+    companyName,
+    whyItMatters: normalizeString(record.whyItMatters) || "Review CRM signals for this account.",
+    recommendedAction:
+      normalizeString(record.recommendedAction) || "Review account and plan next touch.",
+    emailDraft: normalizeString(record.emailDraft) || "Draft unavailable — add more CRM context.",
+    callOpener: normalizeString(record.callOpener) || "Draft unavailable — add more CRM context.",
+  };
+}
+
+export function normalizeBrokerActionPlan(
+  value: unknown,
+): BrokerActionPlanResponse {
+  const record =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+
+  const topAccountsToday = Array.isArray(record.topAccountsToday)
+    ? record.topAccountsToday
+        .map(normalizeAccountPlanItem)
+        .filter((item): item is BrokerActionPlanAccount => item !== null)
+        .slice(0, 5)
+    : [];
+
+  return {
+    dailySummary: normalizeStringArray(record.dailySummary),
+    topAccountsToday,
+    riskWarnings: normalizeStringArray(record.riskWarnings),
+    quickWins: normalizeStringArray(record.quickWins),
+    followUpDisciplineReminders: normalizeStringArray(
+      record.followUpDisciplineReminders,
+    ),
+  };
+}
+
+export function normalizeAccountOutreachQuick(
+  value: unknown,
+): AccountOutreachQuickResponse {
+  const record =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+
+  return {
+    suggestedEmailSubject:
+      normalizeString(record.suggestedEmailSubject) || "Follow-up on freight capacity",
+    suggestedEmailBody:
+      normalizeString(record.suggestedEmailBody) ||
+      "Add more CRM notes to generate a stronger email draft.",
+    linkedInMessage:
+      normalizeString(record.linkedInMessage) ||
+      "Add contact details to personalize LinkedIn outreach.",
+    callOpener:
+      normalizeString(record.callOpener) ||
+      "Hi — I wanted to follow up on your freight needs.",
+    followUpReason:
+      normalizeString(record.followUpReason) ||
+      "Scheduled follow-up based on CRM priority.",
+  };
+}
+
 export function normalizeBrokerRecommendations(
   value: unknown,
 ): BrokerRecommendationsResponse {

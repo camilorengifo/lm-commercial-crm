@@ -137,6 +137,26 @@ export function AdminPage() {
       </div>
 
       <section className="mb-8 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-medium text-zinc-900">
+              Companies oversight
+            </h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              Review all companies across brokers — overdue follow-ups, abandoned
+              accounts, missing contacts, and hot leads.
+            </p>
+          </div>
+          <Link
+            href="/admin/companies"
+            className="inline-flex shrink-0 items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800"
+          >
+            View companies oversight
+          </Link>
+        </div>
+      </section>
+
+      <section className="mb-8 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h2 className="text-lg font-medium text-zinc-900">
@@ -323,9 +343,17 @@ export function AdminPage() {
             </div>
 
             <div>
-              <h3 className="text-sm font-semibold text-zinc-800">
-                Companies with overdue follow-ups
-              </h3>
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-zinc-800">
+                  Companies with overdue follow-ups
+                </h3>
+                <Link
+                  href="/admin/companies"
+                  className="text-xs font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
+                >
+                  View all
+                </Link>
+              </div>
               {needsAttention.companies.length === 0 ? (
                 <p className="mt-2 text-sm text-zinc-500">
                   No companies with overdue follow-ups.
