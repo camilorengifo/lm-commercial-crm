@@ -338,7 +338,7 @@ function buildActionPlan(input: {
       kind: "overdue",
       title: followUp.companyName,
       detail: `Overdue follow-up: ${followUp.followUpNote}`,
-      href: `/companies/${followUp.company_id}`,
+      href: "/follow-ups",
     });
   }
 
@@ -348,7 +348,7 @@ function buildActionPlan(input: {
       kind: "today",
       title: followUp.companyName,
       detail: `Due today: ${followUp.followUpNote}`,
-      href: `/companies/${followUp.company_id}`,
+      href: "/follow-ups",
     });
   }
 

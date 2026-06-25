@@ -46,16 +46,36 @@ type DueDateFilter = "all" | "today" | "overdue" | "this_week";
 function SummaryCard({
   label,
   value,
+  onClick,
 }: {
   label: string;
   value: number | string;
+  onClick?: () => void;
 }) {
-  return (
-    <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+  const content = (
+    <>
       <p className="text-sm font-medium text-zinc-600">{label}</p>
       <p className="mt-2 text-2xl font-semibold tracking-tight text-zinc-900">
         {value}
       </p>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="w-full rounded-xl border border-zinc-200 bg-white p-5 text-left shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50/80"
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+      {content}
     </div>
   );
 }
@@ -830,7 +850,7 @@ export function FollowUpsPage() {
     <AuthenticatedLayout maxWidthClass="max-w-[1400px]">
       <div className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-          Follow-ups
+          Follow-ups Work Center
         </h1>
         <p className="mt-1 text-sm text-zinc-500">
           {isAdmin
@@ -852,12 +872,25 @@ export function FollowUpsPage() {
       )}
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <SummaryCard label="Due Today" value={metrics.dueToday} />
-        <SummaryCard label="Overdue" value={metrics.overdue} />
-        <SummaryCard label="Upcoming" value={metrics.upcoming} />
+        <SummaryCard
+          label="Due Today"
+          value={metrics.dueToday}
+          onClick={() => setActiveTab("today")}
+        />
+        <SummaryCard
+          label="Overdue"
+          value={metrics.overdue}
+          onClick={() => setActiveTab("overdue")}
+        />
+        <SummaryCard
+          label="Upcoming"
+          value={metrics.upcoming}
+          onClick={() => setActiveTab("upcoming")}
+        />
         <SummaryCard
           label="Completed This Week"
           value={metrics.completedThisWeek}
+          onClick={() => setActiveTab("completed")}
         />
         <SummaryCard
           label="Total Open Follow-ups"

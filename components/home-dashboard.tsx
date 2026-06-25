@@ -43,11 +43,13 @@ function SummaryCard({
   value,
   subtext,
   highlight,
+  href,
 }: {
   label: string;
   value: number | string;
   subtext?: string;
   highlight?: "danger" | "warning";
+  href?: string;
 }) {
   const highlightClass =
     highlight === "danger"
@@ -56,15 +58,29 @@ function SummaryCard({
         ? "border-amber-200 bg-amber-50/50"
         : "border-zinc-200 bg-white";
 
-  return (
-    <div className={`rounded-xl border p-5 shadow-sm ${highlightClass}`}>
+  const content = (
+    <>
       <p className="text-sm font-medium text-zinc-600">{label}</p>
       <p className="mt-2 text-3xl font-semibold tracking-tight text-zinc-900">
         {value}
       </p>
       {subtext && <p className="mt-1 text-xs text-zinc-500">{subtext}</p>}
-    </div>
+    </>
   );
+
+  const className = `rounded-xl border p-5 shadow-sm transition ${highlightClass} ${
+    href ? "hover:border-zinc-300 hover:bg-zinc-50/80" : ""
+  }`;
+
+  if (href) {
+    return (
+      <Link href={href} className={`block ${className}`}>
+        {content}
+      </Link>
+    );
+  }
+
+  return <div className={className}>{content}</div>;
 }
 
 function QuickNav({ isAdmin }: { isAdmin: boolean }) {
@@ -454,11 +470,13 @@ function BrokerDashboardView({
           label="Follow-ups due today"
           value={metrics.dueTodayCount}
           highlight={metrics.dueTodayCount > 0 ? "warning" : undefined}
+          href="/follow-ups"
         />
         <SummaryCard
           label="Overdue follow-ups"
           value={metrics.overdueCount}
           highlight={metrics.overdueCount > 0 ? "danger" : undefined}
+          href="/follow-ups"
         />
         <SummaryCard
           label="Open opportunities"
@@ -804,7 +822,7 @@ export function HomeDashboard() {
 
     const { error } = await completeFollowUp(
       followUp.id,
-      user.id,
+      followUp.user_id,
       followUp.company_id,
     );
 
