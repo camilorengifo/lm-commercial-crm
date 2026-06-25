@@ -286,7 +286,7 @@ function OpenOpportunityRow({
           </span>
           {opportunity.estimatedValue && (
             <span className="text-sm text-zinc-600">
-              Valor est.: {opportunity.estimatedValue}
+              Est. value: {opportunity.estimatedValue}
             </span>
           )}
         </div>

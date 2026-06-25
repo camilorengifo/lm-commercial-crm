@@ -5,6 +5,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
+import { AdminAccessDenied, AdminSubNav } from "@/components/admin-shared";
 import {
   deleteAdminUser,
   fetchAdminUsers,
@@ -33,6 +34,7 @@ export function AdminUsersPage() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [accessDenied, setAccessDenied] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [users, setUsers] = useState<AdminUserListItem[]>([]);
   const [inviteForm, setInviteForm] = useState(EMPTY_INVITE_FORM);
@@ -70,7 +72,8 @@ export function AdminUsersPage() {
 
       const { data: userProfile } = await fetchUserProfile(session.user.id);
       if (!isAdminProfile(userProfile)) {
-        router.replace("/");
+        setAccessDenied(true);
+        setLoading(false);
         return;
       }
 
@@ -179,12 +182,17 @@ export function AdminUsersPage() {
     );
   }
 
+  if (accessDenied) {
+    return <AdminAccessDenied />;
+  }
+
   if (!user || !profile) {
     return null;
   }
 
   return (
     <AuthenticatedLayout maxWidthClass="max-w-[1400px]">
+      <AdminSubNav />
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
