@@ -78,3 +78,21 @@ export async function deleteAdminUser(userId: string) {
     body: JSON.stringify({ userId }),
   });
 }
+
+export interface ReassignCompaniesResult {
+  message: string;
+  reassigned: number;
+  skipped: number;
+  failed: Array<{ companyId?: string; error?: string }>;
+  partial?: boolean;
+}
+
+export async function reassignAdminCompanies(input: {
+  companyIds: string[];
+  newUserId: string;
+}) {
+  return adminRequest<ReassignCompaniesResult>("/api/admin/reassign-companies", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}

@@ -445,6 +445,35 @@ export async function fetchAdminCompaniesOversight(): Promise<{
 
 export const ADMIN_COMPANY_PRIORITIES = COMPANY_PRIORITIES;
 
+export function getAssignableCompanyOwners(
+  profiles: Array<{
+    id: string;
+    email: string | null;
+    full_name: string | null;
+    role: string;
+    is_active: boolean;
+  }>,
+): AdminCompaniesBrokerOption[] {
+  return profiles
+    .filter(
+      (profile) =>
+        profile.is_active !== false &&
+        (profile.role === "broker" || profile.role === "admin"),
+    )
+    .map((profile) => ({
+      userId: profile.id,
+      name: getProfileDisplayName({
+        id: profile.id,
+        email: profile.email ?? "",
+        full_name: profile.full_name,
+        role: profile.role as "admin" | "broker",
+        is_active: profile.is_active,
+      }),
+      email: profile.email ?? "—",
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export function attentionBadgeLabel(badge: AdminCompanyAttentionBadge): string {
   switch (badge) {
     case "overdue_follow_up":

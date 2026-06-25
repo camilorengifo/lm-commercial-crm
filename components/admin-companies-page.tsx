@@ -10,6 +10,11 @@ import {
   AdminSummaryCard,
 } from "@/components/admin-shared";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
+import {
+  AdminReassignCompaniesModal,
+  buildAssignableOwnersFromProfiles,
+} from "@/components/admin-reassign-companies-modal";
+import { reassignAdminCompanies } from "@/lib/adminClient";
 import { verifyAdminAccess } from "@/lib/admin";
 import {
   ADMIN_COMPANY_PRIORITIES,
@@ -23,7 +28,7 @@ import {
 import { formatPipelineValue } from "@/lib/brokerProductivity";
 import { priorityBadgeClass, type CompanyPriority } from "@/lib/crmConstants";
 import { formatDate, formatSupabaseError } from "@/lib/crmFormat";
-import type { UserProfile } from "@/lib/userProfile";
+import { fetchAllProfiles, type UserProfile } from "@/lib/userProfile";
 
 export function AdminCompaniesPage() {
   const router = useRouter();
@@ -42,6 +47,18 @@ export function AdminCompaniesPage() {
   const [countryFilter, setCountryFilter] = useState("all");
   const [attentionFilter, setAttentionFilter] =
     useState<AdminCompanyAttentionStatus>("all");
+
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [assignableOwners, setAssignableOwners] = useState<
+    ReturnType<typeof buildAssignableOwnersFromProfiles>
+  >([]);
+  const [reassignModalOpen, setReassignModalOpen] = useState(false);
+  const [targetBrokerId, setTargetBrokerId] = useState("");
+  const [reassigning, setReassigning] = useState(false);
+  const [reassignError, setReassignError] = useState<string | null>(null);
+  const [reassignSuccess, setReassignSuccess] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setFetchError(null);
@@ -67,6 +84,11 @@ export function AdminCompaniesPage() {
 
       setUser(result.user);
       setProfile(result.profile);
+
+      void fetchAllProfiles().then(({ data }) => {
+        setAssignableOwners(buildAssignableOwnersFromProfiles(data));
+      });
+
       loadData().finally(() => setLoading(false));
     });
   }, [router, loadData]);
@@ -89,6 +111,80 @@ export function AdminCompaniesPage() {
     countryFilter,
     attentionFilter,
   ]);
+
+  const selectedCompanies = useMemo(() => {
+    if (!oversight) return [];
+    return oversight.companies.filter((company) =>
+      selectedCompanyIds.has(company.companyId),
+    );
+  }, [oversight, selectedCompanyIds]);
+
+  const visibleCompanyIds = useMemo(
+    () => filteredCompanies.map((company) => company.companyId),
+    [filteredCompanies],
+  );
+
+  const allVisibleSelected =
+    visibleCompanyIds.length > 0 &&
+    visibleCompanyIds.every((companyId) => selectedCompanyIds.has(companyId));
+
+  function toggleCompanySelection(companyId: string) {
+    setSelectedCompanyIds((current) => {
+      const next = new Set(current);
+      if (next.has(companyId)) {
+        next.delete(companyId);
+      } else {
+        next.add(companyId);
+      }
+      return next;
+    });
+  }
+
+  function toggleSelectAllVisible() {
+    setSelectedCompanyIds((current) => {
+      const next = new Set(current);
+      if (allVisibleSelected) {
+        for (const companyId of visibleCompanyIds) {
+          next.delete(companyId);
+        }
+      } else {
+        for (const companyId of visibleCompanyIds) {
+          next.add(companyId);
+        }
+      }
+      return next;
+    });
+  }
+
+  function openReassignModal() {
+    setReassignError(null);
+    setTargetBrokerId("");
+    setReassignModalOpen(true);
+  }
+
+  async function handleConfirmReassign() {
+    if (selectedCompanyIds.size === 0 || !targetBrokerId) return;
+
+    setReassigning(true);
+    setReassignError(null);
+
+    const { data, error } = await reassignAdminCompanies({
+      companyIds: Array.from(selectedCompanyIds),
+      newUserId: targetBrokerId,
+    });
+
+    setReassigning(false);
+
+    if (error || !data) {
+      setReassignError(error ?? "Unable to reassign companies.");
+      return;
+    }
+
+    setReassignModalOpen(false);
+    setSelectedCompanyIds(new Set());
+    setReassignSuccess(data.message);
+    await loadData();
+  }
 
   if (loading) {
     return (
@@ -125,6 +221,12 @@ export function AdminCompaniesPage() {
       {fetchError && (
         <p className="mb-6 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
           {fetchError}
+        </p>
+      )}
+
+      {reassignSuccess && (
+        <p className="mb-6 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {reassignSuccess}
         </p>
       )}
 
@@ -258,6 +360,24 @@ export function AdminCompaniesPage() {
         </div>
       </div>
 
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-zinc-600">
+          {selectedCompanyIds.size === 0
+            ? "No companies selected"
+            : `${selectedCompanyIds.size} compan${
+                selectedCompanyIds.size === 1 ? "y" : "ies"
+              } selected`}
+        </p>
+        <button
+          type="button"
+          onClick={openReassignModal}
+          disabled={selectedCompanyIds.size === 0}
+          className="inline-flex shrink-0 items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Reassign Broker
+        </button>
+      </div>
+
       {filteredCompanies.length === 0 ? (
         <p className="rounded-xl border border-zinc-200 bg-white p-6 text-sm text-zinc-500 shadow-sm">
           {oversight.companies.length === 0
@@ -269,6 +389,15 @@ export function AdminCompaniesPage() {
           <table className="min-w-full divide-y divide-zinc-200 text-sm">
             <thead className="bg-zinc-50">
               <tr>
+                <th className="px-4 py-3 text-left">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={toggleSelectAllVisible}
+                    aria-label="Select all visible companies"
+                    className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500"
+                  />
+                </th>
                 <th className="px-4 py-3 text-left font-medium text-zinc-600">
                   Company
                 </th>
@@ -307,6 +436,15 @@ export function AdminCompaniesPage() {
             <tbody className="divide-y divide-zinc-100">
               {filteredCompanies.map((company) => (
                 <tr key={company.companyId} className="hover:bg-zinc-50/60">
+                  <td className="px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedCompanyIds.has(company.companyId)}
+                      onChange={() => toggleCompanySelection(company.companyId)}
+                      aria-label={`Select ${company.companyName}`}
+                      className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500"
+                    />
+                  </td>
                   <td className="px-4 py-3">
                     <Link
                       href={`/companies/${company.companyId}`}
@@ -395,6 +533,23 @@ export function AdminCompaniesPage() {
           companies.
         </p>
       )}
+
+      <AdminReassignCompaniesModal
+        open={reassignModalOpen}
+        selectedCompanies={selectedCompanies}
+        assignableOwners={assignableOwners}
+        targetBrokerId={targetBrokerId}
+        submitting={reassigning}
+        error={reassignError}
+        onTargetBrokerChange={setTargetBrokerId}
+        onCancel={() => {
+          if (!reassigning) {
+            setReassignModalOpen(false);
+            setReassignError(null);
+          }
+        }}
+        onConfirm={() => void handleConfirmReassign()}
+      />
     </AuthenticatedLayout>
   );
 }
