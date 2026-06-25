@@ -6,6 +6,14 @@ import { supabase } from "@/lib/supabaseClient";
 
 const INACTIVITY_DAYS = 30;
 
+export type AdminCompanyLifecycleStatus = "active" | "archived" | "all";
+
+export type AdminCompanySortOption =
+  | "name_asc"
+  | "name_desc"
+  | "created_newest"
+  | "created_oldest";
+
 export type AdminCompanyAttentionStatus =
   | "all"
   | "overdue_follow_up"
@@ -41,6 +49,9 @@ export interface AdminCompanyOversightRow {
   openOpportunityCount: number;
   openOpportunityValue: number;
   attentionBadges: AdminCompanyAttentionBadge[];
+  isArchived: boolean;
+  deletedAt: string | null;
+  deleteReason: string | null;
 }
 
 export interface AdminCompaniesSummary {
@@ -98,9 +109,15 @@ function hasDueTodayFollowUp(input: {
   return getFollowUpBucket(input.nextFollowUpAt) === "today";
 }
 
-export function buildCompanyAttentionBadges(
-  row: Omit<AdminCompanyOversightRow, "attentionBadges">,
-): AdminCompanyAttentionBadge[] {
+export function buildCompanyAttentionBadges(row: {
+  priority: string;
+  lastContactAt: string | null;
+  nextFollowUpAt: string | null;
+  contactCount: number;
+  overdueFollowUpCount: number;
+  dueTodayFollowUpCount: number;
+  openOpportunityCount: number;
+}): AdminCompanyAttentionBadge[] {
   const badges: AdminCompanyAttentionBadge[] = [];
 
   if (
@@ -168,11 +185,16 @@ export function filterAdminCompanies(
     priority: string;
     country: string;
     attention: AdminCompanyAttentionStatus;
+    lifecycle: AdminCompanyLifecycleStatus;
+    sort: AdminCompanySortOption;
   },
 ): AdminCompanyOversightRow[] {
   const normalizedSearch = filters.search.trim().toLowerCase();
 
-  return companies.filter((company) => {
+  let rows = companies.filter((company) => {
+    if (filters.lifecycle === "active" && company.isArchived) return false;
+    if (filters.lifecycle === "archived" && !company.isArchived) return false;
+
     if (normalizedSearch) {
       if (!company.companyName.toLowerCase().includes(normalizedSearch)) {
         return false;
@@ -207,6 +229,21 @@ export function filterAdminCompanies(
         return company.attentionBadges.includes("open_opportunity");
     }
   });
+
+  rows = [...rows].sort((a, b) => {
+    switch (filters.sort) {
+      case "name_asc":
+        return a.companyName.localeCompare(b.companyName);
+      case "name_desc":
+        return b.companyName.localeCompare(a.companyName);
+      case "created_newest":
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      case "created_oldest":
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    }
+  });
+
+  return rows;
 }
 
 export async function fetchAdminCompaniesOversight(): Promise<{
@@ -223,11 +260,11 @@ export async function fetchAdminCompaniesOversight(): Promise<{
   ] = await Promise.all([
     supabase
       .from("profiles")
-      .select("id, email, full_name, role, is_active"),
+      .select("id, email, full_name, role, is_active, is_blocked, blocked_at, blocked_reason"),
     supabase
       .from("companies")
       .select(
-        "id, user_id, name, country, priority, last_contact_at, next_follow_up_at, created_at",
+        "id, user_id, name, country, priority, last_contact_at, next_follow_up_at, created_at, deleted_at, delete_reason",
       )
       .order("name", { ascending: true }),
     supabase.from("contacts").select("id, company_id"),
@@ -270,6 +307,9 @@ export async function fetchAdminCompaniesOversight(): Promise<{
         full_name: profile.full_name,
         role: profile.role,
         is_active: profile.is_active ?? true,
+        is_blocked: profile.is_blocked ?? false,
+        blocked_at: profile.blocked_at ?? null,
+        blocked_reason: profile.blocked_reason ?? null,
       },
     ]),
   );
@@ -345,6 +385,9 @@ export async function fetchAdminCompaniesOversight(): Promise<{
           full_name: profile.full_name,
           role: profile.role as "admin" | "broker",
           is_active: profile.is_active,
+          is_blocked: profile.is_blocked,
+          blocked_at: profile.blocked_at,
+          blocked_reason: profile.blocked_reason,
         })
       : "Unknown broker";
     const brokerEmail = profile?.email ?? "—";
@@ -402,6 +445,9 @@ export async function fetchAdminCompaniesOversight(): Promise<{
     return {
       ...baseRow,
       attentionBadges: buildCompanyAttentionBadges(baseRow),
+      isArchived: Boolean(company.deleted_at),
+      deletedAt: company.deleted_at ?? null,
+      deleteReason: company.delete_reason ?? null,
     };
   });
 
@@ -424,6 +470,9 @@ export async function fetchAdminCompaniesOversight(): Promise<{
           full_name: profile.full_name,
           role: profile.role as "admin" | "broker",
           is_active: profile.is_active,
+          is_blocked: profile.is_blocked,
+          blocked_at: profile.blocked_at,
+          blocked_reason: profile.blocked_reason,
         }),
         email: profile.email,
       };
@@ -468,6 +517,9 @@ export function getAssignableCompanyOwners(
         full_name: profile.full_name,
         role: profile.role as "admin" | "broker",
         is_active: profile.is_active,
+        is_blocked: false,
+        blocked_at: null,
+        blocked_reason: null,
       }),
       email: profile.email ?? "—",
     }))

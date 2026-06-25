@@ -24,7 +24,10 @@ import {
   filterAdminCompanies,
   type AdminCompaniesOversightData,
   type AdminCompanyAttentionStatus,
+  type AdminCompanyLifecycleStatus,
+  type AdminCompanySortOption,
 } from "@/lib/adminCompanies";
+import { restoreCompanies } from "@/lib/companyClient";
 import { formatPipelineValue } from "@/lib/brokerProductivity";
 import { priorityBadgeClass, type CompanyPriority } from "@/lib/crmConstants";
 import { formatDate, formatSupabaseError } from "@/lib/crmFormat";
@@ -47,6 +50,9 @@ export function AdminCompaniesPage() {
   const [countryFilter, setCountryFilter] = useState("all");
   const [attentionFilter, setAttentionFilter] =
     useState<AdminCompanyAttentionStatus>("all");
+  const [lifecycleFilter, setLifecycleFilter] =
+    useState<AdminCompanyLifecycleStatus>("active");
+  const [sortBy, setSortBy] = useState<AdminCompanySortOption>("name_asc");
 
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<Set<string>>(
     new Set(),
@@ -102,6 +108,8 @@ export function AdminCompaniesPage() {
       priority: priorityFilter,
       country: countryFilter,
       attention: attentionFilter,
+      lifecycle: lifecycleFilter,
+      sort: sortBy,
     });
   }, [
     oversight,
@@ -110,6 +118,8 @@ export function AdminCompaniesPage() {
     priorityFilter,
     countryFilter,
     attentionFilter,
+    lifecycleFilter,
+    sortBy,
   ]);
 
   const selectedCompanies = useMemo(() => {
@@ -183,6 +193,24 @@ export function AdminCompaniesPage() {
     setReassignModalOpen(false);
     setSelectedCompanyIds(new Set());
     setReassignSuccess(data.message);
+    await loadData();
+  }
+
+  async function handleRestoreSelected() {
+    if (selectedCompanyIds.size === 0) return;
+
+    setReassignError(null);
+    setReassignSuccess(null);
+
+    const { data, error } = await restoreCompanies(Array.from(selectedCompanyIds));
+
+    if (error || !data) {
+      setReassignError(error ?? "Unable to restore companies.");
+      return;
+    }
+
+    setReassignSuccess(data.message);
+    setSelectedCompanyIds(new Set());
     await loadData();
   }
 
@@ -337,6 +365,49 @@ export function AdminCompaniesPage() {
 
         <div>
           <label
+            htmlFor="lifecycle-filter"
+            className="mb-1.5 block text-sm font-medium text-zinc-700"
+          >
+            Status
+          </label>
+          <select
+            id="lifecycle-filter"
+            value={lifecycleFilter}
+            onChange={(event) =>
+              setLifecycleFilter(event.target.value as AdminCompanyLifecycleStatus)
+            }
+            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+          >
+            <option value="active">Active</option>
+            <option value="archived">Archived / Deleted</option>
+            <option value="all">All</option>
+          </select>
+        </div>
+
+        <div>
+          <label
+            htmlFor="sort-filter"
+            className="mb-1.5 block text-sm font-medium text-zinc-700"
+          >
+            Sort
+          </label>
+          <select
+            id="sort-filter"
+            value={sortBy}
+            onChange={(event) =>
+              setSortBy(event.target.value as AdminCompanySortOption)
+            }
+            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+          >
+            <option value="name_asc">Company name A–Z</option>
+            <option value="name_desc">Company name Z–A</option>
+            <option value="created_newest">Created (newest)</option>
+            <option value="created_oldest">Created (oldest)</option>
+          </select>
+        </div>
+
+        <div>
+          <label
             htmlFor="attention-filter"
             className="mb-1.5 block text-sm font-medium text-zinc-700"
           >
@@ -376,6 +447,16 @@ export function AdminCompaniesPage() {
         >
           Reassign Broker
         </button>
+        {lifecycleFilter !== "active" && (
+          <button
+            type="button"
+            onClick={() => void handleRestoreSelected()}
+            disabled={selectedCompanyIds.size === 0}
+            className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Restore selected
+          </button>
+        )}
       </div>
 
       {filteredCompanies.length === 0 ? (
@@ -452,6 +533,11 @@ export function AdminCompaniesPage() {
                     >
                       {company.companyName}
                     </Link>
+                    {company.isArchived && (
+                      <span className="ml-2 inline-flex rounded-full bg-zinc-200 px-2 py-0.5 text-xs font-medium text-zinc-700">
+                        Archived
+                      </span>
+                    )}
                     <p className="text-xs text-zinc-500">
                       Created {formatDate(company.createdAt)}
                     </p>

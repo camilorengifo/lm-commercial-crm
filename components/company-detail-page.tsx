@@ -6,6 +6,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { AiAccountSummarySection } from "@/components/ai-account-summary-section";
+import { CompanyArchiveModal } from "@/components/company-archive-modal";
+import { CompanyEditModal } from "@/components/company-edit-modal";
 import { AiOutreachAssistantSection } from "@/components/ai-outreach-assistant-section";
 import { CompanyChronologySection } from "@/components/company-chronology-section";
 import { CompanyContactsSection } from "@/components/company-contacts-section";
@@ -22,6 +24,8 @@ import {
 } from "@/lib/crmConstants";
 import { formatDate, formatSupabaseError } from "@/lib/crmFormat";
 import { reassignCompanyOwner } from "@/lib/adminStats";
+import { COMPANY_LIST_SELECT, type CompanyRecord } from "@/lib/companies";
+import { restoreCompanies } from "@/lib/companyClient";
 import {
   fetchAllProfiles,
   fetchUserProfile,
@@ -31,19 +35,8 @@ import {
 } from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
 
-interface Company {
-  id: string;
-  user_id: string;
-  name: string;
-  city: string | null;
-  state: string | null;
-  country: string | null;
-  priority: CompanyPriority;
+interface Company extends CompanyRecord {
   sales_stage: SalesStage;
-  general_notes: string | null;
-  last_contact_at: string | null;
-  next_follow_up_at: string | null;
-  created_at: string;
 }
 
 function DetailField({
@@ -84,6 +77,11 @@ export function CompanyDetailPage() {
   const [reassigning, setReassigning] = useState(false);
   const [reassignError, setReassignError] = useState<string | null>(null);
   const [reassignSuccess, setReassignSuccess] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(false);
 
   const isAdmin = isAdminProfile(profile);
 
@@ -94,9 +92,7 @@ export function CompanyDetailPage() {
 
       let query = supabase
         .from("companies")
-        .select(
-          "id, user_id, name, city, state, country, priority, sales_stage, general_notes, last_contact_at, next_follow_up_at, created_at",
-        )
+        .select(COMPANY_LIST_SELECT)
         .eq("id", id);
 
       if (!asAdmin) {
@@ -207,6 +203,32 @@ export function CompanyDetailPage() {
     setReassigning(false);
   }
 
+  async function handleRestoreCompany() {
+    if (!company) return;
+
+    setActionError(null);
+    setActionMessage(null);
+    setRestoring(true);
+
+    const { data, error } = await restoreCompanies([company.id]);
+
+    setRestoring(false);
+
+    if (error || !data) {
+      setActionError(error ?? "Unable to restore company.");
+      return;
+    }
+
+    setActionMessage(data.message);
+    if (user && companyId && profile) {
+      await fetchCompany(user.id, companyId, isAdminProfile(profile));
+      setChronologyRefreshKey((key) => key + 1);
+    }
+  }
+
+  const isArchived = Boolean(company?.deleted_at);
+  const canManageCompany = !isArchived || isAdmin;
+
   useEffect(() => {
     if (!companyId) {
       setNotFound(true);
@@ -275,6 +297,18 @@ export function CompanyDetailPage() {
 
   return (
     <AuthenticatedLayout maxWidthClass="max-w-4xl">
+        {actionMessage && (
+          <p className="mb-4 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            {actionMessage}
+          </p>
+        )}
+
+        {actionError && (
+          <p className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+            {actionError}
+          </p>
+        )}
+
         {fetchError && (
           <p className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
             {fetchError}
@@ -292,6 +326,15 @@ export function CompanyDetailPage() {
         {company && (
           <>
             <div className="mb-8 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+              {isArchived && (
+                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  This company is archived.
+                  {company.delete_reason
+                    ? ` Reason: ${company.delete_reason}`
+                    : ""}
+                </div>
+              )}
+
               <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
@@ -302,11 +345,61 @@ export function CompanyDetailPage() {
                     follow-ups
                   </p>
                 </div>
-                <span
-                  className={`inline-flex rounded-full px-3 py-1 text-sm font-medium ${priorityBadgeClass(company.priority)}`}
-                >
-                  {company.priority}
-                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`inline-flex rounded-full px-3 py-1 text-sm font-medium ${priorityBadgeClass(company.priority)}`}
+                  >
+                    {company.priority}
+                  </span>
+                  {canManageCompany && !isAdmin && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setEditOpen(true)}
+                        className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                      >
+                        Edit company
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setArchiveOpen(true)}
+                        className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-800 transition hover:bg-red-100"
+                      >
+                        Delete company
+                      </button>
+                    </>
+                  )}
+                  {isAdmin && canManageCompany && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setEditOpen(true)}
+                        className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                      >
+                        Edit company
+                      </button>
+                      {!isArchived && (
+                        <button
+                          type="button"
+                          onClick={() => setArchiveOpen(true)}
+                          className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-800 transition hover:bg-red-100"
+                        >
+                          Archive company
+                        </button>
+                      )}
+                      {isArchived && (
+                        <button
+                          type="button"
+                          onClick={handleRestoreCompany}
+                          disabled={restoring}
+                          className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
+                        >
+                          {restoring ? "Restoring..." : "Restore company"}
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
 
               <dl className="grid gap-5 sm:grid-cols-2">
@@ -465,6 +558,33 @@ export function CompanyDetailPage() {
             </div>
           </>
         )}
+
+      <CompanyEditModal
+        open={editOpen}
+        company={company}
+        onClose={() => setEditOpen(false)}
+        onSaved={() => {
+          setActionMessage("Company updated successfully.");
+          handleCompanyUpdated();
+          setChronologyRefreshKey((key) => key + 1);
+        }}
+      />
+
+      <CompanyArchiveModal
+        open={archiveOpen}
+        companyName={company?.name ?? "Company"}
+        companyIds={company ? [company.id] : []}
+        isAdmin={isAdmin}
+        onClose={() => setArchiveOpen(false)}
+        onArchived={(message) => {
+          setActionMessage(message);
+          if (isAdmin) {
+            handleCompanyUpdated();
+          } else {
+            router.push("/companies");
+          }
+        }}
+      />
     </AuthenticatedLayout>
   );
 }

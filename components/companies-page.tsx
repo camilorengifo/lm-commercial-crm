@@ -15,22 +15,19 @@ import {
   type CompanyPriority,
   type SalesStage,
 } from "@/lib/crmConstants";
+import {
+  COMPANY_LIST_SELECT,
+  COMPANY_SORT_OPTIONS,
+  filterCompaniesBySearch,
+  sortCompanies,
+  type CompanyRecord,
+  type CompanySortOption,
+} from "@/lib/companies";
 import { formatDate, formatSupabaseError } from "@/lib/crmFormat";
 import { supabase } from "@/lib/supabaseClient";
 
-interface Company {
-  id: string;
-  user_id: string;
-  name: string;
-  city: string | null;
-  state: string | null;
-  country: string | null;
-  priority: CompanyPriority;
+interface Company extends CompanyRecord {
   sales_stage: SalesStage;
-  general_notes: string | null;
-  last_contact_at: string | null;
-  next_follow_up_at: string | null;
-  created_at: string;
 }
 
 const EMPTY_FORM = {
@@ -52,6 +49,9 @@ export function CompaniesPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [countryFilter, setCountryFilter] = useState("all");
+  const [priorityFilter, setPriorityFilter] = useState("all");
+  const [sortBy, setSortBy] = useState<CompanySortOption>("name_asc");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
@@ -63,9 +63,7 @@ export function CompaniesPage() {
 
     const { data, error } = await supabase
       .from("companies")
-      .select(
-        "id, user_id, name, city, state, country, priority, sales_stage, general_notes, last_contact_at, next_follow_up_at, created_at",
-      )
+      .select(COMPANY_LIST_SELECT)
       .eq("user_id", userId)
       .order("name", { ascending: true });
 
@@ -103,25 +101,34 @@ export function CompaniesPage() {
     return () => subscription.unsubscribe();
   }, [router, fetchCompanies]);
 
+  const countryOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const company of companies) {
+      if (company.country?.trim()) values.add(company.country.trim());
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [companies]);
+
   const filteredCompanies = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return companies;
+    let rows = filterCompaniesBySearch(companies, search);
 
-    return companies.filter((company) => {
-      const haystack = [
-        company.name,
-        company.city,
-        company.state,
-        company.country,
-        company.priority,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
+    if (countryFilter !== "all") {
+      rows = rows.filter((company) => company.country === countryFilter);
+    }
 
-      return haystack.includes(query);
-    });
-  }, [companies, search]);
+    if (priorityFilter !== "all") {
+      rows = rows.filter((company) => company.priority === priorityFilter);
+    }
+
+    return sortCompanies(rows, sortBy);
+  }, [companies, search, countryFilter, priorityFilter, sortBy]);
+
+  function resetFilters() {
+    setSearch("");
+    setCountryFilter("all");
+    setPriorityFilter("all");
+    setSortBy("name_asc");
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -193,32 +200,104 @@ export function CompaniesPage() {
           </p>
         </div>
 
-        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                setShowForm((prev) => !prev);
-                setFormError(null);
-              }}
-              className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800"
-            >
-              {showForm ? "Cancel" : "Add Company"}
-            </button>
+        <div className="mb-6 flex flex-col gap-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForm((prev) => !prev);
+                  setFormError(null);
+                }}
+                className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800"
+              >
+                {showForm ? "Cancel" : "Add Company"}
+              </button>
+            </div>
+
+            <div className="w-full sm:max-w-xs">
+              <label htmlFor="search" className="sr-only">
+                Search companies
+              </label>
+              <input
+                id="search"
+                type="search"
+                placeholder="Search companies..."
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              />
+            </div>
           </div>
 
-          <div className="w-full sm:max-w-xs">
-            <label htmlFor="search" className="sr-only">
-              Search companies
-            </label>
-            <input
-              id="search"
-              type="search"
-              placeholder="Search companies..."
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
-            />
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div>
+              <label htmlFor="country-filter" className="mb-1.5 block text-sm font-medium text-zinc-700">
+                Country
+              </label>
+              <select
+                id="country-filter"
+                value={countryFilter}
+                onChange={(event) => setCountryFilter(event.target.value)}
+                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              >
+                <option value="all">All countries</option>
+                {countryOptions.map((country) => (
+                  <option key={country} value={country}>
+                    {country}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="priority-filter" className="mb-1.5 block text-sm font-medium text-zinc-700">
+                Priority
+              </label>
+              <select
+                id="priority-filter"
+                value={priorityFilter}
+                onChange={(event) => setPriorityFilter(event.target.value)}
+                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              >
+                <option value="all">All priorities</option>
+                {COMPANY_PRIORITIES.map((priority) => (
+                  <option key={priority} value={priority}>
+                    {priority}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="sort-by" className="mb-1.5 block text-sm font-medium text-zinc-700">
+                Sort
+              </label>
+              <select
+                id="sort-by"
+                value={sortBy}
+                onChange={(event) =>
+                  setSortBy(event.target.value as CompanySortOption)
+                }
+                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              >
+                {COMPANY_SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="inline-flex w-full items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+              >
+                Reset filters
+              </button>
+            </div>
           </div>
         </div>
 
@@ -477,7 +556,7 @@ export function CompaniesPage() {
               <p className="text-sm text-zinc-500">
                 {companies.length === 0
                   ? "No companies yet. Click Add Company to get started."
-                  : "No companies match your search."}
+                  : "No companies match your filters."}
               </p>
             </div>
           ) : (
