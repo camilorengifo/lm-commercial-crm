@@ -7,10 +7,6 @@ import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { BrokerAssistantDashboardCard } from "@/components/broker-assistant-dashboard-card";
 import {
-  fetchAdminDashboardStats,
-  type AdminDashboardStats,
-} from "@/lib/adminStats";
-import {
   ACTIVITY_TYPE_LABELS,
   FOLLOW_UP_STATUS_LABELS,
   priorityBadgeClass,
@@ -310,107 +306,59 @@ function RecentActivityRow({ activity }: { activity: RecentActivityItem }) {
   );
 }
 
-function AdminDashboardView({ stats }: { stats: AdminDashboardStats }) {
+function AdminToolsSection() {
+  const links = [
+    {
+      href: "/admin",
+      title: "Admin overview",
+      description: "Team-wide KPIs and commercial pulse",
+    },
+    {
+      href: "/admin/brokers",
+      title: "Broker productivity",
+      description: "Scores and activity by broker",
+    },
+    {
+      href: "/admin/companies",
+      title: "Companies oversight",
+      description: "All accounts, reassignment, and filters",
+    },
+    {
+      href: "/admin/users",
+      title: "Users",
+      description: "Invite and manage CRM users",
+    },
+  ] as const;
+
   return (
-    <>
-      <div className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        <SummaryCard label="Total companies" value={stats.totalCompanies} />
-        <SummaryCard label="Total brokers" value={stats.totalBrokers} />
-        <SummaryCard
-          label="Follow-ups due today"
-          value={stats.followUpsDueToday}
-          highlight={stats.followUpsDueToday > 0 ? "warning" : undefined}
-        />
-        <SummaryCard
-          label="Overdue follow-ups"
-          value={stats.overdueFollowUps}
-          highlight={stats.overdueFollowUps > 0 ? "danger" : undefined}
-        />
-        <SummaryCard
-          label="High priority companies"
-          value={stats.highPriorityCompanies}
-          highlight={
-            stats.highPriorityCompanies > 0 ? "warning" : undefined
-          }
-        />
-        <SummaryCard
-          label="Open opportunities"
-          value={stats.openOpportunities}
-        />
-      </div>
-
-      <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-medium text-zinc-900">
-          Broker activity overview
-        </h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Global commercial workload and recent activity by broker.
-        </p>
-
-        {stats.brokerRows.length === 0 ? (
-          <p className="mt-4 text-sm text-zinc-500">
-            No brokers registered yet.
+    <section className="mb-8 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-lg font-medium text-zinc-900">Admin tools</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Management views across the full team. Your commercial work is below.
           </p>
-        ) : (
-          <div className="mt-4 overflow-x-auto rounded-lg border border-zinc-200">
-            <table className="min-w-full divide-y divide-zinc-200 text-sm">
-              <thead className="bg-zinc-50">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium text-zinc-600">
-                    Broker
-                  </th>
-                  <th className="px-4 py-3 text-left font-medium text-zinc-600">
-                    Email
-                  </th>
-                  <th className="px-4 py-3 text-right font-medium text-zinc-600">
-                    Companies
-                  </th>
-                  <th className="px-4 py-3 text-right font-medium text-zinc-600">
-                    Follow-ups today
-                  </th>
-                  <th className="px-4 py-3 text-right font-medium text-zinc-600">
-                    Overdue
-                  </th>
-                  <th className="px-4 py-3 text-right font-medium text-zinc-600">
-                    Activity 7 days
-                  </th>
-                  <th className="px-4 py-3 text-left font-medium text-zinc-600">
-                    Last activity
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100 bg-white">
-                {stats.brokerRows.map((row) => (
-                  <tr key={row.userId}>
-                    <td className="px-4 py-3 font-medium text-zinc-900">
-                      {row.name}
-                    </td>
-                    <td className="px-4 py-3 text-zinc-600">{row.email}</td>
-                    <td className="px-4 py-3 text-right text-zinc-900">
-                      {row.companies}
-                    </td>
-                    <td className="px-4 py-3 text-right text-zinc-900">
-                      {row.followUpsDueToday}
-                    </td>
-                    <td className="px-4 py-3 text-right text-zinc-900">
-                      {row.overdueFollowUps}
-                    </td>
-                    <td className="px-4 py-3 text-right text-zinc-900">
-                      {row.activityCount7d}
-                    </td>
-                    <td className="px-4 py-3 text-zinc-600">
-                      {row.lastActivityAt
-                        ? formatDate(row.lastActivityAt)
-                        : "No activity"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-    </>
+        </div>
+        <Link
+          href="/admin"
+          className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+        >
+          Open admin overview
+        </Link>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {links.map((link) => (
+          <Link
+            key={link.href}
+            href={link.href}
+            className="rounded-lg border border-zinc-200 bg-zinc-50/60 px-4 py-3 transition hover:border-zinc-300 hover:bg-zinc-50"
+          >
+            <p className="text-sm font-medium text-zinc-900">{link.title}</p>
+            <p className="mt-1 text-xs text-zinc-500">{link.description}</p>
+          </Link>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -717,30 +665,12 @@ export function HomeDashboard() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [brokerDashboard, setBrokerDashboard] =
     useState<BrokerDashboardData | null>(null);
-  const [adminStats, setAdminStats] = useState<AdminDashboardStats | null>(
-    null,
-  );
   const [completingId, setCompletingId] = useState<string | null>(null);
 
   const isAdmin = isAdminProfile(profile);
 
-  const loadDashboard = useCallback(async (userId: string, asAdmin: boolean) => {
+  const loadDashboard = useCallback(async (userId: string) => {
     setFetchError(null);
-
-    if (asAdmin) {
-      const { data, error } = await fetchAdminDashboardStats();
-
-      if (error || !data) {
-        setFetchError(
-          formatSupabaseError(error ?? { message: "Unable to load dashboard." }),
-        );
-        return;
-      }
-
-      setAdminStats(data);
-      setBrokerDashboard(null);
-      return;
-    }
 
     const { data, error } = await fetchBrokerDashboardData(userId);
 
@@ -748,11 +678,11 @@ export function HomeDashboard() {
       setFetchError(
         formatSupabaseError(error ?? { message: "Unable to load dashboard." }),
       );
+      setBrokerDashboard(null);
       return;
     }
 
     setBrokerDashboard(data);
-    setAdminStats(null);
   }, []);
 
   useEffect(() => {
@@ -767,10 +697,7 @@ export function HomeDashboard() {
       const { data: userProfile } = await fetchUserProfile(session.user.id);
       setProfile(userProfile);
 
-      await loadDashboard(
-        session.user.id,
-        isAdminProfile(userProfile),
-      );
+      await loadDashboard(session.user.id);
       setLoading(false);
     });
 
@@ -785,7 +712,7 @@ export function HomeDashboard() {
       setUser(session.user);
       const { data: userProfile } = await fetchUserProfile(session.user.id);
       setProfile(userProfile);
-      await loadDashboard(session.user.id, isAdminProfile(userProfile));
+      await loadDashboard(session.user.id);
     });
 
     return () => subscription.unsubscribe();
@@ -808,7 +735,7 @@ export function HomeDashboard() {
       return;
     }
 
-    await loadDashboard(user.id, false);
+    await loadDashboard(user.id);
     setCompletingId(null);
   }
 
@@ -820,7 +747,7 @@ export function HomeDashboard() {
     );
   }
 
-  if (!user || (!brokerDashboard && !adminStats)) {
+  if (!user || !brokerDashboard) {
     return null;
   }
 
@@ -836,7 +763,7 @@ export function HomeDashboard() {
           </h1>
           <p className="mt-2 text-sm text-zinc-600">
             {isAdmin
-              ? "Global operational view for administrators."
+              ? "Your commercial dashboard for the day, plus admin tools below the header."
               : "Your operational dashboard for the day. Signed in as "}
             {!isAdmin && (
               <span className="font-medium text-zinc-900">{user.email}</span>
@@ -845,14 +772,12 @@ export function HomeDashboard() {
         </div>
 
         <div className="flex flex-col items-stretch gap-3 sm:items-end">
-          {!isAdmin && (
-            <Link
-              href="/companies"
-              className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800"
-            >
-              Add Company
-            </Link>
-          )}
+          <Link
+            href="/companies"
+            className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800"
+          >
+            Add Company
+          </Link>
         </div>
       </div>
 
@@ -862,15 +787,22 @@ export function HomeDashboard() {
         </p>
       )}
 
-      {isAdmin && adminStats ? (
-        <AdminDashboardView stats={adminStats} />
-      ) : brokerDashboard ? (
-        <BrokerDashboardView
-          dashboard={brokerDashboard}
-          completingId={completingId}
-          onMarkDone={handleMarkDone}
-        />
-      ) : null}
+      {isAdmin && <AdminToolsSection />}
+
+      {isAdmin && (
+        <div className="mb-6">
+          <h2 className="text-lg font-medium text-zinc-900">My commercial work</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Companies, follow-ups, and next actions assigned to you.
+          </p>
+        </div>
+      )}
+
+      <BrokerDashboardView
+        dashboard={brokerDashboard}
+        completingId={completingId}
+        onMarkDone={handleMarkDone}
+      />
     </AuthenticatedLayout>
   );
 }
