@@ -671,9 +671,8 @@ export function CompanyDetailPage() {
               <CompanyChronologySection
                 companyId={company.id}
                 userId={company.user_id}
-                onCompanyUpdated={refreshFollowUpSections}
+                isAdmin={isAdmin}
                 externalRefreshKey={chronologyRefreshKey}
-                canManage={!isAdmin}
               />
               <div className="crm-workspace-toolbar">
                 <Link
