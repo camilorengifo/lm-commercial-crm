@@ -40,6 +40,7 @@ import {
   type AccountStatusFilter,
 } from "@/lib/accountStatus";
 import { formatDate, formatSupabaseError } from "@/lib/crmFormat";
+import { ALL_OFFICES_LABEL, UNASSIGNED_OFFICE_LABEL } from "@/lib/offices";
 import { fetchAllProfiles, type UserProfile } from "@/lib/userProfile";
 
 export function AdminCompaniesPage() {
@@ -55,6 +56,7 @@ export function AdminCompaniesPage() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [brokerFilter, setBrokerFilter] = useState("all");
+  const [officeFilter, setOfficeFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [countryFilter, setCountryFilter] = useState("all");
   const [attentionFilter, setAttentionFilter] =
@@ -116,6 +118,7 @@ export function AdminCompaniesPage() {
     return filterAdminCompanies(oversight.companies, {
       search: searchQuery,
       brokerUserId: brokerFilter,
+      officeId: officeFilter,
       priority: priorityFilter,
       country: countryFilter,
       attention: attentionFilter,
@@ -127,6 +130,7 @@ export function AdminCompaniesPage() {
     oversight,
     searchQuery,
     brokerFilter,
+    officeFilter,
     priorityFilter,
     countryFilter,
     attentionFilter,
@@ -334,6 +338,29 @@ export function AdminCompaniesPage() {
 
         <div>
           <label
+            htmlFor="office-filter"
+            className="mb-1.5 block text-sm font-medium text-zinc-700"
+          >
+            Filter by office
+          </label>
+          <select
+            id="office-filter"
+            value={officeFilter}
+            onChange={(event) => setOfficeFilter(event.target.value)}
+            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+          >
+            <option value="all">{ALL_OFFICES_LABEL}</option>
+            <option value="unassigned">{UNASSIGNED_OFFICE_LABEL}</option>
+            {oversight.offices.map((office) => (
+              <option key={office.id} value={office.id}>
+                {office.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label
             htmlFor="priority-filter"
             className="mb-1.5 block text-sm font-medium text-zinc-700"
           >
@@ -522,6 +549,9 @@ export function AdminCompaniesPage() {
                   Broker
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-zinc-600">
+                  Office / Agency
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-zinc-600">
                   Priority
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-zinc-600">
@@ -595,6 +625,9 @@ export function AdminCompaniesPage() {
                   <td className="px-4 py-3">
                     <p className="text-zinc-900">{company.brokerName}</p>
                     <p className="text-xs text-zinc-500">{company.brokerEmail}</p>
+                  </td>
+                  <td className="px-4 py-3 text-zinc-700">
+                    {company.brokerOfficeName}
                   </td>
                   <td className="px-4 py-3">
                     <span

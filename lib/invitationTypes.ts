@@ -12,6 +12,7 @@ export interface UserInvitationRow {
   created_at: string;
   existing_user: boolean;
   auth_user_id: string | null;
+  office_id: string | null;
 }
 
 export type InvitationValidationReason =

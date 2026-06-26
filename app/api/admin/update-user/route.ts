@@ -7,6 +7,7 @@ interface UpdateUserBody {
   userId?: string;
   role?: string;
   isActive?: boolean;
+  officeId?: string | null;
 }
 
 function isUserRole(value: string): value is UserRole {
@@ -42,6 +43,7 @@ export async function PATCH(request: Request) {
       actingAdminId: auth.context.user.id,
       role: body.role,
       isActive: body.isActive,
+      officeId: body.officeId,
     });
 
     return NextResponse.json(result);

@@ -11,12 +11,18 @@ import {
   type UserProfile,
 } from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
+import {
+  UNASSIGNED_OFFICE_LABEL,
+  type Office,
+} from "@/lib/offices";
 
 export interface BrokerProductivityRow {
   userId: string;
   name: string;
   email: string;
   isActive: boolean;
+  officeId: string | null;
+  officeName: string;
   companies: number;
   contacts: number;
   activities7d: number;
@@ -34,6 +40,19 @@ export interface BrokerProductivityRow {
   lastActivityAt: string | null;
   productivityScore: number;
   activityLevel: Exclude<BrokerActivityLevel, "all">;
+}
+
+export interface OfficeProductivitySummary {
+  officeId: string | null;
+  officeName: string;
+  totalBrokers: number;
+  totalCompanies: number;
+  totalActivities: number;
+  totalFollowUps: number;
+  overdueFollowUps: number;
+  openOpportunities: number;
+  quotedOpportunities: number;
+  wonOpportunities: number;
 }
 
 export interface AdminOverviewKpis {
@@ -110,6 +129,8 @@ export interface CommercialPulseFollowUp {
 export interface AdminOverviewData {
   kpis: AdminOverviewKpis;
   brokerProductivity: BrokerProductivityRow[];
+  officeSummaries: OfficeProductivitySummary[];
+  offices: Office[];
   needsAttention: {
     brokers: NeedsAttentionBroker[];
     inactiveBrokers: NeedsAttentionBroker[];
@@ -207,6 +228,16 @@ interface RawCrmData {
     full_name: string | null;
     role: string;
     is_active: boolean | null;
+    is_blocked: boolean | null;
+    blocked_at: string | null;
+    blocked_reason: string | null;
+    office_id: string | null;
+  }>;
+  offices: Array<{
+    id: string;
+    name: string;
+    city: string | null;
+    is_active: boolean | null;
   }>;
   companies: Array<{
     id: string;
@@ -257,6 +288,7 @@ async function fetchRawCrmData(): Promise<{
 }> {
   const [
     profilesResult,
+    officesResult,
     companiesResult,
     contactsResult,
     followUpsResult,
@@ -265,7 +297,14 @@ async function fetchRawCrmData(): Promise<{
   ] = await Promise.all([
     supabase
       .from("profiles")
-      .select("id, email, full_name, role, is_active"),
+      .select(
+        "id, email, full_name, role, is_active, is_blocked, blocked_at, blocked_reason, office_id",
+      ),
+    supabase
+      .from("offices")
+      .select("id, name, city, is_active")
+      .eq("is_active", true)
+      .order("name"),
     supabase.from("companies").select(
       "id, user_id, name, priority, sales_stage, last_contact_at, next_follow_up_at, created_at",
     ),
@@ -291,6 +330,7 @@ async function fetchRawCrmData(): Promise<{
 
   const firstError =
     profilesResult.error ??
+    officesResult.error ??
     companiesResult.error ??
     contactsResult.error ??
     followUpsResult.error ??
@@ -304,6 +344,7 @@ async function fetchRawCrmData(): Promise<{
   return {
     data: {
       profiles: profilesResult.data ?? [],
+      offices: officesResult.data ?? [],
       companies: companiesResult.data ?? [],
       contacts: contactsResult.data ?? [],
       followUps: followUpsResult.data ?? [],
@@ -320,13 +361,23 @@ function buildBrokerProductivityRows(
   const cutoff7d = getCutoffDays(7);
   const cutoff30d = getCutoffDays(30);
 
+  const officeNameById = new Map(
+    raw.offices.map((office) => [office.id, office.name]),
+  );
+
   const brokerProfiles = raw.profiles
     .filter((profile) => profile.role === "broker")
     .map((profile) => ({
-      ...profile,
+      id: profile.id,
+      email: profile.email ?? "",
+      full_name: profile.full_name,
       role: "broker" as const,
       is_active: profile.is_active ?? true,
-    })) as UserProfile[];
+      is_blocked: profile.is_blocked ?? false,
+      blocked_at: profile.blocked_at ?? null,
+      blocked_reason: profile.blocked_reason ?? null,
+      office_id: profile.office_id ?? null,
+    }));
 
   const lastActivityByUser = new Map<string, string>();
   const activities7dByUser = new Map<string, number>();
@@ -425,6 +476,10 @@ function buildBrokerProductivityRows(
       name: getProfileDisplayName(profile),
       email: profile.email ?? "—",
       isActive: profile.is_active,
+      officeId: profile.office_id,
+      officeName: profile.office_id
+        ? officeNameById.get(profile.office_id) ?? UNASSIGNED_OFFICE_LABEL
+        : UNASSIGNED_OFFICE_LABEL,
       companies: raw.companies.filter((company) => company.user_id === userId)
         .length,
       contacts: raw.contacts.filter((contact) => contact.user_id === userId)
@@ -455,6 +510,85 @@ function buildBrokerProductivityRows(
         activities7d,
         overdueFollowUps,
       }),
+    };
+  });
+}
+
+function buildOfficeProductivitySummaries(
+  raw: RawCrmData,
+  brokerRows: BrokerProductivityRow[],
+): OfficeProductivitySummary[] {
+  const officeNameById = new Map(
+    raw.offices.map((office) => [office.id, office.name]),
+  );
+
+  const brokerOfficeByUserId = new Map(
+    raw.profiles
+      .filter((profile) => profile.role === "broker")
+      .map((profile) => [profile.id, profile.office_id ?? null]),
+  );
+
+  const officeIds = [
+    ...raw.offices.map((office) => office.id),
+    null as string | null,
+  ];
+
+  return officeIds.map((officeId) => {
+    const brokerUserIds = new Set(
+      brokerRows
+        .filter((broker) => broker.officeId === officeId)
+        .map((broker) => broker.userId),
+    );
+
+    const companies = raw.companies.filter((company) => {
+      const brokerOfficeId = brokerOfficeByUserId.get(company.user_id);
+      return brokerOfficeId === officeId;
+    });
+
+    const companyIds = new Set(companies.map((company) => company.id));
+
+    const activities = raw.activities.filter((activity) =>
+      companyIds.has(activity.company_id),
+    );
+
+    const followUps = raw.followUps.filter((followUp) =>
+      brokerUserIds.has(followUp.user_id),
+    );
+
+    const pendingFollowUps = followUps.filter(
+      (followUp) => followUp.status === "pending",
+    );
+
+    let overdueFollowUps = 0;
+    for (const followUp of pendingFollowUps) {
+      if (getFollowUpBucket(followUp.due_at) === "overdue") {
+        overdueFollowUps += 1;
+      }
+    }
+
+    const opportunities = raw.opportunities.filter((opportunity) =>
+      brokerUserIds.has(opportunity.user_id),
+    );
+
+    return {
+      officeId,
+      officeName: officeId
+        ? officeNameById.get(officeId) ?? UNASSIGNED_OFFICE_LABEL
+        : UNASSIGNED_OFFICE_LABEL,
+      totalBrokers: brokerUserIds.size,
+      totalCompanies: companies.length,
+      totalActivities: activities.length,
+      totalFollowUps: pendingFollowUps.length,
+      overdueFollowUps,
+      openOpportunities: opportunities.filter((opportunity) =>
+        isOpenOpportunityStage(opportunity.status),
+      ).length,
+      quotedOpportunities: opportunities.filter(
+        (opportunity) => opportunity.status === "quoted",
+      ).length,
+      wonOpportunities: opportunities.filter(
+        (opportunity) => opportunity.status === "won",
+      ).length,
     };
   });
 }
@@ -712,10 +846,19 @@ export async function fetchAdminOverview(): Promise<{
     (a, b) => b.productivityScore - a.productivityScore,
   );
 
+  const officeSummaries = buildOfficeProductivitySummaries(raw, brokerProductivity);
+
   return {
     data: {
       kpis: buildOverviewKpis(raw, brokerProductivity),
       brokerProductivity,
+      officeSummaries,
+      offices: raw.offices.map((office) => ({
+        id: office.id,
+        name: office.name,
+        city: office.city,
+        isActive: office.is_active ?? true,
+      })),
       needsAttention: buildNeedsAttention(raw, brokerProductivity),
       commercialPulse: buildCommercialPulse(raw),
     },

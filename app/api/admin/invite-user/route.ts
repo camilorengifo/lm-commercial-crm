@@ -8,6 +8,7 @@ interface InviteUserBody {
   email?: string;
   fullName?: string;
   role?: string;
+  officeId?: string | null;
 }
 
 function isUserRole(value: string): value is UserRole {
@@ -55,6 +56,7 @@ export async function POST(request: Request) {
       email,
       fullName,
       role,
+      officeId: body.officeId ?? null,
       actingAdminId: auth.context.user.id,
     });
     return NextResponse.json({

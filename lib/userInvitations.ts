@@ -98,6 +98,7 @@ export async function createUserInvitation(input: {
   invitedBy?: string;
   existingUser?: boolean;
   authUserId?: string | null;
+  officeId?: string | null;
 }): Promise<{ invitation: UserInvitationRow; inviteLink: string }> {
   const admin = createSupabaseAdminClient();
   if (!admin) {
@@ -126,6 +127,7 @@ export async function createUserInvitation(input: {
       expires_at: expiresAt,
       existing_user: input.existingUser === true,
       auth_user_id: input.authUserId ?? null,
+      office_id: input.officeId ?? null,
     })
     .select("*")
     .single();
@@ -358,6 +360,7 @@ export async function acceptUserInvitation(input: {
       full_name: row.full_name,
       role: row.role,
       is_active: true,
+      office_id: row.office_id ?? null,
     },
     { onConflict: "id" },
   );

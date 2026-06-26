@@ -27,11 +27,17 @@ import {
   type UserRole,
 } from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
+import {
+  fetchOffices,
+  UNASSIGNED_OFFICE_LABEL,
+  type Office,
+} from "@/lib/offices";
 
 const EMPTY_INVITE_FORM = {
   fullName: "",
   email: "",
   role: "broker" as UserRole,
+  officeId: "",
 };
 
 export function AdminUsersPage() {
@@ -42,6 +48,7 @@ export function AdminUsersPage() {
   const [accessDenied, setAccessDenied] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [users, setUsers] = useState<AdminUserListItem[]>([]);
+  const [offices, setOffices] = useState<Office[]>([]);
   const [inviteForm, setInviteForm] = useState(EMPTY_INVITE_FORM);
   const [inviting, setInviting] = useState(false);
   const [inviteMessage, setInviteMessage] = useState<string | null>(null);
@@ -59,6 +66,7 @@ export function AdminUsersPage() {
     type: "success" | "error";
     message: string;
   } | null>(null);
+  const [updateSuccess, setUpdateSuccess] = useState<string | null>(null);
 
   const loadUsers = useCallback(async () => {
     setFetchError(null);
@@ -90,7 +98,11 @@ export function AdminUsersPage() {
       }
 
       setProfile(userProfile);
-      await loadUsers();
+      const [{ data: officesData }] = await Promise.all([
+        fetchOffices(),
+        loadUsers(),
+      ]);
+      setOffices(officesData ?? []);
       setLoading(false);
     });
   }, [router, loadUsers]);
@@ -105,6 +117,7 @@ export function AdminUsersPage() {
       email: inviteForm.email.trim(),
       fullName: inviteForm.fullName.trim(),
       role: inviteForm.role,
+      officeId: inviteForm.officeId || null,
     });
 
     if (error || !data) {
@@ -117,6 +130,27 @@ export function AdminUsersPage() {
     setInviteForm(EMPTY_INVITE_FORM);
     await loadUsers();
     setInviting(false);
+  }
+
+  async function handleOfficeChange(targetUserId: string, officeId: string) {
+    setUpdatingUserId(targetUserId);
+    setFetchError(null);
+    setUpdateSuccess(null);
+
+    const { data, error } = await updateAdminUser({
+      userId: targetUserId,
+      officeId: officeId || null,
+    });
+
+    if (error) {
+      setFetchError(error);
+      setUpdatingUserId(null);
+      return;
+    }
+
+    setUpdateSuccess(data?.message ?? "Office updated successfully.");
+    await loadUsers();
+    setUpdatingUserId(null);
   }
 
   async function handleRoleChange(targetUserId: string, role: UserRole) {
@@ -446,6 +480,33 @@ export function AdminUsersPage() {
             </select>
           </div>
 
+          <div>
+            <label
+              htmlFor="invite-office"
+              className="mb-1.5 block text-sm font-medium text-zinc-700"
+            >
+              Office / Agency
+            </label>
+            <select
+              id="invite-office"
+              value={inviteForm.officeId}
+              onChange={(event) =>
+                setInviteForm((prev) => ({
+                  ...prev,
+                  officeId: event.target.value,
+                }))
+              }
+              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+            >
+              <option value="">{UNASSIGNED_OFFICE_LABEL}</option>
+              {offices.map((office) => (
+                <option key={office.id} value={office.id}>
+                  {office.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="flex items-end">
             <button
               type="submit"
@@ -488,6 +549,12 @@ export function AdminUsersPage() {
           </p>
         )}
 
+        {updateSuccess && (
+          <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+            {updateSuccess}
+          </p>
+        )}
+
         <div className="mt-5 overflow-x-auto">
           <table className="min-w-full divide-y divide-zinc-200">
             <thead className="bg-zinc-50">
@@ -499,6 +566,9 @@ export function AdminUsersPage() {
                   Role
                 </th>
                 <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-zinc-500">
+                  Office / Agency
+                </th>
+                <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-zinc-500">
                   Active
                 </th>
                 <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-zinc-500">
@@ -506,15 +576,6 @@ export function AdminUsersPage() {
                 </th>
                 <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-zinc-500">
                   Last sign-in
-                </th>
-                <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-zinc-500">
-                  Companies
-                </th>
-                <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-zinc-500">
-                  Due today
-                </th>
-                <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-zinc-500">
-                  Open opps
                 </th>
                 <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-zinc-500">
                   Actions
@@ -557,6 +618,23 @@ export function AdminUsersPage() {
                     </td>
                     <td className="px-3 py-3 text-sm">
                       <select
+                        value={row.officeId ?? ""}
+                        disabled={isUpdating}
+                        onChange={(event) =>
+                          handleOfficeChange(row.id, event.target.value)
+                        }
+                        className="min-w-[12rem] rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <option value="">{UNASSIGNED_OFFICE_LABEL}</option>
+                        {offices.map((office) => (
+                          <option key={office.id} value={office.id}>
+                            {office.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-3 py-3 text-sm">
+                      <select
                         value={row.isActive ? "active" : "inactive"}
                         disabled={isUpdating || isSelf}
                         onChange={(event) =>
@@ -576,15 +654,6 @@ export function AdminUsersPage() {
                     </td>
                     <td className="px-3 py-3 text-sm text-zinc-700">
                       {formatDateTime(row.lastSignInAt)}
-                    </td>
-                    <td className="px-3 py-3 text-sm text-zinc-700">
-                      {row.companyCount}
-                    </td>
-                    <td className="px-3 py-3 text-sm text-zinc-700">
-                      {row.followUpsDueToday}
-                    </td>
-                    <td className="px-3 py-3 text-sm text-zinc-700">
-                      {row.openOpportunities}
                     </td>
                     <td className="px-3 py-3 text-sm">
                       {row.ownsCrmRecords && (

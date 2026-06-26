@@ -54,6 +54,7 @@ export async function inviteAdminUser(input: {
   email: string;
   fullName: string;
   role: UserRole;
+  officeId?: string | null;
 }) {
   return adminRequest<{ message: string }>("/api/admin/invite-user", {
     method: "POST",
@@ -65,6 +66,7 @@ export async function updateAdminUser(input: {
   userId: string;
   role?: UserRole;
   isActive?: boolean;
+  officeId?: string | null;
 }) {
   return adminRequest<{ message: string }>("/api/admin/update-user", {
     method: "PATCH",

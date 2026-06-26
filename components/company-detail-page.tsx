@@ -44,6 +44,13 @@ import {
   type UserProfile,
 } from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
+import { UNASSIGNED_OFFICE_LABEL } from "@/lib/offices";
+
+interface CompanyOwnerInfo {
+  name: string;
+  email: string;
+  officeName: string;
+}
 
 interface Company extends CompanyRecord {
   sales_stage: SalesStage;
@@ -82,7 +89,7 @@ export function CompanyDetailPage() {
   const [followUpsRefreshKey, setFollowUpsRefreshKey] = useState(0);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [brokers, setBrokers] = useState<UserProfile[]>([]);
-  const [ownerEmail, setOwnerEmail] = useState<string | null>(null);
+  const [ownerInfo, setOwnerInfo] = useState<CompanyOwnerInfo | null>(null);
   const [reassignBrokerId, setReassignBrokerId] = useState("");
   const [reassigning, setReassigning] = useState(false);
   const [reassignError, setReassignError] = useState<string | null>(null);
@@ -135,16 +142,42 @@ export function CompanyDetailPage() {
       setCompany(nextCompany);
       setReassignBrokerId(nextCompany.user_id);
 
-      if (asAdmin) {
-        const { data: ownerProfile } = await supabase
-          .from("profiles")
-          .select("email")
-          .eq("id", nextCompany.user_id)
+      const { data: ownerProfile } = await supabase
+        .from("profiles")
+        .select(
+          "email, full_name, role, is_active, is_blocked, blocked_at, blocked_reason, office_id",
+        )
+        .eq("id", nextCompany.user_id)
+        .maybeSingle();
+
+      let officeName = UNASSIGNED_OFFICE_LABEL;
+      if (ownerProfile?.office_id) {
+        const { data: office } = await supabase
+          .from("offices")
+          .select("name")
+          .eq("id", ownerProfile.office_id)
           .maybeSingle();
 
-        setOwnerEmail(ownerProfile?.email ?? null);
+        officeName = office?.name ?? UNASSIGNED_OFFICE_LABEL;
+      }
+
+      if (ownerProfile) {
+        setOwnerInfo({
+          name: getProfileDisplayName({
+            id: nextCompany.user_id,
+            email: ownerProfile.email ?? "",
+            full_name: ownerProfile.full_name,
+            role: ownerProfile.role === "admin" ? "admin" : "broker",
+            is_active: ownerProfile.is_active ?? true,
+            is_blocked: ownerProfile.is_blocked ?? false,
+            blocked_at: ownerProfile.blocked_at ?? null,
+            blocked_reason: ownerProfile.blocked_reason ?? null,
+          }),
+          email: ownerProfile.email ?? "—",
+          officeName,
+        });
       } else {
-        setOwnerEmail(null);
+        setOwnerInfo(null);
       }
     },
     [],
@@ -440,6 +473,12 @@ export function CompanyDetailPage() {
                   <p className="crm-page-subtitle">
                     Contacts, opportunities, timeline, and follow-ups
                   </p>
+                  {ownerInfo && (
+                    <p className="mt-2 text-sm text-zinc-600">
+                      Broker: {ownerInfo.name} ({ownerInfo.email}) · Office /
+                      Agency: {ownerInfo.officeName}
+                    </p>
+                  )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span
@@ -589,11 +628,7 @@ export function CompanyDetailPage() {
                   {formatDate(company.created_at)}
                 </DetailField>
                 {isAdmin && (
-                  <>
-                    <DetailField label="Owner broker">
-                      {ownerEmail ?? "—"}
-                    </DetailField>
-                    <DetailField label="Reassign owner">
+                  <DetailField label="Reassign owner">
                       <div className="space-y-2">
                         <select
                           value={reassignBrokerId}
@@ -631,7 +666,6 @@ export function CompanyDetailPage() {
                         )}
                       </div>
                     </DetailField>
-                  </>
                 )}
               </dl>
 

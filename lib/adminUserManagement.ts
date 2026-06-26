@@ -9,6 +9,7 @@ import { createSupabaseAdminClient } from "@/lib/supabaseAdmin";
 import { assertSafeInviteRedirect } from "@/lib/appUrl";
 import { sendInvitationEmail } from "@/lib/invitationEmail";
 import { createUserInvitation } from "@/lib/userInvitations";
+import { UNASSIGNED_OFFICE_LABEL } from "@/lib/offices";
 
 const CRM_OWNERSHIP_TABLES = [
   "companies",
@@ -32,6 +33,8 @@ export interface AdminUserListItem {
   email: string;
   fullName: string | null;
   role: UserRole;
+  officeId: string | null;
+  officeName: string;
   isActive: boolean;
   createdAt: string | null;
   lastSignInAt: string | null;
@@ -96,17 +99,23 @@ export async function listAdminUsers(): Promise<AdminUserListItem[]> {
 
   const [
     profilesResult,
+    officesResult,
     companiesResult,
     followUpsResult,
     opportunitiesResult,
   ] = await Promise.all([
-    admin.from("profiles").select("id, email, full_name, role, is_active, created_at").order("email"),
+    admin
+      .from("profiles")
+      .select("id, email, full_name, role, is_active, created_at, office_id")
+      .order("email"),
+    admin.from("offices").select("id, name").eq("is_active", true),
     admin.from("companies").select("user_id"),
     admin.from("follow_ups").select("user_id, due_at, status").eq("status", "pending"),
     admin.from("load_opportunities").select("user_id, status"),
   ]);
 
   if (profilesResult.error) throw profilesResult.error;
+  if (officesResult.error) throw officesResult.error;
   if (companiesResult.error) throw companiesResult.error;
   if (followUpsResult.error) throw followUpsResult.error;
   if (opportunitiesResult.error) throw opportunitiesResult.error;
@@ -159,12 +168,19 @@ export async function listAdminUsers(): Promise<AdminUserListItem[]> {
   }
 
   const usersWithCrmRecords = await getUserIdsWithCrmRecords(admin);
+  const officeNameById = new Map(
+    (officesResult.data ?? []).map((office) => [office.id, office.name]),
+  );
 
   return (profilesResult.data ?? []).map((profile) => ({
     id: profile.id,
     email: profile.email ?? "—",
     fullName: profile.full_name,
     role: normalizeUserRole(profile.role),
+    officeId: profile.office_id ?? null,
+    officeName: profile.office_id
+      ? officeNameById.get(profile.office_id) ?? UNASSIGNED_OFFICE_LABEL
+      : UNASSIGNED_OFFICE_LABEL,
     isActive: profile.is_active ?? true,
     createdAt: profile.created_at ?? null,
     lastSignInAt: authUsersById.get(profile.id) ?? null,
@@ -201,6 +217,7 @@ export async function inviteAdminUser(input: {
   email: string;
   fullName: string;
   role: UserRole;
+  officeId?: string | null;
   actingAdminId?: string;
 }): Promise<{ message: string }> {
   const admin = createSupabaseAdminClient();
@@ -223,6 +240,7 @@ export async function inviteAdminUser(input: {
     invitedBy: input.actingAdminId,
     existingUser: Boolean(existingAuthUser),
     authUserId: existingAuthUser?.id ?? null,
+    officeId: input.officeId ?? null,
   });
 
   const emailResult = await sendInvitationEmail({
@@ -256,6 +274,7 @@ export async function updateAdminUser(input: {
   actingAdminId: string;
   role?: UserRole;
   isActive?: boolean;
+  officeId?: string | null;
 }): Promise<{ message: string }> {
   const admin = createSupabaseAdminClient();
   if (!admin) {
@@ -296,6 +315,7 @@ export async function updateAdminUser(input: {
   const updates: {
     role?: UserRole;
     is_active?: boolean;
+    office_id?: string | null;
   } = {};
 
   if (input.role !== undefined) {
@@ -307,6 +327,24 @@ export async function updateAdminUser(input: {
       throw new Error("You cannot deactivate your own account.");
     }
     updates.is_active = input.isActive;
+  }
+
+  if (input.officeId !== undefined) {
+    if (input.officeId) {
+      const { data: office, error: officeError } = await admin
+        .from("offices")
+        .select("id")
+        .eq("id", input.officeId)
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (officeError) throw officeError;
+      if (!office) {
+        throw new Error("Selected office is not available.");
+      }
+    }
+
+    updates.office_id = input.officeId;
   }
 
   if (Object.keys(updates).length === 0) {

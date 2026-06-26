@@ -4,6 +4,10 @@ import { getOpportunityPipelineValue } from "@/lib/brokerProductivity";
 import { getFollowUpBucket } from "@/lib/followUps";
 import { getProfileDisplayName } from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
+import {
+  UNASSIGNED_OFFICE_LABEL,
+  type Office,
+} from "@/lib/offices";
 
 const INACTIVITY_DAYS = 30;
 
@@ -39,6 +43,8 @@ export interface AdminCompanyOversightRow {
   brokerUserId: string;
   brokerName: string;
   brokerEmail: string;
+  brokerOfficeId: string | null;
+  brokerOfficeName: string;
   createdAt: string;
   lastContactAt: string | null;
   nextFollowUpAt: string | null;
@@ -76,6 +82,7 @@ export interface AdminCompaniesOversightData {
   companies: AdminCompanyOversightRow[];
   brokers: AdminCompaniesBrokerOption[];
   countries: string[];
+  offices: Office[];
 }
 
 function getInactivityCutoff(): Date {
@@ -185,6 +192,7 @@ export function filterAdminCompanies(
   filters: {
     search: string;
     brokerUserId: string;
+    officeId: string;
     priority: string;
     country: string;
     attention: AdminCompanyAttentionStatus;
@@ -214,6 +222,14 @@ export function filterAdminCompanies(
 
     if (filters.brokerUserId !== "all" && company.brokerUserId !== filters.brokerUserId) {
       return false;
+    }
+
+    if (filters.officeId !== "all") {
+      if (filters.officeId === "unassigned") {
+        if (company.brokerOfficeId !== null) return false;
+      } else if (company.brokerOfficeId !== filters.officeId) {
+        return false;
+      }
     }
 
     if (filters.priority !== "all" && company.priority !== filters.priority) {
@@ -274,6 +290,7 @@ export async function fetchAdminCompaniesOversight(): Promise<{
 }> {
   const [
     profilesResult,
+    officesResult,
     companiesResult,
     contactsResult,
     activitiesResult,
@@ -282,7 +299,12 @@ export async function fetchAdminCompaniesOversight(): Promise<{
   ] = await Promise.all([
     supabase
       .from("profiles")
-      .select("id, email, full_name, role, is_active, is_blocked, blocked_at, blocked_reason"),
+      .select("id, email, full_name, role, is_active, is_blocked, blocked_at, blocked_reason, office_id"),
+    supabase
+      .from("offices")
+      .select("id, name, city, is_active")
+      .eq("is_active", true)
+      .order("name"),
     supabase
       .from("companies")
       .select(
@@ -303,6 +325,7 @@ export async function fetchAdminCompaniesOversight(): Promise<{
 
   const firstError =
     profilesResult.error ??
+    officesResult.error ??
     companiesResult.error ??
     contactsResult.error ??
     activitiesResult.error ??
@@ -314,6 +337,13 @@ export async function fetchAdminCompaniesOversight(): Promise<{
   }
 
   const profiles = profilesResult.data ?? [];
+  const offices = (officesResult.data ?? []).map((office) => ({
+    id: office.id,
+    name: office.name,
+    city: office.city,
+    isActive: office.is_active ?? true,
+  }));
+  const officeNameById = new Map(offices.map((office) => [office.id, office.name]));
   const companies = companiesResult.data ?? [];
   const contacts = contactsResult.data ?? [];
   const activities = activitiesResult.data ?? [];
@@ -332,6 +362,7 @@ export async function fetchAdminCompaniesOversight(): Promise<{
         is_blocked: profile.is_blocked ?? false,
         blocked_at: profile.blocked_at ?? null,
         blocked_reason: profile.blocked_reason ?? null,
+        office_id: profile.office_id ?? null,
       },
     ]),
   );
@@ -413,6 +444,10 @@ export async function fetchAdminCompaniesOversight(): Promise<{
         })
       : "Unknown broker";
     const brokerEmail = profile?.email ?? "—";
+    const brokerOfficeId = profile?.office_id ?? null;
+    const brokerOfficeName = brokerOfficeId
+      ? officeNameById.get(brokerOfficeId) ?? UNASSIGNED_OFFICE_LABEL
+      : UNASSIGNED_OFFICE_LABEL;
 
     const pendingForCompany = pendingFollowUpsByCompany.get(company.id) ?? [];
     let overdueFollowUpCount = 0;
@@ -452,6 +487,8 @@ export async function fetchAdminCompaniesOversight(): Promise<{
       brokerUserId: company.user_id,
       brokerName,
       brokerEmail,
+      brokerOfficeId,
+      brokerOfficeName,
       createdAt: company.created_at,
       lastContactAt,
       nextFollowUpAt,
@@ -511,6 +548,7 @@ export async function fetchAdminCompaniesOversight(): Promise<{
       companies: companyRows,
       brokers,
       countries,
+      offices,
     },
     error: null,
   };
