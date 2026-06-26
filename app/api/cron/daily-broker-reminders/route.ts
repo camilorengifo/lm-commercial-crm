@@ -191,7 +191,16 @@ async function handleCronRequest(request: Request) {
     console.log(
       `[daily-broker-reminders] Cron job finished. attempted=${summary.processed} sent=${summary.sent} skipped=${summary.skipped} errors=${summary.errors.length}`,
     );
-    return NextResponse.json({ ok: true, ...summary });
+    return NextResponse.json({
+      ok: true,
+      brokersProcessed: summary.processed,
+      emailsSent: summary.sent,
+      brokersSkipped: summary.skipped,
+      errors: summary.errors,
+      processed: summary.processed,
+      sent: summary.sent,
+      skipped: summary.skipped,
+    });
   } catch (error) {
     const message =
       error instanceof Error

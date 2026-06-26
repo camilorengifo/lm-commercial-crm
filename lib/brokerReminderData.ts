@@ -1,13 +1,22 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
-  DEFAULT_SALES_STAGE,
-  isSalesStage,
-  type SalesStage,
+  OPEN_OPPORTUNITY_STATUSES,
+  getOpportunityStageLabel,
+  type CompanyPriority,
 } from "@/lib/crmConstants";
+import {
+  formatPipelineValue,
+  getOpportunityPipelineValue,
+} from "@/lib/brokerProductivity";
 import { getFollowUpBucket } from "@/lib/followUps";
 
-const INACTIVITY_DAYS = 14;
-const MAX_ITEMS = 10;
+const SEASONAL_HORIZON_DAYS = 45;
+const MAX_TOP_PRIORITIES = 5;
+const MAX_OVERDUE = 10;
+const MAX_TODAY = 10;
+const MAX_SEASONAL = 10;
+const MAX_OPEN_OPPORTUNITIES = 10;
+const MAX_PRIORITY_ACCOUNTS = 5;
 
 export interface BrokerProfile {
   id: string;
@@ -20,73 +29,115 @@ export interface ReminderFollowUpItem {
   companyName: string;
   companyId: string;
   dueAt: string;
+  contactName: string | null;
+  notes: string | null;
+  suggestedAction: string;
 }
 
-export interface ReminderCompanyItem {
+export interface ReminderSeasonalFollowUpItem {
   companyName: string;
   companyId: string;
-  salesStage: SalesStage;
-  lastContactAt: string | null;
+  title: string;
+  targetDate: string;
+  reminderStartDate: string | null;
+  seasonalContext: string | null;
+  suggestedAction: string;
 }
 
-export interface ReminderOpportunityItem {
+export interface ReminderOpenOpportunityItem {
   companyName: string;
   companyId: string;
+  opportunityId: string;
+  name: string;
   status: string;
-  lane: string;
-  updatedAt: string;
+  statusLabel: string;
+  value: number;
+  valueLabel: string | null;
+  expectedCloseDate: string | null;
+  nextStep: string | null;
+  suggestedAction: string;
+}
+
+export interface ReminderPriorityAccountItem {
+  companyName: string;
+  companyId: string;
+  priority: CompanyPriority | string;
+  reason: string;
+}
+
+export interface ReminderTopPriorityItem {
+  label: string;
+  action: string;
 }
 
 export interface BrokerReminderData {
   userId: string;
   brokerEmail: string;
   brokerName: string | null;
-  todayFollowUps: ReminderFollowUpItem[];
+  topPriorities: ReminderTopPriorityItem[];
   overdueFollowUps: ReminderFollowUpItem[];
-  upcomingFollowUps: ReminderFollowUpItem[];
-  inactiveCompanies: ReminderCompanyItem[];
-  newLeadNoActivity: ReminderCompanyItem[];
-  inFollowUpNoPendingFollowUp: ReminderCompanyItem[];
-  quotedOpportunities: ReminderOpportunityItem[];
-  newOpportunities: ReminderOpportunityItem[];
+  todayFollowUps: ReminderFollowUpItem[];
+  seasonalFollowUps: ReminderSeasonalFollowUpItem[];
+  openOpportunities: ReminderOpenOpportunityItem[];
+  priorityAccounts: ReminderPriorityAccountItem[];
+  hasMoreOverdue: boolean;
+  hasMoreToday: boolean;
+  hasMoreSeasonal: boolean;
+  hasMoreOpenOpportunities: boolean;
+  hasMorePriorityAccounts: boolean;
 }
 
 export interface BrokerReminderCounts {
-  todayFollowUps: number;
+  topPriorities: number;
   overdueFollowUps: number;
-  upcomingFollowUps: number;
-  inactiveCompanies: number;
-  newLeadNoActivity: number;
-  inFollowUpNoPendingFollowUp: number;
-  quotedOpportunities: number;
-  newOpportunities: number;
+  todayFollowUps: number;
+  seasonalFollowUps: number;
+  openOpportunities: number;
+  priorityAccounts: number;
 }
 
 interface CompanyRow {
   id: string;
   name: string;
+  priority: string;
   sales_stage: string;
   last_contact_at: string | null;
   next_follow_up_at: string | null;
+  account_status: string | null;
+  deleted_at: string | null;
 }
 
 interface FollowUpRow {
   id: string;
   company_id: string;
   title: string;
+  notes: string | null;
   due_at: string;
+  follow_up_type: string | null;
+  reminder_start_date: string | null;
+  seasonal_context: string | null;
 }
 
-interface ActivityRow {
+interface ContactRow {
   company_id: string;
-  activity_at: string;
+  first_name: string;
+  last_name: string | null;
+  is_primary: boolean;
 }
 
 interface OpportunityRow {
+  id: string;
   company_id: string;
+  name: string;
   status: string;
   lane_origin: string | null;
   lane_destination: string | null;
+  estimated_revenue_usd: number | null;
+  estimated_margin_usd: number | null;
+  quoted_rate: number | null;
+  target_rate: number | null;
+  expected_close_date: string | null;
+  next_step: string | null;
   updated_at: string;
   companies: { name: string } | { name: string }[] | null;
 }
@@ -98,12 +149,6 @@ function formatDateLabel(value: string | null): string | null {
   return date.toISOString().slice(0, 10);
 }
 
-function formatLane(origin: string | null, destination: string | null): string {
-  const from = origin?.trim() || "—";
-  const to = destination?.trim() || "—";
-  return `${from} → ${to}`;
-}
-
 function unwrapCompanyName(
   value: { name: string } | { name: string }[] | null,
 ): string {
@@ -111,15 +156,146 @@ function unwrapCompanyName(
   return Array.isArray(value) ? (value[0]?.name ?? "Unknown company") : value.name;
 }
 
-function getInactivityCutoff(): Date {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - INACTIVITY_DAYS);
-  cutoff.setHours(0, 0, 0, 0);
-  return cutoff;
+function getDayBounds(reference: Date = new Date()) {
+  const start = new Date(reference);
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date(reference);
+  end.setHours(23, 59, 59, 999);
+
+  return { start, end };
 }
 
-function limit<T>(items: T[]): T[] {
-  return items.slice(0, MAX_ITEMS);
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function isWorkingCompany(company: CompanyRow | undefined): boolean {
+  if (!company) return false;
+  if (company.deleted_at) return false;
+  const status = company.account_status?.trim().toLowerCase() ?? "active";
+  return status !== "archived";
+}
+
+function isSeasonalFollowUpType(value: string | null | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "seasonal" || normalized === "future_opportunity";
+}
+
+function formatContactName(firstName: string, lastName: string | null): string {
+  return [firstName, lastName].filter(Boolean).join(" ").trim();
+}
+
+function buildContactNameByCompany(contacts: ContactRow[]): Map<string, string> {
+  const byCompany = new Map<string, ContactRow[]>();
+
+  for (const contact of contacts) {
+    const existing = byCompany.get(contact.company_id) ?? [];
+    existing.push(contact);
+    byCompany.set(contact.company_id, existing);
+  }
+
+  const result = new Map<string, string>();
+
+  for (const [companyId, companyContacts] of byCompany) {
+    const primary =
+      companyContacts.find((contact) => contact.is_primary) ??
+      companyContacts[0];
+
+    if (primary) {
+      result.set(
+        companyId,
+        formatContactName(primary.first_name, primary.last_name),
+      );
+    }
+  }
+
+  return result;
+}
+
+function shouldIncludeSeasonalFollowUp(
+  followUp: FollowUpRow,
+  todayStart: Date,
+  todayEnd: Date,
+  horizonEnd: Date,
+): boolean {
+  if (!isSeasonalFollowUpType(followUp.follow_up_type)) return false;
+
+  const due = new Date(followUp.due_at);
+  if (Number.isNaN(due.getTime()) || due < todayStart) return false;
+
+  if (followUp.reminder_start_date) {
+    const reminderStart = new Date(followUp.reminder_start_date);
+    if (Number.isNaN(reminderStart.getTime())) return false;
+    return reminderStart <= todayEnd && due >= todayStart;
+  }
+
+  return due <= horizonEnd;
+}
+
+function isHighPriority(priority: string): boolean {
+  return priority === "High" || priority === "Hot Lead";
+}
+
+function buildFollowUpItem(
+  followUp: FollowUpRow,
+  companyById: Map<string, CompanyRow>,
+  contactNameByCompany: Map<string, string>,
+  suggestedAction: string,
+): ReminderFollowUpItem | null {
+  const company = companyById.get(followUp.company_id);
+  if (!isWorkingCompany(company)) return null;
+
+  return {
+    title: followUp.title,
+    companyId: followUp.company_id,
+    companyName: company?.name ?? "Unknown company",
+    dueAt: formatDateLabel(followUp.due_at) ?? followUp.due_at,
+    contactName: contactNameByCompany.get(followUp.company_id) ?? null,
+    notes: followUp.notes?.trim() || null,
+    suggestedAction,
+  };
+}
+
+function buildTopPriorities(data: {
+  overdueFollowUps: ReminderFollowUpItem[];
+  todayFollowUps: ReminderFollowUpItem[];
+  seasonalFollowUps: ReminderSeasonalFollowUpItem[];
+  openOpportunities: ReminderOpenOpportunityItem[];
+}): ReminderTopPriorityItem[] {
+  const priorities: ReminderTopPriorityItem[] = [];
+
+  for (const item of data.overdueFollowUps.slice(0, 2)) {
+    priorities.push({
+      label: `${item.companyName} — ${item.title}`,
+      action: item.suggestedAction,
+    });
+  }
+
+  for (const item of data.todayFollowUps.slice(0, 2)) {
+    priorities.push({
+      label: `${item.companyName} — ${item.title}`,
+      action: item.suggestedAction,
+    });
+  }
+
+  for (const item of data.seasonalFollowUps.slice(0, 2)) {
+    priorities.push({
+      label: `${item.companyName} — ${item.title}`,
+      action: item.suggestedAction,
+    });
+  }
+
+  for (const item of data.openOpportunities.slice(0, 2)) {
+    priorities.push({
+      label: `${item.companyName} — ${item.name}`,
+      action: item.suggestedAction,
+    });
+  }
+
+  return priorities.slice(0, MAX_TOP_PRIORITIES);
 }
 
 export async function fetchBrokerProfiles(
@@ -161,188 +337,216 @@ export async function buildBrokerReminderData(
   const [
     companiesResult,
     followUpsResult,
-    activitiesResult,
+    contactsResult,
     opportunitiesResult,
   ] = await Promise.all([
     supabase
       .from("companies")
-      .select("id, name, sales_stage, last_contact_at, next_follow_up_at")
+      .select(
+        "id, name, priority, sales_stage, last_contact_at, next_follow_up_at, account_status, deleted_at",
+      )
       .eq("user_id", userId),
     supabase
       .from("follow_ups")
-      .select("id, company_id, title, due_at")
+      .select(
+        "id, company_id, title, notes, due_at, follow_up_type, reminder_start_date, seasonal_context",
+      )
       .eq("user_id", userId)
       .eq("status", "pending")
       .order("due_at", { ascending: true }),
     supabase
-      .from("activities")
-      .select("company_id, activity_at")
-      .eq("user_id", userId)
-      .order("activity_at", { ascending: false })
-      .limit(300),
+      .from("contacts")
+      .select("company_id, first_name, last_name, is_primary")
+      .eq("user_id", userId),
     supabase
       .from("load_opportunities")
       .select(
-        "company_id, status, lane_origin, lane_destination, updated_at, companies ( name )",
+        "id, company_id, name, status, lane_origin, lane_destination, estimated_revenue_usd, estimated_margin_usd, quoted_rate, target_rate, expected_close_date, next_step, updated_at, companies ( name )",
       )
       .eq("user_id", userId)
+      .in("status", OPEN_OPPORTUNITY_STATUSES)
       .order("updated_at", { ascending: false })
       .limit(50),
   ]);
 
   if (companiesResult.error) throw companiesResult.error;
   if (followUpsResult.error) throw followUpsResult.error;
-  if (activitiesResult.error) throw activitiesResult.error;
+  if (contactsResult.error) throw contactsResult.error;
   if (opportunitiesResult.error) throw opportunitiesResult.error;
 
   const companies = (companiesResult.data as CompanyRow[]) ?? [];
   const followUps = (followUpsResult.data as FollowUpRow[]) ?? [];
-  const activities = (activitiesResult.data as ActivityRow[]) ?? [];
+  const contacts = (contactsResult.data as ContactRow[]) ?? [];
   const opportunities = (opportunitiesResult.data as OpportunityRow[]) ?? [];
 
   const companyById = new Map(companies.map((company) => [company.id, company]));
-  const activityCountByCompany = new Map<string, number>();
-  const lastActivityByCompany = new Map<string, string>();
-  const companiesWithPendingFollowUp = new Set(
-    followUps.map((followUp) => followUp.company_id),
+  const workingCompanyIds = new Set(
+    companies.filter((company) => isWorkingCompany(company)).map((company) => company.id),
   );
+  const contactNameByCompany = buildContactNameByCompany(contacts);
 
-  for (const activity of activities) {
-    activityCountByCompany.set(
-      activity.company_id,
-      (activityCountByCompany.get(activity.company_id) ?? 0) + 1,
-    );
-    if (!lastActivityByCompany.has(activity.company_id)) {
-      lastActivityByCompany.set(activity.company_id, activity.activity_at);
-    }
-  }
+  const { start: todayStart, end: todayEnd } = getDayBounds();
+  const horizonEnd = addDays(todayEnd, SEASONAL_HORIZON_DAYS);
 
-  const mapFollowUp = (followUp: FollowUpRow): ReminderFollowUpItem => ({
-    title: followUp.title,
-    companyId: followUp.company_id,
-    companyName: companyById.get(followUp.company_id)?.name ?? "Unknown company",
-    dueAt: formatDateLabel(followUp.due_at) ?? followUp.due_at,
-  });
-
-  const todayFollowUps: ReminderFollowUpItem[] = [];
-  const overdueFollowUps: ReminderFollowUpItem[] = [];
-  const upcomingFollowUps: ReminderFollowUpItem[] = [];
+  const overdueAll: ReminderFollowUpItem[] = [];
+  const todayAll: ReminderFollowUpItem[] = [];
+  const seasonalAll: ReminderSeasonalFollowUpItem[] = [];
+  const seasonalFollowUpIds = new Set<string>();
 
   for (const followUp of followUps) {
-    const item = mapFollowUp(followUp);
+    const company = companyById.get(followUp.company_id);
+    if (!isWorkingCompany(company)) continue;
+
+    if (shouldIncludeSeasonalFollowUp(followUp, todayStart, todayEnd, horizonEnd)) {
+      seasonalFollowUpIds.add(followUp.id);
+      seasonalAll.push({
+        companyId: followUp.company_id,
+        companyName: company?.name ?? "Unknown company",
+        title: followUp.title,
+        targetDate: formatDateLabel(followUp.due_at) ?? followUp.due_at,
+        reminderStartDate: formatDateLabel(followUp.reminder_start_date),
+        seasonalContext: followUp.seasonal_context?.trim() || null,
+        suggestedAction:
+          "Start warming up this account before the target season/date.",
+      });
+      continue;
+    }
+
+    if (isSeasonalFollowUpType(followUp.follow_up_type)) {
+      continue;
+    }
+
     const bucket = getFollowUpBucket(followUp.due_at);
-    if (bucket === "overdue") overdueFollowUps.push(item);
-    else if (bucket === "today") todayFollowUps.push(item);
-    else upcomingFollowUps.push(item);
+    const item = buildFollowUpItem(
+      followUp,
+      companyById,
+      contactNameByCompany,
+      bucket === "overdue"
+        ? "Follow up now — this item is past due."
+        : "Complete today's scheduled follow-up.",
+    );
+
+    if (!item) continue;
+
+    if (bucket === "overdue") overdueAll.push(item);
+    else if (bucket === "today") todayAll.push(item);
   }
 
-  const inactivityCutoff = getInactivityCutoff();
+  const openOpportunitiesAll = opportunities
+    .filter((opportunity) => workingCompanyIds.has(opportunity.company_id))
+    .map((opportunity) => {
+      const company = companyById.get(opportunity.company_id);
+      const value = getOpportunityPipelineValue(opportunity);
 
-  const inactiveCompanies = limit(
-    companies
-      .filter((company) => {
-        const lastActivity =
-          lastActivityByCompany.get(company.id) ?? company.last_contact_at;
-        if (!lastActivity) return true;
-        return new Date(lastActivity) < inactivityCutoff;
-      })
-      .map((company) => ({
-        companyId: company.id,
-        companyName: company.name,
-        salesStage: isSalesStage(company.sales_stage)
-          ? company.sales_stage
-          : DEFAULT_SALES_STAGE,
-        lastContactAt: formatDateLabel(company.last_contact_at),
-      })),
-  );
-
-  const newLeadNoActivity = limit(
-    companies
-      .filter((company) => {
-        const stage = isSalesStage(company.sales_stage)
-          ? company.sales_stage
-          : DEFAULT_SALES_STAGE;
-        return (
-          stage === "New Lead" &&
-          !activityCountByCompany.has(company.id) &&
-          !company.last_contact_at
-        );
-      })
-      .map((company) => ({
-        companyId: company.id,
-        companyName: company.name,
-        salesStage: "New Lead" as SalesStage,
-        lastContactAt: formatDateLabel(company.last_contact_at),
-      })),
-  );
-
-  const inFollowUpNoPendingFollowUp = limit(
-    companies
-      .filter((company) => {
-        const stage = isSalesStage(company.sales_stage)
-          ? company.sales_stage
-          : DEFAULT_SALES_STAGE;
-        return (
-          stage === "In Follow-up" &&
-          !companiesWithPendingFollowUp.has(company.id)
-        );
-      })
-      .map((company) => ({
-        companyId: company.id,
-        companyName: company.name,
-        salesStage: "In Follow-up" as SalesStage,
-        lastContactAt: formatDateLabel(company.last_contact_at),
-      })),
-  );
-
-  const quotedOpportunities = limit(
-    opportunities
-      .filter((opportunity) => opportunity.status === "quoted")
-      .map((opportunity) => ({
+      return {
         companyId: opportunity.company_id,
-        companyName:
-          companyById.get(opportunity.company_id)?.name ??
-          unwrapCompanyName(opportunity.companies),
+        companyName: company?.name ?? unwrapCompanyName(opportunity.companies),
+        opportunityId: opportunity.id,
+        name: opportunity.name?.trim() || "Load opportunity",
         status: opportunity.status,
-        lane: formatLane(
-          opportunity.lane_origin,
-          opportunity.lane_destination,
-        ),
-        updatedAt:
-          formatDateLabel(opportunity.updated_at) ?? opportunity.updated_at,
-      })),
+        statusLabel: getOpportunityStageLabel(opportunity.status),
+        value,
+        valueLabel: value > 0 ? formatPipelineValue(value) : null,
+        expectedCloseDate: formatDateLabel(opportunity.expected_close_date),
+        nextStep: opportunity.next_step?.trim() || null,
+        suggestedAction: "Advance this opportunity to the next stage.",
+      } satisfies ReminderOpenOpportunityItem;
+    });
+
+  const openOpportunityCompanyIds = new Set(
+    openOpportunitiesAll.map((opportunity) => opportunity.companyId),
+  );
+  const companiesWithPendingFollowUp = new Set(
+    followUps
+      .filter((followUp) => workingCompanyIds.has(followUp.company_id))
+      .map((followUp) => followUp.company_id),
   );
 
-  const newOpportunities = limit(
-    opportunities
-      .filter((opportunity) => opportunity.status === "prospecting")
-      .map((opportunity) => ({
-        companyId: opportunity.company_id,
-        companyName:
-          companyById.get(opportunity.company_id)?.name ??
-          unwrapCompanyName(opportunity.companies),
-        status: opportunity.status,
-        lane: formatLane(
-          opportunity.lane_origin,
-          opportunity.lane_destination,
-        ),
-        updatedAt:
-          formatDateLabel(opportunity.updated_at) ?? opportunity.updated_at,
-      })),
-  );
+  const priorityAccountsAll = companies
+    .filter((company) => isWorkingCompany(company))
+    .map((company) => {
+      let score = 0;
+      const reasons: string[] = [];
+
+      if (isHighPriority(company.priority)) {
+        score += company.priority === "Hot Lead" ? 50 : 30;
+        reasons.push(`${company.priority} priority account`);
+      }
+
+      if (openOpportunityCompanyIds.has(company.id)) {
+        score += 25;
+        reasons.push("has open opportunity");
+      }
+
+      if (companiesWithPendingFollowUp.has(company.id)) {
+        score += 20;
+        reasons.push("has upcoming follow-up");
+      }
+
+      if (company.next_follow_up_at) {
+        const nextFollowUp = new Date(company.next_follow_up_at);
+        if (
+          !Number.isNaN(nextFollowUp.getTime()) &&
+          nextFollowUp <= addDays(todayEnd, 7)
+        ) {
+          score += 10;
+          if (!reasons.includes("has upcoming follow-up")) {
+            reasons.push("follow-up due soon");
+          }
+        }
+      }
+
+      return {
+        company,
+        score,
+        reason:
+          reasons.length > 0
+            ? reasons.slice(0, 2).join("; ")
+            : "Active working account",
+      };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.company.name.localeCompare(b.company.name);
+    })
+    .map((entry) => ({
+      companyId: entry.company.id,
+      companyName: entry.company.name,
+      priority: entry.company.priority,
+      reason: entry.reason,
+    }));
+
+  const overdueFollowUps = overdueAll.slice(0, MAX_OVERDUE);
+  const todayFollowUps = todayAll.slice(0, MAX_TODAY);
+  const seasonalFollowUps = seasonalAll.slice(0, MAX_SEASONAL);
+  const openOpportunities = openOpportunitiesAll.slice(0, MAX_OPEN_OPPORTUNITIES);
+  const priorityAccounts = priorityAccountsAll.slice(0, MAX_PRIORITY_ACCOUNTS);
+
+  const topPriorities = buildTopPriorities({
+    overdueFollowUps,
+    todayFollowUps,
+    seasonalFollowUps,
+    openOpportunities,
+  });
 
   return {
     userId,
     brokerEmail,
     brokerName,
-    todayFollowUps: limit(todayFollowUps),
-    overdueFollowUps: limit(overdueFollowUps),
-    upcomingFollowUps: limit(upcomingFollowUps),
-    inactiveCompanies,
-    newLeadNoActivity,
-    inFollowUpNoPendingFollowUp,
-    quotedOpportunities,
-    newOpportunities,
+    topPriorities,
+    overdueFollowUps,
+    todayFollowUps,
+    seasonalFollowUps,
+    openOpportunities,
+    priorityAccounts,
+    hasMoreOverdue: overdueAll.length > MAX_OVERDUE,
+    hasMoreToday: todayAll.length > MAX_TODAY,
+    hasMoreSeasonal: seasonalAll.length > MAX_SEASONAL,
+    hasMoreOpenOpportunities:
+      openOpportunitiesAll.length > MAX_OPEN_OPPORTUNITIES,
+    hasMorePriorityAccounts:
+      priorityAccountsAll.length > MAX_PRIORITY_ACCOUNTS,
   };
 }
 
@@ -350,15 +554,29 @@ export function getBrokerReminderCounts(
   data: BrokerReminderData,
 ): BrokerReminderCounts {
   return {
-    todayFollowUps: data.todayFollowUps.length,
+    topPriorities: data.topPriorities.length,
     overdueFollowUps: data.overdueFollowUps.length,
-    upcomingFollowUps: data.upcomingFollowUps.length,
-    inactiveCompanies: data.inactiveCompanies.length,
-    newLeadNoActivity: data.newLeadNoActivity.length,
-    inFollowUpNoPendingFollowUp: data.inFollowUpNoPendingFollowUp.length,
-    quotedOpportunities: data.quotedOpportunities.length,
-    newOpportunities: data.newOpportunities.length,
+    todayFollowUps: data.todayFollowUps.length,
+    seasonalFollowUps: data.seasonalFollowUps.length,
+    openOpportunities: data.openOpportunities.length,
+    priorityAccounts: data.priorityAccounts.length,
   };
+}
+
+export function buildRuleBasedSuggestedFocus(data: BrokerReminderData): string {
+  if (
+    data.overdueFollowUps.length > 0 ||
+    data.seasonalFollowUps.length > 0 ||
+    data.openOpportunities.length > 0
+  ) {
+    return "Start with overdue follow-ups, then warm up seasonal accounts, then advance open opportunities.";
+  }
+
+  if (data.todayFollowUps.length > 0) {
+    return "Work through today's follow-ups, then review priority accounts and open opportunities.";
+  }
+
+  return "Use today to advance priority accounts, update notes, and prepare upcoming seasonal opportunities.";
 }
 
 export function buildRuleBasedSuggestedActions(
@@ -374,45 +592,33 @@ export function buildRuleBasedSuggestedActions(
 
   if (data.todayFollowUps.length > 0) {
     actions.push(
-      `Work through ${data.todayFollowUps.length} follow-up${data.todayFollowUps.length === 1 ? "" : "s"} due today.`,
+      `Complete ${data.todayFollowUps.length} follow-up${data.todayFollowUps.length === 1 ? "" : "s"} due today.`,
     );
   }
 
-  if (data.quotedOpportunities.length > 0) {
+  if (data.seasonalFollowUps.length > 0) {
     actions.push(
-      `Follow up on ${data.quotedOpportunities.length} quoted opportunit${data.quotedOpportunities.length === 1 ? "y" : "ies"} while they are still warm.`,
+      `Warm up ${data.seasonalFollowUps.length} seasonal account${data.seasonalFollowUps.length === 1 ? "" : "s"} before the target date.`,
     );
   }
 
-  if (data.inactiveCompanies.length > 0) {
+  if (data.openOpportunities.length > 0) {
     actions.push(
-      `Re-engage ${data.inactiveCompanies.length} account${data.inactiveCompanies.length === 1 ? "" : "s"} with no recent activity.`,
+      `Advance ${data.openOpportunities.length} open opportunit${data.openOpportunities.length === 1 ? "y" : "ies"} to the next stage.`,
     );
   }
 
-  if (data.newLeadNoActivity.length > 0) {
+  if (data.priorityAccounts.length > 0) {
     actions.push(
-      `Make first contact with ${data.newLeadNoActivity.length} new lead${data.newLeadNoActivity.length === 1 ? "" : "s"} that have no activity logged.`,
-    );
-  }
-
-  if (data.inFollowUpNoPendingFollowUp.length > 0) {
-    actions.push(
-      `Schedule next steps for ${data.inFollowUpNoPendingFollowUp.length} in follow-up account${data.inFollowUpNoPendingFollowUp.length === 1 ? "" : "s"} without a pending follow-up.`,
-    );
-  }
-
-  if (data.newOpportunities.length > 0) {
-    actions.push(
-      `Review ${data.newOpportunities.length} new load opportunit${data.newOpportunities.length === 1 ? "y" : "ies"} and decide whether to quote.`,
+      `Review ${data.priorityAccounts.length} priority working account${data.priorityAccounts.length === 1 ? "" : "s"}.`,
     );
   }
 
   if (actions.length === 0) {
     actions.push(
-      "Pipeline looks quiet — use today to prospect, update notes, or advance quoted opportunities.",
+      "Pipeline looks quiet — use today to prospect, update notes, or prepare upcoming work.",
     );
   }
 
-  return actions.slice(0, 6);
+  return actions.slice(0, 5);
 }
