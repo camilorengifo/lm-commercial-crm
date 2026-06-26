@@ -5,6 +5,9 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
+import { CompaniesBulkActiveModal } from "@/components/companies-bulk-active-modal";
+import { CompaniesBulkArchiveModal } from "@/components/companies-bulk-archive-modal";
+import { CompaniesBulkPauseModal } from "@/components/companies-bulk-pause-modal";
 import {
   COMPANY_PRIORITIES,
   COUNTRY_OPTIONS,
@@ -69,6 +72,13 @@ export function CompaniesPage() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [bulkArchiveOpen, setBulkArchiveOpen] = useState(false);
+  const [bulkPauseOpen, setBulkPauseOpen] = useState(false);
+  const [bulkActiveOpen, setBulkActiveOpen] = useState(false);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
   const fetchCompanies = useCallback(async (userId: string) => {
     setFetchError(null);
@@ -141,6 +151,91 @@ export function CompaniesPage() {
 
     return sortCompanies(rows, sortBy);
   }, [companies, search, countryFilter, priorityFilter, accountStatusFilter, sortBy]);
+
+  const visibleCompanyIds = useMemo(
+    () => filteredCompanies.map((company) => company.id),
+    [filteredCompanies],
+  );
+
+  const selectedVisibleCount = useMemo(
+    () => visibleCompanyIds.filter((id) => selectedCompanyIds.has(id)).length,
+    [visibleCompanyIds, selectedCompanyIds],
+  );
+
+  const allVisibleSelected =
+    visibleCompanyIds.length > 0 &&
+    visibleCompanyIds.every((companyId) => selectedCompanyIds.has(companyId));
+
+  const selectedCompanyIdList = useMemo(
+    () => Array.from(selectedCompanyIds),
+    [selectedCompanyIds],
+  );
+
+  function toggleCompanySelection(companyId: string) {
+    setSelectedCompanyIds((current) => {
+      const next = new Set(current);
+      if (next.has(companyId)) {
+        next.delete(companyId);
+      } else {
+        next.add(companyId);
+      }
+      return next;
+    });
+  }
+
+  function toggleSelectAllVisible() {
+    setSelectedCompanyIds((current) => {
+      const next = new Set(current);
+      if (allVisibleSelected) {
+        for (const companyId of visibleCompanyIds) {
+          next.delete(companyId);
+        }
+      } else {
+        for (const companyId of visibleCompanyIds) {
+          next.add(companyId);
+        }
+      }
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelectedCompanyIds(new Set());
+  }
+
+  function archiveSuccessMessage(updated: number): string {
+    if (
+      accountStatusFilter !== "archived" &&
+      accountStatusFilter !== "all"
+    ) {
+      return `${updated} account${updated === 1 ? "" : "s"} archived and hidden from the working list.`;
+    }
+
+    return `${updated} account${updated === 1 ? "" : "s"} archived successfully.`;
+  }
+
+  async function handleBulkCompleted(
+    action: "archive" | "pause" | "active",
+    result: { updated: number; message: string },
+  ) {
+    if (!user) return;
+
+    setBulkSubmitting(true);
+    clearSelection();
+
+    let message = result.message;
+    if (action === "archive") {
+      message = archiveSuccessMessage(result.updated);
+    } else if (action === "pause") {
+      message = `${result.updated} account${result.updated === 1 ? "" : "s"} paused successfully.`;
+    } else {
+      message = `${result.updated} account${result.updated === 1 ? "" : "s"} marked as active.`;
+    }
+
+    setSuccessMessage(message);
+    await fetchCompanies(user.id);
+    setBulkSubmitting(false);
+  }
 
   function resetFilters() {
     setSearch("");
@@ -345,6 +440,54 @@ export function CompaniesPage() {
           <p className="mb-4 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-800">
             {successMessage}
           </p>
+        )}
+
+        {selectedCompanyIds.size > 0 && (
+          <div className="mb-4 flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm font-medium text-zinc-700">
+              {selectedCompanyIds.size} account
+              {selectedCompanyIds.size === 1 ? "" : "s"} selected
+              {selectedVisibleCount !== selectedCompanyIds.size && (
+                <span className="ml-1 font-normal text-zinc-500">
+                  ({selectedVisibleCount} visible)
+                </span>
+              )}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setBulkArchiveOpen(true)}
+                disabled={bulkSubmitting}
+                className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Archive selected
+              </button>
+              <button
+                type="button"
+                onClick={() => setBulkPauseOpen(true)}
+                disabled={bulkSubmitting}
+                className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Pause selected
+              </button>
+              <button
+                type="button"
+                onClick={() => setBulkActiveOpen(true)}
+                disabled={bulkSubmitting}
+                className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Mark as Active
+              </button>
+              <button
+                type="button"
+                onClick={clearSelection}
+                disabled={bulkSubmitting}
+                className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Clear selection
+              </button>
+            </div>
+          </div>
         )}
 
         {fetchError && (
@@ -608,9 +751,32 @@ export function CompaniesPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
+              <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-2">
+                <button
+                  type="button"
+                  onClick={toggleSelectAllVisible}
+                  className="text-sm font-medium text-zinc-600 transition hover:text-zinc-900"
+                >
+                  {allVisibleSelected ? "Deselect all visible" : "Select all visible"}
+                </button>
+                {selectedVisibleCount > 0 && (
+                  <span className="text-sm text-zinc-500">
+                    {selectedVisibleCount} selected
+                  </span>
+                )}
+              </div>
               <table className="w-full min-w-[800px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-zinc-200 bg-zinc-50">
+                    <th className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={allVisibleSelected}
+                        onChange={toggleSelectAllVisible}
+                        aria-label="Select all visible companies"
+                        className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500"
+                      />
+                    </th>
                     <th className="px-4 py-3 font-medium text-zinc-600">
                       Company
                     </th>
@@ -650,6 +816,15 @@ export function CompaniesPage() {
 
                     return (
                     <tr key={company.id} className="hover:bg-zinc-50/50">
+                      <td className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedCompanyIds.has(company.id)}
+                          onChange={() => toggleCompanySelection(company.id)}
+                          aria-label={`Select ${company.name}`}
+                          className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500"
+                        />
+                      </td>
                       <td className="px-4 py-3">
                         <Link
                           href={`/companies/${company.id}`}
@@ -714,6 +889,28 @@ export function CompaniesPage() {
             </div>
           )}
         </div>
+
+        <CompaniesBulkArchiveModal
+          open={bulkArchiveOpen}
+          selectedCount={selectedCompanyIds.size}
+          companyIds={selectedCompanyIdList}
+          onClose={() => setBulkArchiveOpen(false)}
+          onCompleted={(result) => void handleBulkCompleted("archive", result)}
+        />
+        <CompaniesBulkPauseModal
+          open={bulkPauseOpen}
+          selectedCount={selectedCompanyIds.size}
+          companyIds={selectedCompanyIdList}
+          onClose={() => setBulkPauseOpen(false)}
+          onCompleted={(result) => void handleBulkCompleted("pause", result)}
+        />
+        <CompaniesBulkActiveModal
+          open={bulkActiveOpen}
+          selectedCount={selectedCompanyIds.size}
+          companyIds={selectedCompanyIdList}
+          onClose={() => setBulkActiveOpen(false)}
+          onCompleted={(result) => void handleBulkCompleted("active", result)}
+        />
     </AuthenticatedLayout>
   );
 }

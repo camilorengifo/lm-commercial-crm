@@ -1,0 +1,150 @@
+"use client";
+
+import { FormEvent, useEffect, useState } from "react";
+import { bulkUpdateCompanyAccountStatus } from "@/lib/companyClient";
+import {
+  BULK_PAUSE_DISPOSITIONS,
+  type BulkPauseDisposition,
+} from "@/lib/accountStatus";
+
+export function CompaniesBulkPauseModal({
+  open,
+  selectedCount,
+  companyIds,
+  onClose,
+  onCompleted,
+}: {
+  open: boolean;
+  selectedCount: number;
+  companyIds: string[];
+  onClose: () => void;
+  onCompleted: (result: { updated: number; message: string }) => void;
+}) {
+  const [disposition, setDisposition] = useState<BulkPauseDisposition | "">("");
+  const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setDisposition("");
+    setNotes("");
+    setError(null);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !submitting) onClose();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, submitting, onClose]);
+
+  if (!open) return null;
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError(null);
+
+    const { data, error: requestError } = await bulkUpdateCompanyAccountStatus({
+      companyIds,
+      accountStatus: "paused",
+      accountDisposition: disposition || null,
+      archiveNotes: notes.trim() || null,
+    });
+
+    setSubmitting(false);
+
+    if (requestError || !data) {
+      setError(requestError ?? "Unable to pause accounts.");
+      return;
+    }
+
+    onCompleted({ updated: data.updated, message: data.message });
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-lg rounded-xl border border-zinc-200 bg-white p-6 shadow-xl">
+        <h2 className="text-lg font-semibold text-zinc-900">Pause selected accounts</h2>
+        <p className="mt-2 text-sm text-zinc-600">
+          You are about to pause {selectedCount} account
+          {selectedCount === 1 ? "" : "s"}. Paused accounts will remain visible in
+          the working list unless filtered out.
+        </p>
+
+        <form onSubmit={handleSubmit} className="mt-5 space-y-4">
+          <div>
+            <label
+              htmlFor="bulk-pause-disposition"
+              className="mb-1.5 block text-sm font-medium text-zinc-700"
+            >
+              Disposition
+            </label>
+            <select
+              id="bulk-pause-disposition"
+              value={disposition}
+              onChange={(event) =>
+                setDisposition(event.target.value as BulkPauseDisposition | "")
+              }
+              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+            >
+              <option value="">Select a disposition (optional)</option>
+              {BULK_PAUSE_DISPOSITIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label
+              htmlFor="bulk-pause-notes"
+              className="mb-1.5 block text-sm font-medium text-zinc-700"
+            >
+              Notes
+            </label>
+            <textarea
+              id="bulk-pause-notes"
+              rows={3}
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              placeholder="Optional notes about why these accounts are being paused."
+            />
+          </div>
+
+          {error && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </p>
+          )}
+
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={submitting}
+              className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {submitting ? "Pausing..." : "Pause accounts"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

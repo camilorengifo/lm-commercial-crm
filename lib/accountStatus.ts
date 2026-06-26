@@ -27,9 +27,24 @@ export const ACCOUNT_DISPOSITIONS = [
   { value: "wrong_contact", label: "Wrong contact" },
   { value: "already_covered", label: "Already covered" },
   { value: "future_opportunity", label: "Future opportunity" },
+  { value: "call_back_later", label: "Call back later" },
   { value: "do_not_pursue", label: "Do not pursue" },
   { value: "other", label: "Other" },
 ] as const;
+
+export const BULK_ARCHIVE_DISPOSITIONS = ACCOUNT_DISPOSITIONS.filter(
+  (option) => option.value !== "working",
+);
+
+export const BULK_PAUSE_DISPOSITIONS = [
+  { value: "future_opportunity", label: "Future opportunity" },
+  { value: "no_current_freight", label: "No current freight" },
+  { value: "call_back_later", label: "Call back later" },
+  { value: "other", label: "Other" },
+] as const;
+
+export type BulkPauseDisposition =
+  (typeof BULK_PAUSE_DISPOSITIONS)[number]["value"];
 
 export type AccountDisposition = (typeof ACCOUNT_DISPOSITIONS)[number]["value"];
 

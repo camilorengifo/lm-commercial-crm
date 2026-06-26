@@ -90,3 +90,24 @@ export async function updateCompanyAccountStatus(input: {
     archiveNotes: input.archiveNotes ?? null,
   });
 }
+
+export async function bulkUpdateCompanyAccountStatus(input: {
+  companyIds: string[];
+  accountStatus: string;
+  accountDisposition?: string | null;
+  archiveReason?: string | null;
+  archiveNotes?: string | null;
+}) {
+  return companyRequest<{
+    message: string;
+    updated: number;
+    failed: number;
+    errors?: string[];
+  }>("/api/companies/account-status/bulk", {
+    companyIds: input.companyIds,
+    accountStatus: input.accountStatus,
+    accountDisposition: input.accountDisposition ?? null,
+    archiveReason: input.archiveReason ?? null,
+    archiveNotes: input.archiveNotes ?? null,
+  });
+}
