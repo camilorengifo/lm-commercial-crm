@@ -10,9 +10,14 @@ import {
   deleteAdminUser,
   fetchAdminUsers,
   inviteAdminUser,
+  removeAdminUser,
   updateAdminUser,
 } from "@/lib/adminClient";
 import type { AdminUserListItem } from "@/lib/adminUserManagement";
+import {
+  AdminDeleteUserModal,
+  type AdminDeleteUserAssignee,
+} from "@/components/admin-delete-user-modal";
 import { formatDate, formatDateTime } from "@/lib/crmFormat";
 import {
   USER_ROLES,
@@ -43,6 +48,13 @@ export function AdminUsersPage() {
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AdminUserListItem | null>(
+    null,
+  );
+  const [deleteStep, setDeleteStep] = useState<"options" | "confirm">("options");
+  const [deleteReassignToUserId, setDeleteReassignToUserId] = useState("");
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleteModalError, setDeleteModalError] = useState<string | null>(null);
   const [deleteFeedback, setDeleteFeedback] = useState<{
     type: "success" | "error";
     message: string;
@@ -142,26 +154,92 @@ export function AdminUsersPage() {
     setUpdatingUserId(null);
   }
 
-  async function handleDelete(targetUserId: string) {
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this user? This cannot be undone.",
-    );
+  async function handleDeleteClick(row: AdminUserListItem) {
+    if (!row.ownsCrmRecords) {
+      const confirmed = window.confirm(
+        "Are you sure you want to delete this user? This cannot be undone.",
+      );
 
-    if (!confirmed) {
+      if (!confirmed) {
+        return;
+      }
+
+      setDeletingUserId(row.id);
+      setDeleteFeedback(null);
+      setFetchError(null);
+
+      const { data, error } = await deleteAdminUser(row.id);
+
+      if (error || !data) {
+        setDeleteFeedback({
+          type: "error",
+          message: error ?? "Unable to delete user.",
+        });
+        setDeletingUserId(null);
+        return;
+      }
+
+      setDeleteFeedback({
+        type: "success",
+        message: data.message,
+      });
+      await loadUsers();
+      setDeletingUserId(null);
       return;
     }
 
-    setDeletingUserId(targetUserId);
-    setDeleteFeedback(null);
-    setFetchError(null);
+    setDeleteTarget(row);
+    setDeleteStep("options");
+    setDeleteReassignToUserId("");
+    setDeleteConfirmText("");
+    setDeleteModalError(null);
+  }
 
-    const { data, error } = await deleteAdminUser(targetUserId);
+  function closeDeleteModal() {
+    if (deletingUserId) {
+      return;
+    }
+
+    setDeleteTarget(null);
+    setDeleteStep("options");
+    setDeleteReassignToUserId("");
+    setDeleteConfirmText("");
+    setDeleteModalError(null);
+  }
+
+  const assignableDeleteTargets = users
+    .filter(
+      (row) =>
+        row.id !== deleteTarget?.id &&
+        row.isActive &&
+        (row.role === "broker" || row.role === "admin"),
+    )
+    .map(
+      (row): AdminDeleteUserAssignee => ({
+        userId: row.id,
+        name: row.fullName?.trim() || row.email,
+        email: row.email,
+      }),
+    )
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  async function handleReassignRecords() {
+    if (!deleteTarget || !deleteReassignToUserId) {
+      setDeleteModalError("Select a broker or admin to receive the records.");
+      return;
+    }
+
+    setDeletingUserId(deleteTarget.id);
+    setDeleteModalError(null);
+
+    const { data, error } = await removeAdminUser({
+      userId: deleteTarget.id,
+      mode: "reassign",
+      reassignToUserId: deleteReassignToUserId,
+    });
 
     if (error || !data) {
-      setDeleteFeedback({
-        type: "error",
-        message: error ?? "Unable to delete user.",
-      });
+      setDeleteModalError(error ?? "Unable to reassign records.");
       setDeletingUserId(null);
       return;
     }
@@ -172,6 +250,78 @@ export function AdminUsersPage() {
     });
     await loadUsers();
     setDeletingUserId(null);
+    closeDeleteModal();
+  }
+
+  async function handleDeactivateUser() {
+    if (!deleteTarget) {
+      return;
+    }
+
+    setDeletingUserId(deleteTarget.id);
+    setDeleteModalError(null);
+
+    const { data, error } = await removeAdminUser({
+      userId: deleteTarget.id,
+      mode: "deactivate",
+    });
+
+    if (error || !data) {
+      setDeleteModalError(error ?? "Unable to deactivate user.");
+      setDeletingUserId(null);
+      return;
+    }
+
+    setDeleteFeedback({
+      type: "success",
+      message: data.message,
+    });
+    await loadUsers();
+    setDeletingUserId(null);
+    closeDeleteModal();
+  }
+
+  function handleDeleteAnyway() {
+    setDeleteStep("confirm");
+    setDeleteConfirmText("");
+    setDeleteModalError(null);
+  }
+
+  async function handleConfirmDelete() {
+    if (!deleteTarget || deleteConfirmText !== "DELETE") {
+      return;
+    }
+
+    if (!deleteReassignToUserId) {
+      setDeleteModalError(
+        "Select a broker or admin to receive the records before deleting.",
+      );
+      return;
+    }
+
+    setDeletingUserId(deleteTarget.id);
+    setDeleteModalError(null);
+
+    const { data, error } = await removeAdminUser({
+      userId: deleteTarget.id,
+      mode: "delete",
+      reassignToUserId: deleteReassignToUserId,
+      confirmedForceDelete: true,
+    });
+
+    if (error || !data) {
+      setDeleteModalError(error ?? "Unable to delete user.");
+      setDeletingUserId(null);
+      return;
+    }
+
+    setDeleteFeedback({
+      type: "success",
+      message: data.message,
+    });
+    await loadUsers();
+    setDeletingUserId(null);
+    closeDeleteModal();
   }
 
   if (loading) {
@@ -437,13 +587,20 @@ export function AdminUsersPage() {
                       {row.openOpportunities}
                     </td>
                     <td className="px-3 py-3 text-sm">
+                      {row.ownsCrmRecords && (
+                        <p className="mb-2 max-w-xs text-xs text-amber-800">
+                          This user owns CRM records. You can reassign,
+                          deactivate, or proceed with deletion after
+                          confirmation.
+                        </p>
+                      )}
                       <button
                         type="button"
                         disabled={isSelf || isUpdating || isDeleting}
-                        onClick={() => handleDelete(row.id)}
+                        onClick={() => handleDeleteClick(row)}
                         className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        {isDeleting ? "Deleting..." : "Delete"}
+                        {isDeleting ? "Removing..." : "Delete"}
                       </button>
                     </td>
                   </tr>
@@ -453,6 +610,24 @@ export function AdminUsersPage() {
           </table>
         </div>
       </section>
+
+      <AdminDeleteUserModal
+        open={deleteTarget !== null}
+        targetUser={deleteTarget}
+        assignableOwners={assignableDeleteTargets}
+        step={deleteStep}
+        reassignToUserId={deleteReassignToUserId}
+        confirmText={deleteConfirmText}
+        submitting={deletingUserId !== null}
+        error={deleteModalError}
+        onReassignToUserIdChange={setDeleteReassignToUserId}
+        onConfirmTextChange={setDeleteConfirmText}
+        onCancel={closeDeleteModal}
+        onReassignRecords={handleReassignRecords}
+        onDeactivateUser={handleDeactivateUser}
+        onDeleteAnyway={handleDeleteAnyway}
+        onConfirmDelete={handleConfirmDelete}
+      />
     </AuthenticatedLayout>
   );
 }

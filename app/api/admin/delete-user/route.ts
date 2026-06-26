@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import {
   UserDeleteBlockedError,
-  deleteAdminUser,
+  removeAdminUser,
+  type AdminUserRemoveMode,
 } from "@/lib/adminUserManagement";
 import { requireAdminFromRequest } from "@/lib/adminAuthServer";
 
 interface DeleteUserBody {
   userId?: string;
+  mode?: AdminUserRemoveMode;
+  reassignToUserId?: string;
+  confirmedForceDelete?: boolean;
 }
 
 export async function DELETE(request: Request) {
@@ -28,10 +32,18 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "User ID is required." }, { status: 400 });
   }
 
+  const mode = body.mode ?? "delete";
+  if (mode !== "delete" && mode !== "deactivate" && mode !== "reassign") {
+    return NextResponse.json({ error: "Invalid removal mode." }, { status: 400 });
+  }
+
   try {
-    const result = await deleteAdminUser({
+    const result = await removeAdminUser({
       targetUserId: userId,
       actingAdminId: auth.context.user.id,
+      mode,
+      reassignToUserId: body.reassignToUserId,
+      confirmedForceDelete: body.confirmedForceDelete === true,
     });
 
     return NextResponse.json(result);
@@ -41,7 +53,7 @@ export async function DELETE(request: Request) {
     }
 
     const message =
-      error instanceof Error ? error.message : "Unable to delete user.";
+      error instanceof Error ? error.message : "Unable to remove user.";
 
     return NextResponse.json({ error: message }, { status: 400 });
   }

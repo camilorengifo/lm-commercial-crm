@@ -73,10 +73,25 @@ export async function updateAdminUser(input: {
 }
 
 export async function deleteAdminUser(userId: string) {
-  return adminRequest<{ message: string }>("/api/admin/delete-user", {
-    method: "DELETE",
-    body: JSON.stringify({ userId }),
+  return removeAdminUser({
+    userId,
+    mode: "delete",
   });
+}
+
+export async function removeAdminUser(input: {
+  userId: string;
+  mode: "delete" | "deactivate" | "reassign";
+  reassignToUserId?: string;
+  confirmedForceDelete?: boolean;
+}) {
+  return adminRequest<{ message: string; reassignedCompanies?: number }>(
+    "/api/admin/delete-user",
+    {
+      method: "DELETE",
+      body: JSON.stringify(input),
+    },
+  );
 }
 
 export interface ReassignCompaniesResult {
