@@ -31,3 +31,8 @@ export function hashIndicatesInvitation(hash: string): boolean {
   const params = parseHashParams(hash);
   return params.type === "invite" || params.type === "signup";
 }
+
+export function hashIndicatesRecovery(hash: string): boolean {
+  const params = parseHashParams(hash);
+  return params.type === "recovery";
+}

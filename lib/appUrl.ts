@@ -30,6 +30,10 @@ export function getInviteRedirectUrl(): string {
   return `${getAppBaseUrl()}/set-password`;
 }
 
+export function getPasswordResetRedirectUrl(): string {
+  return `${getAppBaseUrl()}/reset-password`;
+}
+
 export function isLocalAppUrl(url: string): boolean {
   try {
     const { hostname } = new URL(url);

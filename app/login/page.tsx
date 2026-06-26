@@ -1,10 +1,19 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AuthError } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabaseClient";
+import {
+  buildAuthCallbackRedirect,
+  redirectPathForAuthCallback,
+} from "@/lib/authRoutes";
 import { sessionNeedsPasswordSetup } from "@/lib/invitationSession";
+import {
+  isPasswordRecoveryPending,
+  setPasswordRecoveryPending,
+} from "@/lib/passwordRecovery";
+import { supabase } from "@/lib/supabaseClient";
 import {
   fetchUserProfile,
   isActiveProfile,
@@ -59,9 +68,32 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
+    const search = window.location.search;
+    const hash = window.location.hash;
+    const authCallbackPath = redirectPathForAuthCallback(search, hash);
+
+    if (authCallbackPath && authCallbackPath !== "/login") {
+      router.replace(buildAuthCallbackRedirect(authCallbackPath, search, hash));
+      return;
+    }
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY" && session) {
+        setPasswordRecoveryPending();
+        router.replace("/reset-password");
+      }
+    });
+
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) {
         setCheckingSession(false);
+        return;
+      }
+
+      if (isPasswordRecoveryPending()) {
+        router.replace("/reset-password");
         return;
       }
 
@@ -79,6 +111,8 @@ export default function LoginPage() {
 
       router.replace("/");
     });
+
+    return () => subscription.unsubscribe();
   }, [router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -177,6 +211,11 @@ export default function LoginPage() {
               onChange={(event) => setPassword(event.target.value)}
               className="crm-input"
             />
+            <div className="mt-2 text-right">
+              <Link href="/forgot-password" className="text-sm text-slate-500 transition hover:text-slate-800">
+                Forgot your password?
+              </Link>
+            </div>
           </div>
 
           {inactiveNotice && (

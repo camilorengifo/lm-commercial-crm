@@ -4,6 +4,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
+import {
+  buildAuthCallbackRedirect,
+  redirectPathForAuthCallback,
+} from "@/lib/authRoutes";
+import {
+  isPasswordRecoveryPending,
+  setPasswordRecoveryPending,
+} from "@/lib/passwordRecovery";
 import { BrokerAssistantDashboardCard } from "@/components/broker-assistant-dashboard-card";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { ActionPlanRow, CrmAlert, CrmCard, ListPanel, PageHeader, SectionHeader, StatCard, StatGrid } from "@/components/crm-ui";
@@ -591,9 +599,32 @@ export function HomeDashboard() {
   }, []);
 
   useEffect(() => {
+    const search = window.location.search;
+    const hash = window.location.hash;
+    const authCallbackPath = redirectPathForAuthCallback(search, hash);
+
+    if (authCallbackPath) {
+      router.replace(buildAuthCallbackRedirect(authCallbackPath, search, hash));
+      return;
+    }
+
+    const {
+      data: { subscription: recoverySubscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY" && session) {
+        setPasswordRecoveryPending();
+        router.replace("/reset-password");
+      }
+    });
+
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) {
         router.replace("/login");
+        return;
+      }
+
+      if (isPasswordRecoveryPending()) {
+        router.replace("/reset-password");
         return;
       }
 
@@ -608,9 +639,14 @@ export function HomeDashboard() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!session) {
         router.replace("/login");
+        return;
+      }
+
+      if (event === "PASSWORD_RECOVERY" || isPasswordRecoveryPending()) {
+        router.replace("/reset-password");
         return;
       }
 
@@ -620,7 +656,10 @@ export function HomeDashboard() {
       await loadDashboard(session.user.id);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      recoverySubscription.unsubscribe();
+      subscription.unsubscribe();
+    };
   }, [router, loadDashboard]);
 
   async function handleMarkDone(followUp: FollowUpDashboardItem) {
