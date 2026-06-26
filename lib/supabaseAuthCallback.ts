@@ -3,6 +3,7 @@ import {
   authCallbackIndicatesInvite,
   authCallbackIndicatesRecovery,
 } from "@/lib/authRoutes";
+import { establishInviteSessionViaApi } from "@/lib/inviteAuthClient";
 import {
   hashIndicatesInvitation,
   hashIndicatesRecovery,
@@ -17,14 +18,15 @@ export type AuthCallbackSessionKind = "recovery" | "invite" | "default";
 export type EstablishSessionResult =
   | { status: "session"; kind: AuthCallbackSessionKind }
   | { status: "pending" }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; reason?: string; email?: string };
 
 function resolveSessionKind(
   search: string,
   hash: string,
+  pathname?: string,
 ): AuthCallbackSessionKind {
   if (
-    authCallbackIndicatesInvite(search, hash) ||
+    authCallbackIndicatesInvite(search, hash, pathname) ||
     hashIndicatesInvitation(hash)
   ) {
     return "invite";
@@ -49,6 +51,7 @@ function markRecoveryIfNeeded(kind: AuthCallbackSessionKind): void {
 async function getExistingSessionKind(
   search: string,
   hash: string,
+  pathname?: string,
 ): Promise<EstablishSessionResult | null> {
   const {
     data: { session },
@@ -62,14 +65,67 @@ async function getExistingSessionKind(
     return { status: "session", kind: "invite" };
   }
 
-  const kind = resolveSessionKind(search, hash);
+  const kind = resolveSessionKind(search, hash, pathname);
   markRecoveryIfNeeded(kind);
   return { status: "session", kind };
+}
+
+async function tryServerInviteSession(
+  search: string,
+  hash: string,
+): Promise<EstablishSessionResult | null> {
+  const params = new URLSearchParams(search);
+  const hashParams = parseHashParams(hash);
+  const code = params.get("code");
+  const tokenHash = params.get("token_hash");
+  const type = params.get("type") ?? hashParams.type;
+
+  if (!code && !tokenHash) {
+    return null;
+  }
+
+  const serverResult = await establishInviteSessionViaApi({
+    code,
+    tokenHash,
+    type,
+  });
+
+  if (
+    serverResult.ok &&
+    serverResult.accessToken &&
+    serverResult.refreshToken
+  ) {
+    const { error } = await supabase.auth.setSession({
+      access_token: serverResult.accessToken,
+      refresh_token: serverResult.refreshToken,
+    });
+
+    if (error) {
+      return {
+        status: "error",
+        message: error.message,
+      };
+    }
+
+    return { status: "session", kind: "invite" };
+  }
+
+  if (!serverResult.ok && serverResult.reason) {
+    return {
+      status: "error",
+      message: serverResult.error ?? "Unable to verify invitation.",
+      reason: serverResult.reason,
+      email: serverResult.email,
+    };
+  }
+
+  return null;
 }
 
 async function establishSessionFromHash(
   search: string,
   hash: string,
+  pathname?: string,
 ): Promise<EstablishSessionResult> {
   const hashParams = parseHashParams(hash);
   const accessToken = hashParams.access_token;
@@ -82,16 +138,21 @@ async function establishSessionFromHash(
     });
 
     if (error) {
+      const serverResult = await tryServerInviteSession(search, hash);
+      if (serverResult) {
+        return serverResult;
+      }
+
       return { status: "error", message: error.message };
     }
 
-    const kind = resolveSessionKind(search, hash);
+    const kind = resolveSessionKind(search, hash, pathname);
     markRecoveryIfNeeded(kind);
     return { status: "session", kind };
   }
 
   for (let attempt = 0; attempt < 12; attempt += 1) {
-    const existing = await getExistingSessionKind(search, hash);
+    const existing = await getExistingSessionKind(search, hash, pathname);
     if (existing) {
       return existing;
     }
@@ -105,13 +166,14 @@ async function establishSessionFromHash(
 export async function establishSessionFromAuthCallback(
   search: string,
   hash: string,
+  pathname = "/set-password",
 ): Promise<EstablishSessionResult> {
   const params = new URLSearchParams(search);
   const code = params.get("code");
   const tokenHash = params.get("token_hash");
   const type = params.get("type");
 
-  const existingSession = await getExistingSessionKind(search, hash);
+  const existingSession = await getExistingSessionKind(search, hash, pathname);
   if (existingSession) {
     return existingSession;
   }
@@ -120,15 +182,27 @@ export async function establishSessionFromAuthCallback(
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (error) {
-      const afterExchangeAttempt = await getExistingSessionKind(search, hash);
+      const afterExchangeAttempt = await getExistingSessionKind(
+        search,
+        hash,
+        pathname,
+      );
       if (afterExchangeAttempt) {
         return afterExchangeAttempt;
+      }
+
+      const inviteKind = resolveSessionKind(search, hash, pathname);
+      if (inviteKind === "invite") {
+        const serverResult = await tryServerInviteSession(search, hash);
+        if (serverResult) {
+          return serverResult;
+        }
       }
 
       return { status: "error", message: error.message };
     }
 
-    const kind = resolveSessionKind(search, hash);
+    const kind = resolveSessionKind(search, hash, pathname);
     markRecoveryIfNeeded(kind);
     return { status: "session", kind };
   }
@@ -140,10 +214,18 @@ export async function establishSessionFromAuthCallback(
     });
 
     if (error) {
+      const inviteKind = resolveSessionKind(search, hash, pathname);
+      if (inviteKind === "invite") {
+        const serverResult = await tryServerInviteSession(search, hash);
+        if (serverResult) {
+          return serverResult;
+        }
+      }
+
       return { status: "error", message: error.message };
     }
 
-    const kind = resolveSessionKind(search, hash);
+    const kind = resolveSessionKind(search, hash, pathname);
     markRecoveryIfNeeded(kind);
     return { status: "session", kind };
   }
@@ -153,7 +235,14 @@ export async function establishSessionFromAuthCallback(
     hashIndicatesInvitation(hash) ||
     parseHashParams(hash).access_token
   ) {
-    return establishSessionFromHash(search, hash);
+    return establishSessionFromHash(search, hash, pathname);
+  }
+
+  if (authCallbackIndicatesInvite(search, hash, pathname)) {
+    const serverResult = await tryServerInviteSession(search, hash);
+    if (serverResult) {
+      return serverResult;
+    }
   }
 
   return { status: "pending" };

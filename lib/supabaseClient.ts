@@ -11,7 +11,8 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    flowType: "pkce",
+    // Email invite/recovery links open in a fresh browser without a PKCE verifier.
+    flowType: "implicit",
     detectSessionInUrl: true,
     persistSession: true,
   },

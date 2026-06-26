@@ -51,7 +51,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await inviteAdminUser({ email, fullName, role });
+    const result = await inviteAdminUser({
+      email,
+      fullName,
+      role,
+      actingAdminId: auth.context.user.id,
+    });
     return NextResponse.json({
       ...result,
       redirectTo: getInviteRedirectUrl(),

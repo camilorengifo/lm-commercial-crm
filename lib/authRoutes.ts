@@ -24,7 +24,13 @@ export function urlHasAuthCallbackParams(search: string, hash: string): boolean 
   }
 
   const type = params.get("type");
-  if (type === "recovery" || type === "invite" || type === "signup") {
+  if (
+    type === "recovery" ||
+    type === "invite" ||
+    type === "signup" ||
+    type === "magiclink" ||
+    type === "email"
+  ) {
     return true;
   }
 
@@ -32,13 +38,31 @@ export function urlHasAuthCallbackParams(search: string, hash: string): boolean 
   return Boolean(hashParams.access_token || hashParams.type);
 }
 
-export function authCallbackIndicatesInvite(search: string, hash: string): boolean {
-  const type = new URLSearchParams(search).get("type");
+export function authCallbackIndicatesInvite(
+  search: string,
+  hash: string,
+  pathname?: string,
+): boolean {
+  const params = new URLSearchParams(search);
+  const type = params.get("type");
   if (type === "invite" || type === "signup") {
     return true;
   }
 
-  return hashIndicatesInvitation(hash);
+  if (hashIndicatesInvitation(hash)) {
+    return true;
+  }
+
+  // Supabase invite PKCE/implicit callbacks land on redirectTo with ?code= only.
+  if (pathname === "/set-password" && params.get("code")) {
+    return true;
+  }
+
+  if (pathname === "/set-password" && params.get("token_hash")) {
+    return true;
+  }
+
+  return false;
 }
 
 export function authCallbackIndicatesRecovery(search: string, hash: string): boolean {
@@ -60,8 +84,12 @@ export function authCallbackIndicatesRecovery(search: string, hash: string): boo
   return false;
 }
 
-export function resolveAuthCallbackPath(search: string, hash: string): PublicAuthPath {
-  if (authCallbackIndicatesInvite(search, hash)) {
+export function resolveAuthCallbackPath(
+  search: string,
+  hash: string,
+  pathname?: string,
+): PublicAuthPath {
+  if (authCallbackIndicatesInvite(search, hash, pathname)) {
     return "/set-password";
   }
 
@@ -79,10 +107,11 @@ export function buildAuthCallbackRedirect(
 export function redirectPathForAuthCallback(
   search: string,
   hash: string,
+  pathname?: string,
 ): PublicAuthPath | null {
   if (!urlHasAuthCallbackParams(search, hash)) {
     return null;
   }
 
-  return resolveAuthCallbackPath(search, hash);
+  return resolveAuthCallbackPath(search, hash, pathname);
 }

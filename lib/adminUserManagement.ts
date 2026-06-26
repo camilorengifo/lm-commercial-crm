@@ -6,11 +6,9 @@ import {
 } from "@/lib/userProfile";
 import { isOpenOpportunityStage } from "@/lib/crmConstants";
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin";
-import {
-  assertSafeInviteRedirect,
-  getInviteRedirectUrl,
-} from "@/lib/appUrl";
-import { INVITE_PASSWORD_SETUP_KEY } from "@/lib/invitationSession";
+import { assertSafeInviteRedirect } from "@/lib/appUrl";
+import { sendInvitationEmail } from "@/lib/invitationEmail";
+import { createUserInvitation } from "@/lib/userInvitations";
 
 const CRM_OWNERSHIP_TABLES = [
   "companies",
@@ -203,78 +201,54 @@ export async function inviteAdminUser(input: {
   email: string;
   fullName: string;
   role: UserRole;
+  actingAdminId?: string;
 }): Promise<{ message: string }> {
   const admin = createSupabaseAdminClient();
   if (!admin) {
     throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured.");
   }
 
+  assertSafeInviteRedirect();
+
   const email = input.email.trim();
   const fullName = input.fullName.trim();
   const role = input.role;
 
   const existingAuthUser = await findAuthUserByEmail(admin, email);
+
+  const { inviteLink } = await createUserInvitation({
+    email,
+    fullName,
+    role,
+    invitedBy: input.actingAdminId,
+    existingUser: Boolean(existingAuthUser),
+    authUserId: existingAuthUser?.id ?? null,
+  });
+
+  const emailResult = await sendInvitationEmail({
+    to: email,
+    fullName,
+    inviteLink,
+    existingUser: Boolean(existingAuthUser),
+  });
+
+  if (emailResult.error && process.env.VERCEL === "1") {
+    throw new Error(emailResult.error);
+  }
+
   if (existingAuthUser) {
-    const { error: profileError } = await admin.from("profiles").upsert(
-      {
-        id: existingAuthUser.id,
-        email,
-        full_name: fullName,
-        role,
-        is_active: true,
-      },
-      { onConflict: "id" },
-    );
-
-    if (profileError) {
-      throw profileError;
-    }
-
     return {
-      message:
-        "A user with this email already exists. Their profile was updated.",
+      message: emailResult.sent
+        ? "This user already exists. A password setup invitation was sent to their email."
+        : "This user already exists. Invitation link was generated — check server logs for the link.",
     };
   }
 
-  assertSafeInviteRedirect();
-  const redirectTo = getInviteRedirectUrl();
-
-  const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
-    data: {
-      full_name: fullName,
-      role,
-      [INVITE_PASSWORD_SETUP_KEY]: true,
-    },
-    redirectTo,
-  });
-
-  if (error) {
-    if (error.message.toLowerCase().includes("already")) {
-      return {
-        message: "A user with this email already exists.",
-      };
-    }
-    throw error;
-  }
-
-  if (data.user) {
-    const { error: profileError } = await admin.from("profiles").upsert(
-      {
-        id: data.user.id,
-        email,
-        full_name: fullName,
-        role,
-        is_active: true,
-      },
-      { onConflict: "id" },
-    );
-
-    if (profileError) {
-      throw profileError;
-    }
-  }
-
-  return { message: "Invitation sent successfully." };
+  return {
+    message: emailResult.sent
+      ? "Invitation sent successfully."
+      : "Invitation created. Check server logs for the invitation link.",
+  };
 }
 
 export async function updateAdminUser(input: {
