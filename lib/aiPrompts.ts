@@ -77,6 +77,107 @@ function normalizeStringArray(value: unknown): string[] {
     .filter(Boolean);
 }
 
+export interface AssistantGeneratePriority {
+  companyId: string;
+  companyName: string;
+  priority: string;
+  lastContactAt: string | null;
+  nextFollowUpAt: string | null;
+  openOpportunityCount: number;
+  reason: string;
+  suggestedAction: string;
+}
+
+export interface AssistantGenerateResponse {
+  actionPlan: string;
+  priorities: AssistantGeneratePriority[];
+  whatToDoFirst: string[];
+  whoToContact: string[];
+  crmUpdates: string[];
+  risks: string[];
+  commercialFocus: string[];
+}
+
+export const ASSISTANT_GENERATE_SYSTEM_PROMPT = `${SHARED_RULES}
+
+This is an ASSISTIVE freight brokerage sales command center. You recommend actions only.
+You do NOT send email, WhatsApp, SMS, or contact customers. You do NOT claim outreach was sent.
+Use ONLY the CRM context provided. If data is missing, say so and suggest logging better CRM notes.
+
+Return JSON with exactly these keys:
+- actionPlan (string: 2-4 sentence practical daily summary for the broker)
+- priorities (array of up to 5 objects with: companyId, companyName, priority, lastContactAt, nextFollowUpAt, openOpportunityCount, reason, suggestedAction)
+- whatToDoFirst (array of 3-5 short strings)
+- whoToContact (array of strings naming companies/contacts to reach out to manually)
+- crmUpdates (array of strings for CRM hygiene tasks)
+- risks (array of strings for accounts needing attention)
+- commercialFocus (array of 2-4 strings for today's commercial focus)`;
+
+export function buildAssistantGenerateUserPrompt(
+  context: Record<string, unknown>,
+): string {
+  return `Generate a daily freight brokerage AI action plan from this CRM context:
+
+${JSON.stringify(context, null, 2)}
+
+Be practical, direct, and sales-oriented. Reference real company names from the data.
+priorities must use companyId values from the context when available.`;
+}
+
+function normalizeAssistantPriority(value: unknown): AssistantGeneratePriority | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const companyName = normalizeString(record.companyName);
+  if (!companyName) return null;
+
+  return {
+    companyId: normalizeString(record.companyId),
+    companyName,
+    priority: normalizeString(record.priority) || "Medium",
+    lastContactAt:
+      typeof record.lastContactAt === "string" ? record.lastContactAt : null,
+    nextFollowUpAt:
+      typeof record.nextFollowUpAt === "string" ? record.nextFollowUpAt : null,
+    openOpportunityCount:
+      typeof record.openOpportunityCount === "number"
+        ? record.openOpportunityCount
+        : 0,
+    reason: normalizeString(record.reason) || "Review this account today.",
+    suggestedAction:
+      normalizeString(record.suggestedAction) || "Plan the next commercial touch.",
+  };
+}
+
+export function normalizeAssistantGenerateResponse(
+  value: unknown,
+): AssistantGenerateResponse {
+  const record =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+
+  const priorities = Array.isArray(record.priorities)
+    ? record.priorities
+        .map(normalizeAssistantPriority)
+        .filter((item): item is AssistantGeneratePriority => item !== null)
+        .slice(0, 5)
+    : [];
+
+  const actionPlan =
+    normalizeString(record.actionPlan) ||
+    "Review your prioritized accounts and overdue follow-ups to plan your day.";
+
+  return {
+    actionPlan,
+    priorities,
+    whatToDoFirst: normalizeStringArray(record.whatToDoFirst),
+    whoToContact: normalizeStringArray(record.whoToContact),
+    crmUpdates: normalizeStringArray(record.crmUpdates),
+    risks: normalizeStringArray(record.risks),
+    commercialFocus: normalizeStringArray(record.commercialFocus),
+  };
+}
+
 export interface BrokerActionPlanAccount {
   companyName: string;
   whyItMatters: string;

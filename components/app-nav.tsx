@@ -12,7 +12,7 @@ import {
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard" },
-  { href: "/ai-broker-assistant", label: "AI Broker Assistant" },
+  { href: "/assistant", label: "AI Assistant" },
   { href: "/companies", label: "Companies" },
   { href: "/opportunities", label: "Opportunities" },
   { href: "/pipeline", label: "Pipeline" },

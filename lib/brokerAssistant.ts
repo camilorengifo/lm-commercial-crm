@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { isOpenOpportunityStage } from "@/lib/crmConstants";
+import { isOpenOpportunityStage, getOpportunityStageLabel } from "@/lib/crmConstants";
 import { getFollowUpBucket } from "@/lib/followUps";
 import { getOpportunityPipelineValue } from "@/lib/brokerProductivity";
 
@@ -44,11 +44,14 @@ interface ActivityRow {
 }
 
 interface OpportunityRow {
+  id: string;
   company_id: string;
+  name: string;
   status: string;
   estimated_revenue_usd: number | null;
   quoted_rate: number | null;
   target_rate: number | null;
+  updated_at: string;
 }
 
 export interface PrioritizedAccountContact {
@@ -91,8 +94,43 @@ export interface BrokerAssistantSnapshot {
   generatedAt: string;
   focus: BrokerAssistantFocus;
   topAccounts: PrioritizedAccount[];
+  todaysPriorities: PrioritizedAccount[];
+  overdueFollowUpItems: AssistantOverdueFollowUp[];
+  staleAccounts: AssistantStaleAccount[];
+  hotOpportunities: AssistantHotOpportunity[];
   dataQualitySuggestions: string[];
   hasCrmData: boolean;
+}
+
+export interface AssistantOverdueFollowUp {
+  followUpId: string;
+  companyId: string;
+  companyName: string;
+  title: string;
+  dueAt: string;
+  status: string;
+  suggestedAction: string;
+}
+
+export interface AssistantStaleAccount {
+  companyId: string;
+  companyName: string;
+  priority: string;
+  salesStage: string;
+  lastActivityAt: string | null;
+  daysSinceActivity: number | null;
+  openOpportunityCount: number;
+  suggestedAction: string;
+}
+
+export interface AssistantHotOpportunity {
+  opportunityId: string;
+  companyId: string;
+  companyName: string;
+  name: string;
+  status: string;
+  pipelineValue: number;
+  suggestedNextStep: string;
 }
 
 function getInactivityCutoff(): Date {
@@ -320,7 +358,7 @@ export async function fetchBrokerAssistantSnapshot(
     supabase
       .from("load_opportunities")
       .select(
-        "company_id, status, estimated_revenue_usd, quoted_rate, target_rate",
+        "id, company_id, name, status, estimated_revenue_usd, quoted_rate, target_rate, updated_at",
       )
       .eq("user_id", userId),
   ]);
@@ -494,6 +532,76 @@ export async function fetchBrokerAssistantSnapshot(
     prioritizedAccounts,
   );
 
+  const companyById = new Map(
+    companies.map((company) => [company.id, company]),
+  );
+
+  const overdueFollowUpItems: AssistantOverdueFollowUp[] = followUps
+    .filter((followUp) => getFollowUpBucket(followUp.due_at) === "overdue")
+    .sort((a, b) => new Date(a.due_at).getTime() - new Date(b.due_at).getTime())
+    .slice(0, 15)
+    .map((followUp) => {
+      const company = companyById.get(followUp.company_id);
+      return {
+        followUpId: followUp.id,
+        companyId: followUp.company_id,
+        companyName: company?.name ?? "Unknown company",
+        title: followUp.title,
+        dueAt: followUp.due_at,
+        status: followUp.status,
+        suggestedAction: "Complete or reschedule this overdue follow-up today.",
+      };
+    });
+
+  const staleAccounts: AssistantStaleAccount[] = prioritizedAccounts
+    .filter((account) => isInactive(account.lastActivityAt))
+    .filter((account) => !isClosedCompanyStage(account.salesStage))
+    .sort((a, b) => {
+      const priorityRank = (priority: string) =>
+        priority === "Hot Lead" ? 0 : priority === "High" ? 1 : priority === "Medium" ? 2 : 3;
+      const rankDiff = priorityRank(a.priority) - priorityRank(b.priority);
+      if (rankDiff !== 0) return rankDiff;
+      return b.openPipelineValue - a.openPipelineValue;
+    })
+    .slice(0, 10)
+    .map((account) => ({
+      companyId: account.companyId,
+      companyName: account.companyName,
+      priority: account.priority,
+      salesStage: account.salesStage,
+      lastActivityAt: account.lastActivityAt,
+      daysSinceActivity: account.lastActivityAt
+        ? Math.floor(
+            (Date.now() - new Date(account.lastActivityAt).getTime()) /
+              (1000 * 60 * 60 * 24),
+          )
+        : null,
+      openOpportunityCount: account.openOpportunityCount,
+      suggestedAction: account.recommendedAction,
+    }));
+
+  const hotOpportunities: AssistantHotOpportunity[] = opportunities
+    .filter((opportunity) => isOpenOpportunityStage(opportunity.status))
+    .map((opportunity) => {
+      const company = companyById.get(opportunity.company_id);
+      const pipelineValue = getOpportunityPipelineValue(opportunity);
+      const statusLabel = getOpportunityStageLabel(opportunity.status);
+      return {
+        opportunityId: opportunity.id,
+        companyId: opportunity.company_id,
+        companyName: company?.name ?? "Unknown company",
+        name: opportunity.name,
+        status: statusLabel,
+        pipelineValue,
+        suggestedNextStep:
+          opportunity.status === "quoted" || opportunity.status === "negotiating"
+            ? "Follow up on quote status and confirm next lane or booking."
+            : "Confirm lane details and move the opportunity to the next stage.",
+      };
+    })
+    .sort((a, b) => b.pipelineValue - a.pipelineValue)
+    .slice(0, 10);
+
   return {
     generatedAt: new Date().toISOString(),
     focus: {
@@ -504,6 +612,10 @@ export async function fetchBrokerAssistantSnapshot(
       accountsNeedingAttention,
     },
     topAccounts: prioritizedAccounts.slice(0, accountLimit),
+    todaysPriorities: prioritizedAccounts.slice(0, 5),
+    overdueFollowUpItems,
+    staleAccounts,
+    hotOpportunities,
     dataQualitySuggestions,
     hasCrmData: companies.length > 0,
   };
@@ -557,6 +669,18 @@ function buildGlobalDataQualitySuggestions(
   }
 
   return Array.from(suggestions);
+}
+
+export function summarizeAssistantContextForAi(
+  snapshot: BrokerAssistantSnapshot,
+): Record<string, unknown> {
+  return {
+    focus: snapshot.focus,
+    todaysPriorities: summarizePrioritizedAccountsForAi(snapshot.todaysPriorities),
+    overdueFollowUps: snapshot.overdueFollowUpItems.slice(0, 10),
+    staleAccounts: snapshot.staleAccounts.slice(0, 8),
+    hotOpportunities: snapshot.hotOpportunities.slice(0, 8),
+  };
 }
 
 export function summarizePrioritizedAccountsForAi(

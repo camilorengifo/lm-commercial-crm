@@ -11,7 +11,8 @@ export type AiRouteName =
   | "AI_OUTREACH"
   | "AI_BROKER_ASSISTANT"
   | "AI_BROKER_ACTION_PLAN"
-  | "AI_ACCOUNT_OUTREACH";
+  | "AI_ACCOUNT_OUTREACH"
+  | "AI_ASSISTANT_GENERATE";
 
 export interface AiLogContext {
   route: AiRouteName;

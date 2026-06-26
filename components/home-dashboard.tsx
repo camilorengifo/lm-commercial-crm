@@ -89,7 +89,7 @@ function QuickNav({ isAdmin }: { isAdmin: boolean }) {
     { href: "/opportunities", label: "Opportunities" },
     { href: "/pipeline", label: "Pipeline" },
     { href: "/follow-ups", label: "Follow-ups" },
-    { href: "/ai-broker-assistant", label: "AI Broker Assistant" },
+    { href: "/assistant", label: "AI Assistant" },
     ...(isAdmin ? [{ href: "/admin", label: "Admin" }] : []),
   ];
 

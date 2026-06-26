@@ -66,7 +66,7 @@ export function BrokerAssistantDashboardCard() {
           </p>
         </div>
         <Link
-          href="/ai-broker-assistant"
+          href="/assistant"
           className="inline-flex shrink-0 items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800"
         >
           Open assistant
