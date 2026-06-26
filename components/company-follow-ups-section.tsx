@@ -13,6 +13,7 @@ import {
   DEFAULT_FOLLOW_UP_TYPE_FORM,
   FOLLOW_UP_TYPE_LABELS,
   followUpTypeBadgeClass,
+  followUpTypeFormFromRecord,
   normalizeFollowUpType,
   type FollowUpTypeFormValues,
 } from "@/lib/followUpSeasonal";
@@ -22,6 +23,8 @@ import {
   fetchPendingFollowUpsForCompany,
   fromDatetimeLocalValue,
   getFollowUpBucket,
+  rescheduleFollowUp,
+  toDatetimeLocalValue,
   type FollowUpRecord,
 } from "@/lib/followUps";
 import {
@@ -68,6 +71,143 @@ function bucketBadgeClass(bucket: ReturnType<typeof getFollowUpBucket>): string 
   }
 }
 
+function EditFollowUpModal({
+  followUp,
+  saving,
+  error,
+  onClose,
+  onSave,
+}: {
+  followUp: FollowUpRecord;
+  saving: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSave: (input: {
+    dueAt: string;
+    title: string;
+    notes: string;
+    typeFields: FollowUpTypeFormValues;
+  }) => void;
+}) {
+  const [dueAt, setDueAt] = useState(toDatetimeLocalValue(followUp.due_at));
+  const [title, setTitle] = useState(followUp.title);
+  const [notes, setNotes] = useState(followUp.notes ?? "");
+  const [typeFields, setTypeFields] = useState<FollowUpTypeFormValues>(() =>
+    followUpTypeFormFromRecord(followUp),
+  );
+
+  useEffect(() => {
+    setDueAt(toDatetimeLocalValue(followUp.due_at));
+    setTitle(followUp.title);
+    setNotes(followUp.notes ?? "");
+    setTypeFields(followUpTypeFormFromRecord(followUp));
+  }, [followUp]);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const parsedDueAt = fromDatetimeLocalValue(dueAt);
+    if (!parsedDueAt || !title.trim()) return;
+
+    onSave({
+      dueAt: parsedDueAt,
+      title: title.trim(),
+      notes,
+      typeFields,
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-lg rounded-xl border border-zinc-200 bg-white p-6 shadow-xl">
+        <h3 className="text-lg font-medium text-zinc-900">Edit follow-up</h3>
+
+        <form onSubmit={handleSubmit} className="mt-5 space-y-4">
+          <div>
+            <label
+              htmlFor="edit-follow-up-due"
+              className="mb-1.5 block text-sm font-medium text-zinc-700"
+            >
+              Due date <span className="text-red-600">*</span>
+            </label>
+            <input
+              id="edit-follow-up-due"
+              type="datetime-local"
+              required
+              value={dueAt}
+              onChange={(event) => setDueAt(event.target.value)}
+              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="edit-follow-up-title"
+              className="mb-1.5 block text-sm font-medium text-zinc-700"
+            >
+              Title <span className="text-red-600">*</span>
+            </label>
+            <input
+              id="edit-follow-up-title"
+              type="text"
+              required
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="edit-follow-up-notes"
+              className="mb-1.5 block text-sm font-medium text-zinc-700"
+            >
+              Note / next step
+            </label>
+            <textarea
+              id="edit-follow-up-notes"
+              rows={3}
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+            />
+          </div>
+
+          <FollowUpTypeFormFields
+            idPrefix="edit-follow-up"
+            values={typeFields}
+            onChange={setTypeFields}
+          />
+
+          {error && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </p>
+          )}
+
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
+            >
+              {saving ? "Saving..." : "Save changes"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export function CompanyFollowUpsSection({
   companyId,
   userId,
@@ -98,6 +238,9 @@ export function CompanyFollowUpsSection({
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [completingId, setCompletingId] = useState<string | null>(null);
+  const [editTarget, setEditTarget] = useState<FollowUpRecord | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const primaryContactName = useMemo(() => {
     const contact = contacts[0] ?? null;
@@ -191,6 +334,41 @@ export function CompanyFollowUpsSection({
     await refreshAll();
     onCompanyUpdated?.();
     setCompletingId(null);
+  }
+
+  async function handleEditFollowUpSave(input: {
+    dueAt: string;
+    title: string;
+    notes: string;
+    typeFields: FollowUpTypeFormValues;
+  }) {
+    if (!editTarget) return;
+
+    setEditingId(editTarget.id);
+    setEditError(null);
+
+    const { error } = await rescheduleFollowUp({
+      followUpId: editTarget.id,
+      ownerUserId: userId,
+      companyId,
+      dueAt: input.dueAt,
+      title: input.title,
+      notes: input.notes.trim() || null,
+      typeFields: input.typeFields,
+      asAdmin: isAdmin,
+    });
+
+    if (error) {
+      setEditError(formatSupabaseError(error));
+      setEditingId(null);
+      return;
+    }
+
+    setEditTarget(null);
+    setSuccessMessage("Follow-up updated.");
+    await refreshAll();
+    onCompanyUpdated?.();
+    setEditingId(null);
   }
 
   return (
@@ -456,19 +634,45 @@ export function CompanyFollowUpsSection({
                 </div>
 
                 {canManage && (
-                  <button
-                    type="button"
-                    onClick={() => handleCompleteFollowUp(followUp)}
-                    disabled={isCompleting}
-                    className="inline-flex shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isCompleting ? "Saving..." : "Mark Complete"}
-                  </button>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditError(null);
+                        setEditTarget(followUp);
+                      }}
+                      disabled={editingId === followUp.id}
+                      className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCompleteFollowUp(followUp)}
+                      disabled={isCompleting}
+                      className="inline-flex items-center justify-center rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isCompleting ? "Saving..." : "Mark Complete"}
+                    </button>
+                  </div>
                 )}
               </li>
             );
           })}
         </ul>
+      )}
+
+      {editTarget && (
+        <EditFollowUpModal
+          followUp={editTarget}
+          saving={editingId === editTarget.id}
+          error={editError}
+          onClose={() => {
+            setEditTarget(null);
+            setEditError(null);
+          }}
+          onSave={handleEditFollowUpSave}
+        />
       )}
     </section>
   );

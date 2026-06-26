@@ -640,6 +640,7 @@ export interface RescheduleFollowUpInput {
   title?: string;
   notes?: string | null;
   typeFields?: FollowUpTypeFormValues;
+  asAdmin?: boolean;
 }
 
 export async function rescheduleFollowUp(
@@ -665,12 +666,17 @@ export async function rescheduleFollowUp(
     );
   }
 
-  const { error } = await supabase
+  let query = supabase
     .from("follow_ups")
     .update(updates)
     .eq("id", input.followUpId)
-    .eq("user_id", input.ownerUserId)
     .eq("company_id", input.companyId);
+
+  if (!input.asAdmin) {
+    query = query.eq("user_id", input.ownerUserId);
+  }
+
+  const { error } = await query;
 
   if (error) {
     return { error };
