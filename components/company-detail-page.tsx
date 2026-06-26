@@ -5,7 +5,6 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
-import { AiAccountSummarySection } from "@/components/ai-account-summary-section";
 import { CompanyArchiveModal } from "@/components/company-archive-modal";
 import { CompanyEditModal } from "@/components/company-edit-modal";
 import { AiOutreachAssistantSection } from "@/components/ai-outreach-assistant-section";
@@ -517,10 +516,6 @@ export function CompanyDetailPage() {
                   Draft next outreach
                 </Link>
               </div>
-              <AiAccountSummarySection
-                companyId={company.id}
-                companyName={company.name}
-              />
               <AiOutreachAssistantSection
                 companyId={company.id}
                 companyName={company.name}
