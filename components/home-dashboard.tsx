@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
-import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { BrokerAssistantDashboardCard } from "@/components/broker-assistant-dashboard-card";
+import { AuthenticatedLayout } from "@/components/authenticated-layout";
+import { ActionPlanRow, CrmAlert, CrmCard, ListPanel, PageHeader, SectionHeader, StatCard, StatGrid } from "@/components/crm-ui";
 import {
   ACTIVITY_TYPE_LABELS,
   FOLLOW_UP_STATUS_LABELS,
@@ -34,61 +35,16 @@ import {
 } from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
 
-function SummaryCard({
-  label,
-  value,
-  subtext,
-  highlight,
-  href,
-}: {
-  label: string;
-  value: number | string;
-  subtext?: string;
-  highlight?: "danger" | "warning";
-  href?: string;
-}) {
-  const highlightClass =
-    highlight === "danger"
-      ? "border-red-200 bg-red-50/50"
-      : highlight === "warning"
-        ? "border-amber-200 bg-amber-50/50"
-        : "border-zinc-200 bg-white";
-
-  const content = (
-    <>
-      <p className="text-sm font-medium text-zinc-600">{label}</p>
-      <p className="mt-2 text-3xl font-semibold tracking-tight text-zinc-900">
-        {value}
-      </p>
-      {subtext && <p className="mt-1 text-xs text-zinc-500">{subtext}</p>}
-    </>
-  );
-
-  const className = `rounded-xl border p-5 shadow-sm transition ${highlightClass} ${
-    href ? "hover:border-zinc-300 hover:bg-zinc-50/80" : ""
-  }`;
-
-  if (href) {
-    return (
-      <Link href={href} className={`block ${className}`}>
-        {content}
-      </Link>
-    );
-  }
-
-  return <div className={className}>{content}</div>;
-}
-
 function actionPlanBadgeClass(kind: ActionPlanItem["kind"]): string {
   switch (kind) {
     case "overdue":
-      return "bg-red-100 text-red-800";
+      return "crm-badge bg-red-50 text-red-800 ring-red-200";
     case "today":
-      return "bg-amber-100 text-amber-800";
+      return "crm-badge bg-amber-50 text-amber-800 ring-amber-200";
     case "high_priority":
-      return "bg-orange-100 text-orange-800";
+      return "crm-badge bg-orange-50 text-orange-800 ring-orange-200";
     case "opportunity":
-      return "bg-sky-100 text-sky-800";
+      return "crm-badge bg-sky-50 text-sky-800 ring-sky-200";
   }
 }
 
@@ -125,28 +81,24 @@ function FollowUpRow({
   onMarkDone: (followUp: FollowUpDashboardItem) => void;
 }) {
   const variantClass =
-    variant === "overdue"
-      ? "border-red-200 bg-red-50/60"
-      : "border-amber-200 bg-amber-50/50";
+    variant === "overdue" ? "crm-follow-up-urgent" : "crm-follow-up-today";
 
   const statusLabel = FOLLOW_UP_STATUS_LABELS[followUp.status];
 
   return (
-    <li className={`rounded-lg border p-4 ${variantClass}`}>
+    <li className={variantClass}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-semibold text-zinc-900">
+            <p className="text-sm font-semibold text-slate-900">
               <Link
                 href={`/companies/${followUp.company_id}`}
-                className="underline-offset-2 hover:underline"
+                className="crm-link"
               >
                 {followUp.companyName}
               </Link>
             </p>
-            <span
-              className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${priorityBadgeClass(followUp.companyPriority)}`}
-            >
+            <span className={`crm-badge ${priorityBadgeClass(followUp.companyPriority)}`}>
               {followUp.companyPriority}
             </span>
           </div>
@@ -176,13 +128,13 @@ function FollowUpRow({
             type="button"
             onClick={() => onMarkDone(followUp)}
             disabled={completing}
-            className="inline-flex items-center justify-center rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="crm-btn-success disabled:cursor-not-allowed disabled:opacity-60"
           >
             {completing ? "Saving..." : "Mark as Done"}
           </button>
           <Link
             href={`/companies/${followUp.company_id}`}
-            className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+            className="crm-btn-secondary crm-btn-sm"
           >
             Open Company
           </Link>
@@ -198,13 +150,11 @@ function HighPriorityCompanyRow({
   company: HighPriorityCompanyItem;
 }) {
   return (
-    <li className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+    <li className="crm-action-row">
       <div className="min-w-0 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm font-semibold text-zinc-900">{company.name}</p>
-          <span
-            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${priorityBadgeClass(company.priority)}`}
-          >
+          <p className="text-sm font-semibold text-slate-900">{company.name}</p>
+          <span className={`crm-badge ${priorityBadgeClass(company.priority)}`}>
             {company.priority}
           </span>
         </div>
@@ -225,7 +175,7 @@ function HighPriorityCompanyRow({
 
       <Link
         href={`/companies/${company.id}`}
-        className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+        className="crm-btn-secondary crm-btn-sm"
       >
         Open Company
       </Link>
@@ -239,7 +189,7 @@ function OpenOpportunityRow({
   opportunity: OpenOpportunityDashboardItem;
 }) {
   return (
-    <li className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+    <li className="crm-action-row">
       <div className="min-w-0 space-y-1">
         <p className="text-sm font-semibold text-zinc-900">
           {opportunity.companyName}
@@ -266,7 +216,7 @@ function OpenOpportunityRow({
 
       <Link
         href={`/companies/${opportunity.companyId}`}
-        className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+        className="crm-btn-secondary crm-btn-sm"
       >
         Open Company
       </Link>
@@ -298,7 +248,7 @@ function RecentActivityRow({ activity }: { activity: RecentActivityItem }) {
 
       <Link
         href={`/companies/${activity.companyId}`}
-        className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+        className="crm-btn-secondary crm-btn-sm"
       >
         Open Company
       </Link>
@@ -331,34 +281,30 @@ function AdminToolsSection() {
   ] as const;
 
   return (
-    <section className="mb-8 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-lg font-medium text-zinc-900">Admin tools</h2>
-          <p className="mt-1 text-sm text-zinc-500">
-            Management views across the full team. Your commercial work is below.
-          </p>
-        </div>
-        <Link
-          href="/admin"
-          className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
-        >
-          Open admin overview
-        </Link>
-      </div>
+    <CrmCard className="mb-5" hover>
+      <SectionHeader
+        title="Admin tools"
+        description="Management views across the full team. Your commercial work is below."
+        actions={
+          <Link href="/admin" className="crm-btn-secondary crm-btn-sm">
+            Open admin overview
+          </Link>
+        }
+        className="mb-4"
+      />
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {links.map((link) => (
           <Link
             key={link.href}
             href={link.href}
-            className="rounded-lg border border-zinc-200 bg-zinc-50/60 px-4 py-3 transition hover:border-zinc-300 hover:bg-zinc-50"
+            className="crm-card crm-card-hover rounded-xl px-4 py-4 shadow-sm ring-1 ring-slate-100"
           >
-            <p className="text-sm font-medium text-zinc-900">{link.title}</p>
-            <p className="mt-1 text-xs text-zinc-500">{link.description}</p>
+            <p className="text-sm font-medium text-slate-900">{link.title}</p>
+            <p className="mt-1 text-xs text-slate-500">{link.description}</p>
           </Link>
         ))}
       </div>
-    </section>
+    </CrmCard>
   );
 }
 
@@ -383,31 +329,31 @@ function BrokerDashboardView({
 
   return (
     <>
-      <div className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        <SummaryCard label="Total companies" value={metrics.companyCount} />
-        <SummaryCard
+      <StatGrid columns={6}>
+        <StatCard label="Total companies" value={metrics.companyCount} />
+        <StatCard
           label="High priority / hot"
           value={metrics.hotPriorityCount}
           highlight={metrics.hotPriorityCount > 0 ? "warning" : undefined}
         />
-        <SummaryCard
+        <StatCard
           label="Follow-ups due today"
           value={metrics.dueTodayCount}
           highlight={metrics.dueTodayCount > 0 ? "warning" : undefined}
           href="/follow-ups"
         />
-        <SummaryCard
+        <StatCard
           label="Overdue follow-ups"
           value={metrics.overdueCount}
           highlight={metrics.overdueCount > 0 ? "danger" : undefined}
           href="/follow-ups"
         />
-        <SummaryCard
+        <StatCard
           label="Open opportunities"
           value={metrics.openOpportunityCount}
           subtext={`Won: ${metrics.wonOpportunityCount} · Lost: ${metrics.lostOpportunityCount}`}
         />
-        <SummaryCard
+        <StatCard
           label="Activity last 7 days"
           value={metrics.recentActivityCount7d}
           subtext={
@@ -416,75 +362,54 @@ function BrokerDashboardView({
               : "No activity recorded"
           }
         />
-      </div>
+      </StatGrid>
 
-      <section className="mb-8 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-medium text-zinc-900">Today&apos;s action plan</h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Priority tasks across follow-ups, accounts, and opportunities.
-        </p>
+      <CrmCard className="mb-5">
+        <SectionHeader
+          title="Today's action plan"
+          description="Recommended next steps across follow-ups, accounts, and opportunities."
+          className="mb-3"
+        />
 
         {actionPlan.length === 0 ? (
-          <p className="mt-4 text-sm text-zinc-500">
+          <p className="text-sm text-slate-500">
             No urgent tasks right now. Review your companies or pipeline to plan
             your day.
           </p>
         ) : (
-          <ul className="mt-4 divide-y divide-zinc-100 rounded-lg border border-zinc-200">
+          <ul className="crm-action-plan-list">
             {actionPlan.map((item) => (
-              <li
+              <ActionPlanRow
                 key={item.id}
-                className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="min-w-0 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${actionPlanBadgeClass(item.kind)}`}
-                    >
-                      {actionPlanLabel(item.kind)}
-                    </span>
-                    <p className="text-sm font-semibold text-zinc-900">
-                      {item.title}
-                    </p>
-                  </div>
-                  <p className="text-sm text-zinc-600">{item.detail}</p>
-                </div>
-
-                <Link
-                  href={item.href}
-                  className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
-                >
-                  Open
-                </Link>
-              </li>
+                badge={actionPlanLabel(item.kind)}
+                badgeClass={actionPlanBadgeClass(item.kind)}
+                title={item.title}
+                detail={item.detail}
+                href={item.href}
+              />
             ))}
           </ul>
         )}
-      </section>
+      </CrmCard>
 
       <BrokerAssistantDashboardCard />
 
-      <div className="mb-8 grid gap-6 xl:grid-cols-2">
-        <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-medium text-zinc-900">
-                Today&apos;s follow-ups
-              </h2>
-              <p className="mt-1 text-sm text-zinc-500">
-                Follow-ups scheduled for today
-              </p>
-            </div>
-            <Link
-              href="/follow-ups"
-              className="text-sm font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
-            >
-              View all
-            </Link>
-          </div>
+      <div className="mb-5 grid gap-4 xl:grid-cols-2">
+        <CrmCard>
+          <SectionHeader
+            title="Today's follow-ups"
+            description="Scheduled for today"
+            accent="amber"
+            actions={
+              <Link href="/follow-ups" className="crm-link text-sm">
+                View all
+              </Link>
+            }
+            className="mb-3"
+          />
 
           {dueToday.length === 0 ? (
-            <p className="text-sm text-zinc-500">
+            <p className="text-sm text-slate-500">
               You have no follow-ups due today.
             </p>
           ) : (
@@ -502,32 +427,27 @@ function BrokerDashboardView({
           )}
 
           {dueToday.length > LIST_LIMIT && (
-            <p className="mt-4 text-sm text-zinc-500">
+            <p className="mt-4 text-sm text-slate-500">
               Showing {LIST_LIMIT} of {dueToday.length}.
             </p>
           )}
-        </section>
+        </CrmCard>
 
-        <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-medium text-zinc-900">
-                Overdue follow-ups
-              </h2>
-              <p className="mt-1 text-sm text-zinc-500">
-                Past-due follow-ups that need attention
-              </p>
-            </div>
-            <Link
-              href="/follow-ups"
-              className="text-sm font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
-            >
-              View all
-            </Link>
-          </div>
+        <CrmCard>
+          <SectionHeader
+            title="Overdue follow-ups"
+            description="Past-due items needing attention"
+            accent="red"
+            actions={
+              <Link href="/follow-ups" className="crm-link text-sm">
+                View all
+              </Link>
+            }
+            className="mb-3"
+          />
 
           {overdue.length === 0 ? (
-            <p className="text-sm text-zinc-500">
+            <p className="text-sm text-slate-500">
               You have no overdue follow-ups.
             </p>
           ) : (
@@ -545,114 +465,99 @@ function BrokerDashboardView({
           )}
 
           {overdue.length > LIST_LIMIT && (
-            <p className="mt-4 text-sm text-zinc-500">
+            <p className="mt-4 text-sm text-slate-500">
               Showing {LIST_LIMIT} of {overdue.length}.
             </p>
           )}
-        </section>
+        </CrmCard>
       </div>
 
-      <div className="mb-8 grid gap-6 xl:grid-cols-2">
-        <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-medium text-zinc-900">
-                Hot companies to pursue
-              </h2>
-              <p className="mt-1 text-sm text-zinc-500">
-                High priority, no recent activity, or no follow-up scheduled
-              </p>
-            </div>
-            <Link
-              href="/companies"
-              className="text-sm font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
-            >
-              View all
-            </Link>
-          </div>
+      <div className="mb-5 grid gap-4 xl:grid-cols-2">
+        <CrmCard>
+          <SectionHeader
+            title="Hot companies to pursue"
+            description="High priority with no recent activity or follow-up"
+            accent="amber"
+            actions={
+              <Link href="/companies" className="crm-link text-sm">
+                View all
+              </Link>
+            }
+            className="mb-3"
+          />
 
           {highPriorityCompanies.length === 0 ? (
-            <p className="text-sm text-zinc-500">
+            <p className="text-sm text-slate-500">
               No hot companies need attention right now.
             </p>
           ) : (
-            <ul className="divide-y divide-zinc-100 rounded-lg border border-zinc-200">
+            <ListPanel>
               {highPriorityCompanies.slice(0, LIST_LIMIT).map((company) => (
                 <HighPriorityCompanyRow key={company.id} company={company} />
               ))}
-            </ul>
+            </ListPanel>
           )}
 
           {highPriorityCompanies.length > LIST_LIMIT && (
-            <p className="mt-4 text-sm text-zinc-500">
+            <p className="mt-4 text-sm text-slate-500">
               Showing {LIST_LIMIT} of {highPriorityCompanies.length}.
             </p>
           )}
-        </section>
+        </CrmCard>
 
-        <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-medium text-zinc-900">
-                Active opportunities
-              </h2>
-              <p className="mt-1 text-sm text-zinc-500">
-                Open load opportunities across your accounts
-              </p>
-            </div>
-            <Link
-              href="/opportunities"
-              className="text-sm font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
-            >
-              View all
-            </Link>
-          </div>
+        <CrmCard>
+          <SectionHeader
+            title="Active opportunities"
+            description="Open load opportunities across your accounts"
+            accent="emerald"
+            actions={
+              <Link href="/opportunities" className="crm-link text-sm">
+                View all
+              </Link>
+            }
+            className="mb-3"
+          />
 
           {openOpportunities.length === 0 ? (
-            <p className="text-sm text-zinc-500">
+            <p className="text-sm text-slate-500">
               You have no open opportunities yet.
             </p>
           ) : (
-            <ul className="divide-y divide-zinc-100 rounded-lg border border-zinc-200">
+            <ListPanel>
               {openOpportunities.slice(0, LIST_LIMIT).map((opportunity) => (
                 <OpenOpportunityRow
                   key={opportunity.id}
                   opportunity={opportunity}
                 />
               ))}
-            </ul>
+            </ListPanel>
           )}
 
           {openOpportunities.length > LIST_LIMIT && (
-            <p className="mt-4 text-sm text-zinc-500">
+            <p className="mt-4 text-sm text-slate-500">
               Showing {LIST_LIMIT} of {openOpportunities.length}.
             </p>
           )}
-        </section>
+        </CrmCard>
       </div>
 
-      <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-medium text-zinc-900">
-              Recent activity
-            </h2>
-            <p className="mt-1 text-sm text-zinc-500">
-              Latest notes and activities recorded in the CRM
-            </p>
-          </div>
-        </div>
+      <CrmCard className="mb-5">
+        <SectionHeader
+          title="Recent activity"
+          description="Latest notes and activities in the CRM"
+          className="mb-3"
+        />
 
         {recentActivities.length === 0 ? (
-          <p className="text-sm text-zinc-500">No recent activity.</p>
+          <p className="text-sm text-slate-500">No recent activity.</p>
         ) : (
-          <ul className="divide-y divide-zinc-100 rounded-lg border border-zinc-200">
+          <ListPanel>
             {recentActivities.map((activity) => (
               <RecentActivityRow key={activity.id} activity={activity} />
             ))}
-          </ul>
+          </ListPanel>
         )}
-      </section>
+      </CrmCard>
     </>
   );
 }
@@ -741,8 +646,8 @@ export function HomeDashboard() {
 
   if (loading) {
     return (
-      <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50">
-        <p className="text-sm text-zinc-500">Loading...</p>
+      <div className="crm-loading-screen">
+        <p className="text-sm text-slate-500">Loading...</p>
       </div>
     );
   }
@@ -753,49 +658,36 @@ export function HomeDashboard() {
 
   return (
     <AuthenticatedLayout maxWidthClass="max-w-[1400px]">
-      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-            Today
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">
-            {getTodayHeading()}
-          </h1>
-          <p className="mt-2 text-sm text-zinc-600">
-            {isAdmin
-              ? "Your commercial dashboard for the day, plus admin tools below the header."
-              : "Your operational dashboard for the day. Signed in as "}
-            {!isAdmin && (
-              <span className="font-medium text-zinc-900">{user.email}</span>
-            )}
-          </p>
-        </div>
-
-        <div className="flex flex-col items-stretch gap-3 sm:items-end">
-          <Link
-            href="/companies"
-            className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800"
-          >
+      <PageHeader
+        eyebrow="Today"
+        title={getTodayHeading()}
+        description={
+          isAdmin
+            ? "Your commercial command center for the day, with admin tools when you need them."
+            : (
+                <>
+                  Your operational dashboard for the day. Signed in as{" "}
+                  <span className="font-medium text-slate-900">{user.email}</span>
+                </>
+              )
+        }
+        actions={
+          <Link href="/companies" className="crm-btn-primary">
             Add Company
           </Link>
-        </div>
-      </div>
+        }
+      />
 
-      {fetchError && (
-        <p className="mb-6 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-          {fetchError}
-        </p>
-      )}
+      {fetchError && <CrmAlert variant="error">{fetchError}</CrmAlert>}
 
       {isAdmin && <AdminToolsSection />}
 
       {isAdmin && (
-        <div className="mb-6">
-          <h2 className="text-lg font-medium text-zinc-900">My commercial work</h2>
-          <p className="mt-1 text-sm text-zinc-500">
-            Companies, follow-ups, and next actions assigned to you.
-          </p>
-        </div>
+        <SectionHeader
+          title="My commercial work"
+          description="Companies, follow-ups, and next actions assigned to you."
+          className="mb-6"
+        />
       )}
 
       <BrokerDashboardView

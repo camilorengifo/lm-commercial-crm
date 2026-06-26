@@ -2,23 +2,21 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { CrmCard, StatCard } from "@/components/crm-ui";
 
 export function AdminAccessDenied() {
   return (
-    <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50 px-4">
-      <div className="max-w-md rounded-xl border border-zinc-200 bg-white p-8 text-center shadow-sm">
-        <h1 className="text-xl font-semibold text-zinc-900">Access denied</h1>
-        <p className="mt-2 text-sm text-zinc-600">
+    <div className="crm-app-bg flex min-h-full flex-1 items-center justify-center px-4">
+      <CrmCard className="max-w-md text-center">
+        <h1 className="text-xl font-semibold text-slate-900">Access denied</h1>
+        <p className="mt-2 text-sm text-slate-600">
           You do not have permission to view admin pages. Contact an
           administrator if you believe this is a mistake.
         </p>
-        <Link
-          href="/"
-          className="mt-6 inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800"
-        >
+        <Link href="/" className="crm-btn-primary mt-6">
           Back to dashboard
         </Link>
-      </div>
+      </CrmCard>
     </div>
   );
 }
@@ -34,7 +32,7 @@ export function AdminSubNav() {
   ];
 
   return (
-    <nav className="mb-6 flex flex-wrap gap-2 border-b border-zinc-200 pb-3">
+    <nav className="crm-admin-subnav">
       {links.map((link) => {
         const active =
           link.href === "/admin"
@@ -45,11 +43,9 @@ export function AdminSubNav() {
           <Link
             key={link.href}
             href={link.href}
-            className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
-              active
-                ? "bg-zinc-900 text-white"
-                : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
-            }`}
+            className={
+              active ? "crm-admin-subnav-link crm-admin-subnav-link-active" : "crm-admin-subnav-link"
+            }
           >
             {link.label}
           </Link>
@@ -68,22 +64,15 @@ export function AdminSummaryCard({
   value: number | string;
   subtext?: string;
 }) {
-  return (
-    <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
-      <p className="text-sm font-medium text-zinc-600">{label}</p>
-      <p className="mt-2 text-2xl font-semibold tracking-tight text-zinc-900">
-        {value}
-      </p>
-      {subtext && <p className="mt-1 text-xs text-zinc-500">{subtext}</p>}
-    </div>
-  );
+  return <StatCard label={label} value={value} subtext={subtext} />;
 }
+
+import { PRODUCTIVITY_SCORE_EXPLANATION } from "@/lib/brokerProductivity";
 
 export function ProductivityScoreHint() {
   return (
-    <p className="text-xs text-zinc-500" title="Productivity score explanation">
-      Score is based on recent follow-ups, notes, new accounts, contacts,
-      opportunities, wins, and overdue items.
+    <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">
+      {PRODUCTIVITY_SCORE_EXPLANATION}
     </p>
   );
 }

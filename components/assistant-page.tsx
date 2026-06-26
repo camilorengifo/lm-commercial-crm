@@ -215,7 +215,7 @@ export function AssistantPage() {
           </p>
           <Link
             href="/companies"
-            className="mt-6 inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800"
+            className="mt-6 crm-btn-primary"
           >
             Add company
           </Link>

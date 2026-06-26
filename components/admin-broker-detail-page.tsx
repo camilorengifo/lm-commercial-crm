@@ -10,6 +10,7 @@ import {
   AdminSummaryCard,
 } from "@/components/admin-shared";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
+import { StatGrid } from "@/components/crm-ui";
 import { verifyAdminAccess } from "@/lib/admin";
 import {
   fetchBrokerAdminDetail,
@@ -141,7 +142,7 @@ export function AdminBrokerDetailPage() {
         </p>
       )}
 
-      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+      <StatGrid columns={6}>
         <AdminSummaryCard label="Companies" value={metrics.companies} />
         <AdminSummaryCard label="Contacts" value={metrics.contacts} />
         <AdminSummaryCard
@@ -160,9 +161,9 @@ export function AdminBrokerDetailPage() {
           label="Open pipeline"
           value={formatPipelineValue(metrics.openPipelineValue)}
         />
-      </div>
+      </StatGrid>
 
-      <div className="mb-8 grid gap-6 xl:grid-cols-2">
+      <div className="mb-5 grid gap-4 xl:grid-cols-2">
         <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
           <h2 className="text-lg font-medium text-zinc-900">Needs attention</h2>
           {detail.needsAttention.length === 0 ? (

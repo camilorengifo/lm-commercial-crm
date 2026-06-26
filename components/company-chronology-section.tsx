@@ -533,10 +533,10 @@ export function CompanyChronologySection({
   }
 
   return (
-    <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+    <section className="crm-card crm-card-padded">
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-medium text-zinc-900">
+          <h2 className="crm-section-title">
             Commercial Timeline
           </h2>
           <p className="mt-1 text-sm text-zinc-500">
@@ -551,7 +551,7 @@ export function CompanyChronologySection({
               setCreateError(null);
               cancelEditing();
             }}
-            className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800"
+            className="crm-btn-primary"
           >
             {showCreateForm ? "Cancel" : "Log Activity"}
           </button>
@@ -587,7 +587,7 @@ export function CompanyChronologySection({
               <button
                 type="submit"
                 disabled={createSubmitting}
-                className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                className="crm-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {createSubmitting ? "Saving..." : "Save Activity"}
               </button>
@@ -653,7 +653,7 @@ export function CompanyChronologySection({
                         <button
                           type="submit"
                           disabled={editSubmitting}
-                          className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="crm-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {editSubmitting ? "Saving..." : "Save Changes"}
                         </button>

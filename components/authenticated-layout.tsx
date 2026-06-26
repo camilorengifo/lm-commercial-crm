@@ -10,9 +10,11 @@ export function AuthenticatedLayout({
 }) {
   return (
     <ActiveUserGuard>
-      <div className="min-h-full flex-1 bg-zinc-50">
+      <div className="crm-app-bg flex min-h-screen flex-col lg:flex-row">
         <AppNav />
-        <div className={`mx-auto px-4 py-8 ${maxWidthClass}`}>{children}</div>
+        <main className="crm-main">
+          <div className={`crm-page-inner ${maxWidthClass}`}>{children}</div>
+        </main>
       </div>
     </ActiveUserGuard>
   );

@@ -122,17 +122,17 @@ export function loadOpportunityStatusBadgeClass(
 ): string {
   switch (normalizeOpportunityStage(status)) {
     case "prospecting":
-      return "bg-sky-100 text-sky-800";
+      return "bg-sky-50 text-sky-800 ring-sky-200";
     case "contacted":
-      return "bg-violet-100 text-violet-800";
+      return "bg-violet-50 text-violet-800 ring-violet-200";
     case "quoted":
-      return "bg-blue-100 text-blue-800";
+      return "bg-blue-50 text-blue-800 ring-blue-200";
     case "negotiating":
-      return "bg-amber-100 text-amber-800";
+      return "bg-amber-50 text-amber-800 ring-amber-200";
     case "won":
-      return "bg-emerald-100 text-emerald-800";
+      return "bg-emerald-50 text-emerald-800 ring-emerald-200";
     case "lost":
-      return "bg-red-100 text-red-800";
+      return "bg-red-50 text-red-800 ring-red-200";
   }
 }
 
@@ -143,48 +143,48 @@ export function isSalesStage(value: string): value is SalesStage {
 export function salesStageBadgeClass(stage: SalesStage): string {
   switch (stage) {
     case "New Lead":
-      return "bg-sky-100 text-sky-800";
+      return "bg-sky-50 text-sky-800 ring-sky-200";
     case "Contacted":
-      return "bg-violet-100 text-violet-800";
+      return "bg-violet-50 text-violet-800 ring-violet-200";
     case "In Follow-up":
-      return "bg-amber-100 text-amber-800";
+      return "bg-amber-50 text-amber-800 ring-amber-200";
     case "Quoted":
-      return "bg-blue-100 text-blue-800";
+      return "bg-blue-50 text-blue-800 ring-blue-200";
     case "Customer":
-      return "bg-emerald-100 text-emerald-800";
+      return "bg-emerald-50 text-emerald-800 ring-emerald-200";
     case "Not Interested":
-      return "bg-zinc-100 text-zinc-600";
+      return "bg-slate-100 text-slate-600 ring-slate-200";
     case "Dormant":
-      return "bg-stone-100 text-stone-600";
+      return "bg-stone-100 text-stone-600 ring-stone-200";
   }
 }
 
 export function priorityBadgeClass(priority: CompanyPriority): string {
   switch (priority) {
     case "Hot Lead":
-      return "bg-red-100 text-red-800";
+      return "bg-red-50 text-red-800 ring-red-200";
     case "High":
-      return "bg-orange-100 text-orange-800";
+      return "bg-orange-50 text-orange-800 ring-orange-200";
     case "Medium":
-      return "bg-blue-100 text-blue-800";
+      return "bg-blue-50 text-blue-800 ring-blue-200";
     case "Low":
-      return "bg-zinc-100 text-zinc-600";
+      return "bg-slate-100 text-slate-600 ring-slate-200";
   }
 }
 
 export function activityTypeBadgeClass(type: ActivityType): string {
   switch (type) {
     case "call":
-      return "bg-blue-100 text-blue-800";
+      return "bg-blue-50 text-blue-800 ring-blue-200";
     case "email":
-      return "bg-violet-100 text-violet-800";
+      return "bg-violet-50 text-violet-800 ring-violet-200";
     case "meeting":
-      return "bg-emerald-100 text-emerald-800";
+      return "bg-emerald-50 text-emerald-800 ring-emerald-200";
     case "visit":
-      return "bg-amber-100 text-amber-800";
+      return "bg-amber-50 text-amber-800 ring-amber-200";
     case "note":
-      return "bg-zinc-100 text-zinc-700";
+      return "bg-slate-100 text-slate-700 ring-slate-200";
     case "other":
-      return "bg-slate-100 text-slate-700";
+      return "bg-slate-100 text-slate-700 ring-slate-200";
   }
 }

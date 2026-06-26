@@ -130,30 +130,26 @@ export default function LoginPage() {
 
   if (checkingSession) {
     return (
-      <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50">
-        <p className="text-sm text-zinc-500">Loading...</p>
+      <div className="crm-loading-screen">
+        <p className="text-sm text-slate-500">Loading...</p>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50 px-4">
-      <div className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-8 shadow-sm">
+    <div className="crm-login-shell">
+      <div className="crm-login-card">
         <div className="mb-8 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-            Sign in
-          </h1>
-          <p className="mt-2 text-sm text-zinc-500">
-            Logistics Masters AI Commercial Assistant
+          <p className="crm-eyebrow">Logistics Masters</p>
+          <h1 className="crm-page-title mt-2">Sign in</h1>
+          <p className="crm-page-subtitle mx-auto">
+            Commercial CRM
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
-            <label
-              htmlFor="email"
-              className="mb-1.5 block text-sm font-medium text-zinc-700"
-            >
+            <label htmlFor="email" className="crm-label">
               Email
             </label>
             <input
@@ -163,16 +159,13 @@ export default function LoginPage() {
               required
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="crm-input"
               placeholder="you@company.com"
             />
           </div>
 
           <div>
-            <label
-              htmlFor="password"
-              className="mb-1.5 block text-sm font-medium text-zinc-700"
-            >
+            <label htmlFor="password" className="crm-label">
               Password
             </label>
             <input
@@ -182,18 +175,18 @@ export default function LoginPage() {
               required
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="crm-input"
             />
           </div>
 
           {inactiveNotice && (
-            <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <p className="crm-alert-warning">
               Your CRM access is inactive. Please contact an administrator.
             </p>
           )}
 
           {error && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            <p className="crm-alert-error">
               {error}
             </p>
           )}
@@ -201,7 +194,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+            className="crm-btn-primary w-full disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading ? "Signing in..." : "Sign in"}
           </button>

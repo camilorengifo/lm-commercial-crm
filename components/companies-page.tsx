@@ -5,6 +5,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
+import { CrmAlert, CrmCard, EmptyState, PageHeader, SectionHeader } from "@/components/crm-ui";
 import { CompaniesBulkActiveModal } from "@/components/companies-bulk-active-modal";
 import { CompaniesBulkArchiveModal } from "@/components/companies-bulk-archive-modal";
 import { CompaniesBulkPauseModal } from "@/components/companies-bulk-pause-modal";
@@ -294,8 +295,8 @@ export function CompaniesPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50">
-        <p className="text-sm text-zinc-500">Loading...</p>
+      <div className="crm-loading-screen">
+        <p className="text-sm text-slate-500">Loading...</p>
       </div>
     );
   }
@@ -306,48 +307,41 @@ export function CompaniesPage() {
 
   return (
     <AuthenticatedLayout>
-        <div className="mb-8">
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-            Companies
-          </h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            Search, filter, and manage your company book of business
-          </p>
-        </div>
+        <PageHeader
+          title="Companies"
+          description="Search, filter, and manage your company book of business"
+          actions={
+            <button
+              type="button"
+              onClick={() => {
+                setShowForm((prev) => !prev);
+                setFormError(null);
+              }}
+              className="crm-btn-primary"
+            >
+              {showForm ? "Cancel" : "Add Company"}
+            </button>
+          }
+        />
 
-        <div className="mb-6 flex flex-col gap-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowForm((prev) => !prev);
-                  setFormError(null);
-                }}
-                className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800"
-              >
-                {showForm ? "Cancel" : "Add Company"}
-              </button>
-            </div>
-
-            <div className="w-full sm:max-w-xs">
-              <label htmlFor="search" className="sr-only">
-                Search companies
-              </label>
-              <input
-                id="search"
-                type="search"
-                placeholder="Search companies..."
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
-              />
-            </div>
+        <CrmCard className="mb-5" padding>
+          <div className="mb-4 w-full sm:max-w-sm">
+            <label htmlFor="search" className="crm-label">
+              Search
+            </label>
+            <input
+              id="search"
+              type="search"
+              placeholder="Search companies..."
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="crm-input"
+            />
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
             <div>
-              <label htmlFor="account-status-filter" className="mb-1.5 block text-sm font-medium text-zinc-700">
+              <label htmlFor="account-status-filter" className="crm-label">
                 Account status
               </label>
               <select
@@ -356,7 +350,7 @@ export function CompaniesPage() {
                 onChange={(event) =>
                   setAccountStatusFilter(event.target.value as AccountStatusFilter)
                 }
-                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                className="crm-select"
               >
                 {ACCOUNT_STATUS_FILTER_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -367,14 +361,14 @@ export function CompaniesPage() {
             </div>
 
             <div>
-              <label htmlFor="country-filter" className="mb-1.5 block text-sm font-medium text-zinc-700">
+              <label htmlFor="country-filter" className="crm-label">
                 Country
               </label>
               <select
                 id="country-filter"
                 value={countryFilter}
                 onChange={(event) => setCountryFilter(event.target.value)}
-                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                className="crm-select"
               >
                 <option value="all">All countries</option>
                 {countryOptions.map((country) => (
@@ -386,14 +380,14 @@ export function CompaniesPage() {
             </div>
 
             <div>
-              <label htmlFor="priority-filter" className="mb-1.5 block text-sm font-medium text-zinc-700">
+              <label htmlFor="priority-filter" className="crm-label">
                 Priority
               </label>
               <select
                 id="priority-filter"
                 value={priorityFilter}
                 onChange={(event) => setPriorityFilter(event.target.value)}
-                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                className="crm-select"
               >
                 <option value="all">All priorities</option>
                 {COMPANY_PRIORITIES.map((priority) => (
@@ -405,7 +399,7 @@ export function CompaniesPage() {
             </div>
 
             <div>
-              <label htmlFor="sort-by" className="mb-1.5 block text-sm font-medium text-zinc-700">
+              <label htmlFor="sort-by" className="crm-label">
                 Sort
               </label>
               <select
@@ -414,7 +408,7 @@ export function CompaniesPage() {
                 onChange={(event) =>
                   setSortBy(event.target.value as CompanySortOption)
                 }
-                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                className="crm-select"
               >
                 {COMPANY_SORT_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -428,27 +422,28 @@ export function CompaniesPage() {
               <button
                 type="button"
                 onClick={resetFilters}
-                className="inline-flex w-full items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                className="crm-btn-secondary crm-btn-sm w-full"
               >
                 Reset filters
               </button>
             </div>
           </div>
-        </div>
+        </CrmCard>
 
         {successMessage && (
-          <p className="mb-4 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-800">
+          <CrmAlert variant="success" className="mb-4">
             {successMessage}
-          </p>
+          </CrmAlert>
         )}
 
         {selectedCompanyIds.size > 0 && (
-          <div className="mb-4 flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm font-medium text-zinc-700">
+          <CrmCard className="mb-4" padding>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm font-medium text-slate-700">
               {selectedCompanyIds.size} account
               {selectedCompanyIds.size === 1 ? "" : "s"} selected
               {selectedVisibleCount !== selectedCompanyIds.size && (
-                <span className="ml-1 font-normal text-zinc-500">
+                <span className="ml-1 font-normal text-slate-500">
                   ({selectedVisibleCount} visible)
                 </span>
               )}
@@ -458,7 +453,7 @@ export function CompaniesPage() {
                 type="button"
                 onClick={() => setBulkArchiveOpen(true)}
                 disabled={bulkSubmitting}
-                className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                className="crm-btn-primary crm-btn-sm disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Archive selected
               </button>
@@ -466,7 +461,7 @@ export function CompaniesPage() {
                 type="button"
                 onClick={() => setBulkPauseOpen(true)}
                 disabled={bulkSubmitting}
-                className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                className="crm-btn-secondary crm-btn-sm disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Pause selected
               </button>
@@ -474,7 +469,7 @@ export function CompaniesPage() {
                 type="button"
                 onClick={() => setBulkActiveOpen(true)}
                 disabled={bulkSubmitting}
-                className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                className="crm-btn-secondary crm-btn-sm disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Mark as Active
               </button>
@@ -482,32 +477,31 @@ export function CompaniesPage() {
                 type="button"
                 onClick={clearSelection}
                 disabled={bulkSubmitting}
-                className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                className="crm-btn-secondary crm-btn-sm disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Clear selection
               </button>
             </div>
-          </div>
+            </div>
+          </CrmCard>
         )}
 
         {fetchError && (
-          <p className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+          <CrmAlert variant="error" className="mb-4">
             {fetchError}
-          </p>
+          </CrmAlert>
         )}
 
         {showForm && (
-          <div className="mb-8 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <h2 className="mb-5 text-lg font-medium text-zinc-900">
-              New Company
-            </h2>
+          <CrmCard className="mb-8" padding>
+            <SectionHeader title="New Company" className="mb-5" />
 
             <form onSubmit={handleSubmit} className="space-y-5">
-              <div className="grid gap-5 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="sm:col-span-2">
                   <label
                     htmlFor="name"
-                    className="mb-1.5 block text-sm font-medium text-zinc-700"
+                    className="crm-label"
                   >
                     Company name <span className="text-red-600">*</span>
                   </label>
@@ -519,7 +513,7 @@ export function CompaniesPage() {
                     onChange={(event) =>
                       setForm((prev) => ({ ...prev, name: event.target.value }))
                     }
-                    className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                    className="crm-input"
                     placeholder="Acme Freight Co."
                   />
                 </div>
@@ -527,7 +521,7 @@ export function CompaniesPage() {
                 <div>
                   <label
                     htmlFor="city"
-                    className="mb-1.5 block text-sm font-medium text-zinc-700"
+                    className="crm-label"
                   >
                     City
                   </label>
@@ -538,14 +532,14 @@ export function CompaniesPage() {
                     onChange={(event) =>
                       setForm((prev) => ({ ...prev, city: event.target.value }))
                     }
-                    className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                    className="crm-input"
                   />
                 </div>
 
                 <div>
                   <label
                     htmlFor="state"
-                    className="mb-1.5 block text-sm font-medium text-zinc-700"
+                    className="crm-label"
                   >
                     State
                   </label>
@@ -556,14 +550,14 @@ export function CompaniesPage() {
                     onChange={(event) =>
                       setForm((prev) => ({ ...prev, state: event.target.value }))
                     }
-                    className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                    className="crm-input"
                   />
                 </div>
 
                 <div>
                   <label
                     htmlFor="country"
-                    className="mb-1.5 block text-sm font-medium text-zinc-700"
+                    className="crm-label"
                   >
                     Country
                   </label>
@@ -576,7 +570,7 @@ export function CompaniesPage() {
                         country: event.target.value,
                       }))
                     }
-                    className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                    className="crm-select"
                   >
                     {COUNTRY_OPTIONS.map((option) => (
                       <option key={option} value={option}>
@@ -589,7 +583,7 @@ export function CompaniesPage() {
                 <div>
                   <label
                     htmlFor="priority"
-                    className="mb-1.5 block text-sm font-medium text-zinc-700"
+                    className="crm-label"
                   >
                     Priority
                   </label>
@@ -602,7 +596,7 @@ export function CompaniesPage() {
                         priority: event.target.value as CompanyPriority,
                       }))
                     }
-                    className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                    className="crm-select"
                   >
                     {COMPANY_PRIORITIES.map((option) => (
                       <option key={option} value={option}>
@@ -615,7 +609,7 @@ export function CompaniesPage() {
                 <div>
                   <label
                     htmlFor="sales_stage"
-                    className="mb-1.5 block text-sm font-medium text-zinc-700"
+                    className="crm-label"
                   >
                     Sales stage
                   </label>
@@ -628,7 +622,7 @@ export function CompaniesPage() {
                         sales_stage: event.target.value as SalesStage,
                       }))
                     }
-                    className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                    className="crm-select"
                   >
                     {SALES_STAGES.map((option) => (
                       <option key={option} value={option}>
@@ -641,7 +635,7 @@ export function CompaniesPage() {
                 <div>
                   <label
                     htmlFor="last_contact_at"
-                    className="mb-1.5 block text-sm font-medium text-zinc-700"
+                    className="crm-label"
                   >
                     Last contact
                   </label>
@@ -655,14 +649,14 @@ export function CompaniesPage() {
                         last_contact_at: event.target.value,
                       }))
                     }
-                    className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                    className="crm-input"
                   />
                 </div>
 
                 <div>
                   <label
                     htmlFor="next_follow_up_at"
-                    className="mb-1.5 block text-sm font-medium text-zinc-700"
+                    className="crm-label"
                   >
                     Next follow-up
                   </label>
@@ -676,14 +670,14 @@ export function CompaniesPage() {
                         next_follow_up_at: event.target.value,
                       }))
                     }
-                    className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                    className="crm-input"
                   />
                 </div>
 
                 <div className="sm:col-span-2">
                   <label
                     htmlFor="general_notes"
-                    className="mb-1.5 block text-sm font-medium text-zinc-700"
+                    className="crm-label"
                   >
                     General notes
                   </label>
@@ -697,23 +691,23 @@ export function CompaniesPage() {
                         general_notes: event.target.value,
                       }))
                     }
-                    className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                    className="crm-input"
                     placeholder="Notes about this company..."
                   />
                 </div>
               </div>
 
               {formError && (
-                <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                <CrmAlert variant="error" className="mb-0">
                   {formError}
-                </p>
+                </CrmAlert>
               )}
 
               <div className="flex gap-3">
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="crm-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {submitting ? "Saving..." : "Save Company"}
                 </button>
@@ -724,50 +718,57 @@ export function CompaniesPage() {
                     setForm(EMPTY_FORM);
                     setFormError(null);
                   }}
-                  className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                  className="crm-btn-secondary"
                 >
                   Cancel
                 </button>
               </div>
             </form>
-          </div>
+          </CrmCard>
         )}
 
-        <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+        <div className="crm-table-wrap">
           {filteredCompanies.length === 0 ? (
-            <div className="px-6 py-12 text-center">
-              <p className="text-sm text-zinc-500">
-                {companies.length === 0
-                  ? "No companies yet. Click Add Company to get started."
+            <EmptyState
+              title={
+                companies.length === 0
+                  ? "No companies yet"
                   : accountStatusFilter === "archived"
-                    ? "No archived accounts yet."
+                    ? "No archived accounts"
+                    : "No matches found"
+              }
+              description={
+                companies.length === 0
+                  ? "Click Add Company to get started."
+                  : accountStatusFilter === "archived"
+                    ? "Archived accounts will appear here."
                     : accountStatusFilter === "working" &&
                         !search &&
                         countryFilter === "all" &&
                         priorityFilter === "all"
-                      ? "No working accounts found."
-                      : "No companies match your filters."}
-              </p>
-            </div>
+                      ? "No working accounts in your book."
+                      : "Try adjusting your search or filters."
+              }
+            />
           ) : (
             <div className="overflow-x-auto">
-              <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-2">
+              <div className="crm-divider-toolbar">
                 <button
                   type="button"
                   onClick={toggleSelectAllVisible}
-                  className="text-sm font-medium text-zinc-600 transition hover:text-zinc-900"
+                  className="text-sm font-medium text-slate-600 transition hover:text-slate-900"
                 >
                   {allVisibleSelected ? "Deselect all visible" : "Select all visible"}
                 </button>
                 {selectedVisibleCount > 0 && (
-                  <span className="text-sm text-zinc-500">
+                  <span className="text-sm text-slate-500">
                     {selectedVisibleCount} selected
                   </span>
                 )}
               </div>
-              <table className="w-full min-w-[800px] text-left text-sm">
+              <table className="crm-table">
                 <thead>
-                  <tr className="border-b border-zinc-200 bg-zinc-50">
+                  <tr>
                     <th className="px-4 py-3">
                       <input
                         type="checkbox"
@@ -815,7 +816,7 @@ export function CompaniesPage() {
                     );
 
                     return (
-                    <tr key={company.id} className="hover:bg-zinc-50/50">
+                    <tr key={company.id}>
                       <td className="px-4 py-3">
                         <input
                           type="checkbox"
@@ -828,7 +829,7 @@ export function CompaniesPage() {
                       <td className="px-4 py-3">
                         <Link
                           href={`/companies/${company.id}`}
-                          className="font-medium text-zinc-900 transition hover:text-zinc-600 hover:underline"
+                          className="crm-link font-medium"
                         >
                           {company.name}
                         </Link>
@@ -844,7 +845,7 @@ export function CompaniesPage() {
                       </td>
                       <td className="px-4 py-3">
                         <span
-                          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${priorityBadgeClass(company.priority)}`}
+                          className={`crm-badge ${priorityBadgeClass(company.priority)}`}
                         >
                           {company.priority}
                         </span>
@@ -852,13 +853,13 @@ export function CompaniesPage() {
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1">
                           <span
-                            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${accountStatusBadgeClass(status)}`}
+                            className={`crm-badge ${accountStatusBadgeClass(status)}`}
                           >
                             {ACCOUNT_STATUS_LABELS[status]}
                           </span>
                           {dispositionLabel && (
                             <span
-                              className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${accountDispositionBadgeClass(company.account_disposition ?? "")}`}
+                              className={`crm-badge ${accountDispositionBadgeClass(company.account_disposition ?? "")}`}
                             >
                               {dispositionLabel}
                             </span>
@@ -867,7 +868,7 @@ export function CompaniesPage() {
                       </td>
                       <td className="px-4 py-3">
                         <span
-                          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${salesStageBadgeClass(company.sales_stage)}`}
+                          className={`crm-badge ${salesStageBadgeClass(company.sales_stage)}`}
                         >
                           {company.sales_stage}
                         </span>

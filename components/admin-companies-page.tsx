@@ -10,6 +10,7 @@ import {
   AdminSummaryCard,
 } from "@/components/admin-shared";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
+import { StatGrid } from "@/components/crm-ui";
 import {
   AdminReassignCompaniesModal,
   buildAssignableOwnersFromProfiles,
@@ -270,7 +271,7 @@ export function AdminCompaniesPage() {
         </p>
       )}
 
-      <div className="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <StatGrid columns={5}>
         <AdminSummaryCard label="Total companies" value={summary.totalCompanies} />
         <AdminSummaryCard
           label="High priority companies"
@@ -289,9 +290,9 @@ export function AdminCompaniesPage() {
           label="No contacts"
           value={summary.companiesWithNoContacts}
         />
-      </div>
+      </StatGrid>
 
-      <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <div className="mb-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <div className="xl:col-span-2">
           <label
             htmlFor="company-search"
@@ -478,7 +479,7 @@ export function AdminCompaniesPage() {
           type="button"
           onClick={openReassignModal}
           disabled={selectedCompanyIds.size === 0}
-          className="inline-flex shrink-0 items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+          className="crm-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
         >
           Reassign Broker
         </button>

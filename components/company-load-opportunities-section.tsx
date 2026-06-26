@@ -151,7 +151,7 @@ export function CompanyLoadOpportunitiesSection({
     <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
       <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-medium text-zinc-900">Opportunities</h2>
+          <h2 className="crm-section-title">Opportunities</h2>
           <p className="mt-1 text-sm text-zinc-500">
             Load opportunities and quotes for this company
           </p>

@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
+import { CrmAlert, CrmCard, PageHeader } from "@/components/crm-ui";
 import { CompanyAccountArchiveModal } from "@/components/company-account-archive-modal";
 import { CompanyAccountStatusSection } from "@/components/company-account-status-section";
 import { CompanyArchiveModal } from "@/components/company-archive-modal";
@@ -56,10 +57,10 @@ function DetailField({
 }) {
   return (
     <div>
-      <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+      <dt className="crm-detail-field-label">
         {label}
       </dt>
-      <dd className="mt-1 text-sm text-zinc-900">{children}</dd>
+      <dd className="crm-detail-field-value">{children}</dd>
     </div>
   );
 }
@@ -405,49 +406,49 @@ export function CompanyDetailPage() {
 
         {company && (
           <>
-            <div className="mb-8 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <div className="crm-company-header">
+              <div className="crm-company-header-bar" aria-hidden />
+              <div className="pt-2">
               {isSoftDeleted && (
-                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <CrmAlert variant="warning" className="mb-4">
                   This company has been deleted from your active list.
                   {company.delete_reason
                     ? ` Reason: ${company.delete_reason}`
                     : ""}
-                </div>
+                </CrmAlert>
               )}
 
               {!isSoftDeleted && isAccountArchived && (
-                <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-800">
+                <CrmAlert variant="warning" className="mb-4">
                   This account is archived and hidden from your default working
                   list.
                   {company.archive_reason
                     ? ` Reason: ${company.archive_reason}`
                     : ""}
-                </div>
+                </CrmAlert>
               )}
 
               <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-                    {company.name}
-                  </h1>
-                  <p className="mt-1 text-sm text-zinc-500">
-                    Company record — contacts, opportunities, timeline, and
-                    follow-ups
+                  <p className="crm-eyebrow">Company account</p>
+                  <h1 className="crm-page-title mt-2">{company.name}</h1>
+                  <p className="crm-page-subtitle">
+                    Contacts, opportunities, timeline, and follow-ups
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span
-                    className={`inline-flex rounded-full px-3 py-1 text-sm font-medium ${priorityBadgeClass(company.priority)}`}
+                    className={`crm-badge ${priorityBadgeClass(company.priority)}`}
                   >
                     {company.priority}
                   </span>
                   <span
-                    className={`inline-flex rounded-full px-3 py-1 text-sm font-medium ${accountStatusBadgeClass(accountStatus)}`}
+                    className={`crm-badge ${accountStatusBadgeClass(accountStatus)}`}
                   >
                     {ACCOUNT_STATUS_LABELS[accountStatus]}
                   </span>
                   {dispositionLabel && (
-                    <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
+                    <span className="crm-badge bg-slate-100 text-slate-700 ring-slate-200">
                       {dispositionLabel}
                     </span>
                   )}
@@ -456,7 +457,7 @@ export function CompanyDetailPage() {
                       <button
                         type="button"
                         onClick={() => setEditOpen(true)}
-                        className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                        className="crm-btn-secondary crm-btn-sm"
                       >
                         Edit company
                       </button>
@@ -464,7 +465,7 @@ export function CompanyDetailPage() {
                         <button
                           type="button"
                           onClick={() => setAccountArchiveOpen(true)}
-                          className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                          className="crm-btn-secondary crm-btn-sm"
                         >
                           Archive account
                         </button>
@@ -474,7 +475,7 @@ export function CompanyDetailPage() {
                           type="button"
                           onClick={handleRestoreAccount}
                           disabled={restoringAccount}
-                          className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
+                          className="crm-btn-primary crm-btn-sm disabled:opacity-60"
                         >
                           {restoringAccount ? "Restoring..." : "Restore account"}
                         </button>
@@ -493,7 +494,7 @@ export function CompanyDetailPage() {
                       <button
                         type="button"
                         onClick={() => setEditOpen(true)}
-                        className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                        className="crm-btn-secondary crm-btn-sm"
                       >
                         Edit company
                       </button>
@@ -501,7 +502,7 @@ export function CompanyDetailPage() {
                         <button
                           type="button"
                           onClick={() => setAccountArchiveOpen(true)}
-                          className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                          className="crm-btn-secondary crm-btn-sm"
                         >
                           Archive account
                         </button>
@@ -511,7 +512,7 @@ export function CompanyDetailPage() {
                           type="button"
                           onClick={handleRestoreAccount}
                           disabled={restoringAccount}
-                          className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
+                          className="crm-btn-primary crm-btn-sm disabled:opacity-60"
                         >
                           {restoringAccount ? "Restoring..." : "Restore account"}
                         </button>
@@ -520,7 +521,7 @@ export function CompanyDetailPage() {
                         <button
                           type="button"
                           onClick={() => setArchiveOpen(true)}
-                          className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-800 transition hover:bg-red-100"
+                          className="crm-btn-danger crm-btn-sm"
                         >
                           Delete company
                         </button>
@@ -530,7 +531,7 @@ export function CompanyDetailPage() {
                           type="button"
                           onClick={handleRestoreCompany}
                           disabled={restoring}
-                          className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
+                          className="crm-btn-primary crm-btn-sm disabled:opacity-60"
                         >
                           {restoring ? "Restoring..." : "Restore deleted company"}
                         </button>
@@ -540,7 +541,7 @@ export function CompanyDetailPage() {
                 </div>
               </div>
 
-              <dl className="grid gap-5 sm:grid-cols-2">
+              <dl className="grid gap-4 sm:grid-cols-2">
                 <DetailField label="City">{company.city || "—"}</DetailField>
                 <DetailField label="State">{company.state || "—"}</DetailField>
                 <DetailField label="Country">
@@ -611,7 +612,7 @@ export function CompanyDetailPage() {
                             reassigning ||
                             reassignBrokerId === company.user_id
                           }
-                          className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="crm-btn-secondary crm-btn-sm disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {reassigning ? "Saving..." : "Save owner change"}
                         </button>
@@ -638,24 +639,25 @@ export function CompanyDetailPage() {
                   )}
                 </DetailField>
               </div>
+              </div>
             </div>
 
-            <div className="space-y-6">
+            <div className="space-y-5">
               <CompanyAccountStatusSection
                 company={company}
                 canManage={canManageCompany}
                 onUpdated={handleAccountStatusUpdated}
               />
-              <div className="flex flex-wrap gap-2 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
+              <div className="crm-workspace-toolbar">
                 <Link
                   href="/assistant"
-                  className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                  className="crm-btn-secondary crm-btn-sm"
                 >
                   Open in AI Assistant
                 </Link>
                 <Link
                   href={`/assistant?company=${company.id}`}
-                  className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                  className="crm-btn-secondary crm-btn-sm"
                 >
                   Draft next outreach
                 </Link>

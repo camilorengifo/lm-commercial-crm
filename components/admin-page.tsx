@@ -11,6 +11,7 @@ import {
   ProductivityScoreHint,
 } from "@/components/admin-shared";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
+import { CrmAlert, CrmCard, PageHeader, SectionHeader, StatGrid } from "@/components/crm-ui";
 import { verifyAdminAccess } from "@/lib/admin";
 import {
   fetchAdminOverview,
@@ -62,8 +63,8 @@ export function AdminPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50">
-        <p className="text-sm text-zinc-500">Loading...</p>
+      <div className="crm-loading-screen">
+        <p className="text-sm text-slate-500">Loading...</p>
       </div>
     );
   }
@@ -81,25 +82,16 @@ export function AdminPage() {
 
   return (
     <AuthenticatedLayout maxWidthClass="max-w-[1400px]">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-          Admin overview
-        </h1>
-        <p className="mt-2 text-sm text-zinc-600">
-          Global commercial activity, broker productivity, and pipeline health
-          across all accounts.
-        </p>
-      </div>
+      <PageHeader
+        title="Admin overview"
+        description="Global commercial activity, broker productivity, and pipeline health across all accounts."
+      />
 
       <AdminSubNav />
 
-      {fetchError && (
-        <p className="mb-6 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-          {fetchError}
-        </p>
-      )}
+      {fetchError && <CrmAlert variant="error">{fetchError}</CrmAlert>}
 
-      <div className="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6">
+      <StatGrid columns={6}>
         <AdminSummaryCard label="Total brokers" value={kpis.totalBrokers} />
         <AdminSummaryCard label="Active brokers" value={kpis.activeBrokers} />
         <AdminSummaryCard label="Total companies" value={kpis.totalCompanies} />
@@ -134,50 +126,38 @@ export function AdminPage() {
           label="Open pipeline value"
           value={formatPipelineValue(kpis.estimatedOpenPipelineValue)}
         />
-      </div>
+      </StatGrid>
 
-      <section className="mb-8 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-lg font-medium text-zinc-900">
-              Companies oversight
-            </h2>
-            <p className="mt-1 text-sm text-zinc-500">
-              Review all companies across brokers — overdue follow-ups, abandoned
-              accounts, missing contacts, and hot leads.
-            </p>
-          </div>
-          <Link
-            href="/admin/companies"
-            className="inline-flex shrink-0 items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800"
-          >
-            View companies oversight
-          </Link>
-        </div>
-      </section>
+      <CrmCard className="mb-5">
+        <SectionHeader
+          title="Companies oversight"
+          description="Review all companies across brokers — overdue follow-ups, abandoned accounts, missing contacts, and hot leads."
+          actions={
+            <Link href="/admin/companies" className="crm-btn-primary crm-btn-sm">
+              View companies oversight
+            </Link>
+          }
+        />
+      </CrmCard>
 
-      <section className="mb-8 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h2 className="text-lg font-medium text-zinc-900">
-              Broker productivity
-            </h2>
-            <ProductivityScoreHint />
-          </div>
-          <Link
-            href="/admin/brokers"
-            className="text-sm font-medium text-zinc-600 underline-offset-2 hover:text-zinc-900 hover:underline"
-          >
-            View full broker productivity
-          </Link>
-        </div>
+      <CrmCard className="mb-5">
+        <SectionHeader
+          title="Broker productivity"
+          actions={
+            <Link href="/admin/brokers" className="crm-link text-sm">
+              View full report
+            </Link>
+          }
+          className="mb-4"
+        />
+        <ProductivityScoreHint />
 
         {brokerProductivity.length === 0 ? (
           <p className="text-sm text-zinc-500">No brokers registered yet.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-zinc-200 text-sm">
-              <thead className="bg-zinc-50">
+            <table className="crm-table">
+              <thead>
                 <tr>
                   <th className="px-3 py-2 text-left font-medium text-zinc-600">
                     Broker
@@ -263,17 +243,19 @@ export function AdminPage() {
           </div>
         )}
 
-        <p className="mt-3 text-xs text-zinc-500">
+        <p className="mt-3 text-xs text-slate-500">
           {PRODUCTIVITY_SCORE_EXPLANATION}
         </p>
-      </section>
+      </CrmCard>
 
-      <div className="mb-8 grid gap-6 xl:grid-cols-2">
-        <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-medium text-zinc-900">Needs attention</h2>
-          <p className="mt-1 text-sm text-zinc-500">
-            Brokers, companies, and opportunities that need oversight.
-          </p>
+      <div className="mb-5 grid gap-4 xl:grid-cols-2">
+        <CrmCard>
+          <SectionHeader
+            title="Needs attention"
+            description="Brokers, companies, and opportunities that need oversight."
+            accent="red"
+            className="mb-4"
+          />
 
           <div className="mt-4 space-y-6">
             <div>
@@ -422,13 +404,15 @@ export function AdminPage() {
               )}
             </div>
           </div>
-        </section>
+        </CrmCard>
 
-        <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-medium text-zinc-900">Commercial pulse</h2>
-          <p className="mt-1 text-sm text-zinc-500">
-            Recent activity across all brokers.
-          </p>
+        <CrmCard>
+          <SectionHeader
+            title="Commercial pulse"
+            description="Recent activity across all brokers."
+            accent="blue"
+            className="mb-4"
+          />
 
           <div className="mt-4 space-y-6">
             <div>
@@ -512,7 +496,7 @@ export function AdminPage() {
               )}
             </div>
           </div>
-        </section>
+        </CrmCard>
       </div>
     </AuthenticatedLayout>
   );

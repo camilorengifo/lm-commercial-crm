@@ -6,6 +6,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { FollowUpTypeFormFields } from "@/components/follow-up-type-form-fields";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
+import { CrmAlert, CrmCard, PageHeader, StatCard, StatGrid } from "@/components/crm-ui";
 import {
   followUpTypeFormFromRecord,
   type FollowUpTypeFormValues,
@@ -56,18 +57,15 @@ function SummaryCard({
   label,
   value,
   onClick,
+  highlight,
 }: {
   label: string;
   value: number | string;
   onClick?: () => void;
+  highlight?: "danger" | "warning";
 }) {
-  const content = (
-    <>
-      <p className="text-sm font-medium text-zinc-600">{label}</p>
-      <p className="mt-2 text-2xl font-semibold tracking-tight text-zinc-900">
-        {value}
-      </p>
-    </>
+  const card = (
+    <StatCard label={label} value={value} highlight={highlight} />
   );
 
   if (onClick) {
@@ -75,18 +73,14 @@ function SummaryCard({
       <button
         type="button"
         onClick={onClick}
-        className="w-full rounded-xl border border-zinc-200 bg-white p-5 text-left shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50/80"
+        className="block w-full text-left"
       >
-        {content}
+        {card}
       </button>
     );
   }
 
-  return (
-    <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
-      {content}
-    </div>
-  );
+  return card;
 }
 
 function matchesSearch(followUp: FollowUpEnriched, query: string): boolean {
@@ -172,7 +166,7 @@ function RescheduleModal({
           <div>
             <label
               htmlFor="reschedule-due"
-              className="mb-1.5 block text-sm font-medium text-zinc-700"
+              className="crm-label"
             >
               New due date <span className="text-red-600">*</span>
             </label>
@@ -182,14 +176,14 @@ function RescheduleModal({
               required
               value={dueAt}
               onChange={(event) => setDueAt(event.target.value)}
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="crm-input"
             />
           </div>
 
           <div>
             <label
               htmlFor="reschedule-title"
-              className="mb-1.5 block text-sm font-medium text-zinc-700"
+              className="crm-label"
             >
               Title <span className="text-red-600">*</span>
             </label>
@@ -199,14 +193,14 @@ function RescheduleModal({
               required
               value={title}
               onChange={(event) => setTitle(event.target.value)}
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="crm-input"
             />
           </div>
 
           <div>
             <label
               htmlFor="reschedule-notes"
-              className="mb-1.5 block text-sm font-medium text-zinc-700"
+              className="crm-label"
             >
               Notes / next step
             </label>
@@ -215,7 +209,7 @@ function RescheduleModal({
               rows={3}
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="crm-input"
               placeholder="What should happen next?"
             />
           </div>
@@ -244,7 +238,7 @@ function RescheduleModal({
             <button
               type="submit"
               disabled={saving}
-              className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
+              className="crm-btn-primary disabled:opacity-60"
             >
               {saving ? "Saving..." : "Save reschedule"}
             </button>
@@ -299,7 +293,7 @@ function ActivityNoteModal({
           <div>
             <label
               htmlFor="activity-type"
-              className="mb-1.5 block text-sm font-medium text-zinc-700"
+              className="crm-label"
             >
               Activity type
             </label>
@@ -309,7 +303,7 @@ function ActivityNoteModal({
               onChange={(event) =>
                 setActivityType(event.target.value as ActivityType)
               }
-              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="crm-select"
             >
               {ACTIVITY_TYPES.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -322,7 +316,7 @@ function ActivityNoteModal({
           <div>
             <label
               htmlFor="activity-subject"
-              className="mb-1.5 block text-sm font-medium text-zinc-700"
+              className="crm-label"
             >
               Subject
             </label>
@@ -331,14 +325,14 @@ function ActivityNoteModal({
               type="text"
               value={subject}
               onChange={(event) => setSubject(event.target.value)}
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="crm-input"
             />
           </div>
 
           <div>
             <label
               htmlFor="activity-notes"
-              className="mb-1.5 block text-sm font-medium text-zinc-700"
+              className="crm-label"
             >
               What happened? <span className="text-red-600">*</span>
             </label>
@@ -348,7 +342,7 @@ function ActivityNoteModal({
               rows={4}
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="crm-input"
               placeholder="Customer response, next steps, quote details..."
             />
           </div>
@@ -371,7 +365,7 @@ function ActivityNoteModal({
             <button
               type="submit"
               disabled={saving}
-              className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
+              className="crm-btn-primary disabled:opacity-60"
             >
               {saving ? "Saving..." : "Save activity"}
             </button>
@@ -402,11 +396,11 @@ function FollowUpCard({
   onAddActivity: (followUp: FollowUpEnriched) => void;
 }) {
   const variantClasses: Record<WorkcenterTab | "cancelled", string> = {
-    overdue: "border-red-200 bg-red-50/60",
-    today: "border-amber-200 bg-amber-50/50",
-    upcoming: "border-zinc-200 bg-white",
-    completed: "border-emerald-200 bg-emerald-50/40",
-    cancelled: "border-zinc-200 bg-zinc-50",
+    overdue: "crm-follow-up-urgent",
+    today: "crm-follow-up-today",
+    upcoming: "crm-card crm-card-padded shadow-sm",
+    completed: "crm-card crm-card-padded border-emerald-200 bg-emerald-50/40",
+    cancelled: "crm-card crm-card-padded bg-slate-50",
   };
 
   const followUpNote = followUp.notes?.trim() || followUp.title;
@@ -414,9 +408,7 @@ function FollowUpCard({
     variant === "overdue" ? getDaysOverdue(followUp.due_at) : 0;
 
   return (
-    <li
-      className={`rounded-lg border p-4 shadow-sm ${variantClasses[variant]}`}
-    >
+    <li className={variantClasses[variant]}>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 flex-1 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -870,8 +862,8 @@ export function FollowUpsPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50">
-        <p className="text-sm text-zinc-500">Loading...</p>
+      <div className="crm-loading-screen">
+        <p className="text-sm text-slate-500">Loading...</p>
       </div>
     );
   }
@@ -889,39 +881,35 @@ export function FollowUpsPage() {
 
   return (
     <AuthenticatedLayout maxWidthClass="max-w-[1400px]">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-          Follow-ups Work Center
-        </h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          {isAdmin
+      <PageHeader
+        title="Follow-ups Work Center"
+        description={
+          isAdmin
             ? "Daily work center across all brokers — view who needs contact today and what is overdue."
-            : "Your daily work center — see who to contact today, what is overdue, and log outcomes quickly."}
-        </p>
-      </div>
+            : "Your daily work center — see who to contact today, what is overdue, and log outcomes quickly."
+        }
+      />
 
-      {fetchError && (
-        <p className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-          {fetchError}
-        </p>
-      )}
+      {fetchError && <CrmAlert variant="error" className="mb-4">{fetchError}</CrmAlert>}
 
       {successMessage && (
-        <p className="mb-4 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+        <CrmAlert variant="success" className="mb-4">
           {successMessage}
-        </p>
+        </CrmAlert>
       )}
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <StatGrid columns={5}>
         <SummaryCard
           label="Due Today"
           value={metrics.dueToday}
           onClick={() => setActiveTab("today")}
+          highlight="warning"
         />
         <SummaryCard
           label="Overdue"
           value={metrics.overdue}
           onClick={() => setActiveTab("overdue")}
+          highlight="danger"
         />
         <SummaryCard
           label="Upcoming"
@@ -937,14 +925,14 @@ export function FollowUpsPage() {
           label="Total Open Follow-ups"
           value={metrics.totalOpen}
         />
-      </div>
+      </StatGrid>
 
-      <div className="mb-6 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <CrmCard className="mb-5" padding>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           <div className="xl:col-span-2">
             <label
               htmlFor="follow-up-search"
-              className="mb-1.5 block text-sm font-medium text-zinc-700"
+              className="crm-label"
             >
               Search
             </label>
@@ -954,14 +942,14 @@ export function FollowUpsPage() {
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Company, contact, or note..."
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="crm-input"
             />
           </div>
 
           <div>
             <label
               htmlFor="status-filter"
-              className="mb-1.5 block text-sm font-medium text-zinc-700"
+              className="crm-label"
             >
               Status
             </label>
@@ -971,7 +959,7 @@ export function FollowUpsPage() {
               onChange={(event) =>
                 setStatusFilter(event.target.value as StatusFilter)
               }
-              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="crm-select"
             >
               <option value="open">Open</option>
               <option value="pending">Pending</option>
@@ -983,7 +971,7 @@ export function FollowUpsPage() {
           <div>
             <label
               htmlFor="due-filter"
-              className="mb-1.5 block text-sm font-medium text-zinc-700"
+              className="crm-label"
             >
               Due date
             </label>
@@ -993,7 +981,7 @@ export function FollowUpsPage() {
               onChange={(event) =>
                 setDueDateFilter(event.target.value as DueDateFilter)
               }
-              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="crm-select"
             >
               <option value="all">All</option>
               <option value="today">Today</option>
@@ -1005,7 +993,7 @@ export function FollowUpsPage() {
           <div>
             <label
               htmlFor="priority-filter"
-              className="mb-1.5 block text-sm font-medium text-zinc-700"
+              className="crm-label"
             >
               Priority
             </label>
@@ -1017,7 +1005,7 @@ export function FollowUpsPage() {
                   event.target.value as "all" | CompanyPriority,
                 )
               }
-              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="crm-select"
             >
               <option value="all">All priorities</option>
               {COMPANY_PRIORITIES.map((priority) => (
@@ -1032,7 +1020,7 @@ export function FollowUpsPage() {
             <div className="md:col-span-2 xl:col-span-5">
               <label
                 htmlFor="broker-filter"
-                className="mb-1.5 block text-sm font-medium text-zinc-700"
+                className="crm-label"
               >
                 Broker
               </label>
@@ -1040,7 +1028,7 @@ export function FollowUpsPage() {
                 id="broker-filter"
                 value={brokerFilter}
                 onChange={(event) => setBrokerFilter(event.target.value)}
-                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 sm:max-w-md"
+                className="crm-select sm:max-w-md"
               >
                 <option value="all">All brokers</option>
                 {brokers.map((broker) => (
@@ -1053,28 +1041,36 @@ export function FollowUpsPage() {
             </div>
           )}
         </div>
-      </div>
+      </CrmCard>
 
-      <div className="mb-4 flex flex-wrap gap-2 border-b border-zinc-200 pb-1">
+      <div className="mb-6 flex flex-wrap gap-2">
         {TAB_CONFIG.map((tab) => {
           const count =
             tab.id === "completed"
               ? completedFollowUps.length
               : buckets[tab.id].length;
 
+          const isActive = activeTab === tab.id;
+
           return (
             <button
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
-              className={`rounded-t-lg px-4 py-2 text-sm font-medium transition ${
-                activeTab === tab.id
-                  ? "border border-b-0 border-zinc-200 bg-white text-zinc-900"
-                  : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
-              }`}
+              className={
+                isActive
+                  ? "crm-tab-pill crm-tab-pill-active"
+                  : "crm-tab-pill"
+              }
             >
               {tab.title}
-              <span className="ml-2 rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600">
+              <span
+                className={`ml-2 rounded-md px-2 py-0.5 text-xs font-bold ${
+                  isActive
+                    ? "bg-white/20 text-white"
+                    : "bg-slate-100 text-slate-600"
+                }`}
+              >
                 {count}
               </span>
             </button>
@@ -1082,12 +1078,12 @@ export function FollowUpsPage() {
         })}
       </div>
 
-      <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+      <CrmCard padding>
         <div className="mb-4">
-          <h2 className="text-lg font-medium text-zinc-900">
+          <h2 className="crm-section-title">
             {activeTabConfig.title}
           </h2>
-          <p className="mt-1 text-sm text-zinc-500">
+          <p className="crm-section-subtitle">
             {activeTabConfig.description}
           </p>
         </div>
@@ -1124,7 +1120,7 @@ export function FollowUpsPage() {
             and reschedule their own items.
           </p>
         )}
-      </section>
+      </CrmCard>
 
       {rescheduleTarget && (
         <RescheduleModal

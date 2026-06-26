@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
+import { CrmAlert, PageHeader } from "@/components/crm-ui";
 import {
   COMPANY_PRIORITIES,
   DEFAULT_SALES_STAGE,
@@ -44,7 +45,7 @@ function PipelineCompanyCard({
   const otherStages = SALES_STAGES.filter((stage) => stage !== company.sales_stage);
 
   return (
-    <article className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+    <article className="crm-pipeline-card">
       <div className="mb-3 flex items-start justify-between gap-2">
         <Link
           href={`/companies/${company.id}`}
@@ -127,7 +128,7 @@ function PipelineColumn({
   onMoveStage: (companyId: string, stage: SalesStage) => void;
 }) {
   return (
-    <div className="flex w-72 shrink-0 flex-col rounded-xl border border-zinc-200 bg-zinc-50/80">
+    <div className="crm-pipeline-column flex w-72 shrink-0 flex-col">
       <div className="border-b border-zinc-200 px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-zinc-900">{stage}</h2>
@@ -300,8 +301,8 @@ export function PipelinePage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50">
-        <p className="text-sm text-zinc-500">Loading...</p>
+      <div className="crm-loading-screen">
+        <p className="text-sm text-slate-500">Loading...</p>
       </div>
     );
   }
@@ -312,20 +313,16 @@ export function PipelinePage() {
 
   return (
     <AuthenticatedLayout maxWidthClass="max-w-[1400px]">
-        <div className="mb-8">
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-            Sales Pipeline
-          </h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            Visual board by sales stage — uses the same company record as
-            Companies and Company Detail
-          </p>
-        </div>
+        <PageHeader
+          title="Sales Pipeline"
+          description="Visual board by sales stage — uses the same company record as Companies and Company Detail"
+        />
 
-        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end">
+        <div className="crm-filter-bar">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <div className="w-full sm:max-w-sm">
-            <label htmlFor="pipeline-search" className="sr-only">
-              Search companies
+            <label htmlFor="pipeline-search" className="crm-label">
+              Search
             </label>
             <input
               id="pipeline-search"
@@ -333,15 +330,12 @@ export function PipelinePage() {
               placeholder="Search by company name..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="crm-input"
             />
           </div>
 
           <div className="w-full sm:max-w-xs">
-            <label
-              htmlFor="priority-filter"
-              className="mb-1.5 block text-sm font-medium text-zinc-700"
-            >
+            <label htmlFor="priority-filter" className="crm-label">
               Priority
             </label>
             <select
@@ -350,7 +344,7 @@ export function PipelinePage() {
               onChange={(event) =>
                 setPriorityFilter(event.target.value as CompanyPriority | "")
               }
-              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="crm-select"
             >
               <option value="">All priorities</option>
               {PRIORITY_FILTER_OPTIONS.map((option) => (
@@ -361,11 +355,10 @@ export function PipelinePage() {
             </select>
           </div>
         </div>
+        </div>
 
         {fetchError && (
-          <p className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-            {fetchError}
-          </p>
+          <p className="mb-4 crm-alert-error">{fetchError}</p>
         )}
 
         <div className="overflow-x-auto pb-4">

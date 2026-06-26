@@ -141,7 +141,7 @@ export function CompanyAccountStatusSection({
     <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-medium text-zinc-900">Account status</h2>
+          <h2 className="crm-section-title">Account status</h2>
           <p className="mt-1 text-sm text-zinc-500">
             Classify and archive accounts you are not actively pursuing
           </p>

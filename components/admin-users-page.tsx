@@ -300,7 +300,7 @@ export function AdminUsersPage() {
             <button
               type="submit"
               disabled={inviting}
-              className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+              className="crm-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
             >
               {inviting ? "Inviting..." : "Invite User"}
             </button>

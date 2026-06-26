@@ -120,7 +120,7 @@ function EditFollowUpModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-lg rounded-xl border border-zinc-200 bg-white p-6 shadow-xl">
-        <h3 className="text-lg font-medium text-zinc-900">Edit follow-up</h3>
+        <h3 className="crm-section-title">Edit follow-up</h3>
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
           <div>
@@ -197,7 +197,7 @@ function EditFollowUpModal({
             <button
               type="submit"
               disabled={saving}
-              className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
+              className="crm-btn-primary disabled:opacity-60"
             >
               {saving ? "Saving..." : "Save changes"}
             </button>
@@ -372,10 +372,10 @@ export function CompanyFollowUpsSection({
   }
 
   return (
-    <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+    <section className="crm-card crm-card-padded">
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-lg font-medium text-zinc-900">Follow-ups</h2>
+          <h2 className="crm-section-title">Follow-ups</h2>
           <p className="mt-1 text-sm text-zinc-500">
             Open follow-ups for this company. Manage your daily agenda on the{" "}
             <Link
@@ -515,7 +515,7 @@ export function CompanyFollowUpsSection({
               <button
                 type="submit"
                 disabled={scheduleSubmitting}
-                className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
+                className="crm-btn-primary disabled:opacity-60"
               >
                 {scheduleSubmitting ? "Saving..." : "Save Follow-up"}
               </button>

@@ -429,9 +429,9 @@ export function CompanyContactsSection({
   }
 
   return (
-    <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+    <section className="crm-card crm-card-padded">
       <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-lg font-medium text-zinc-900">Contacts</h2>
+        <h2 className="crm-section-title">Contacts</h2>
         <button
           type="button"
           onClick={() => {
@@ -439,7 +439,7 @@ export function CompanyContactsSection({
             setCreateError(null);
             cancelEditing();
           }}
-          className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800"
+          className="crm-btn-primary"
         >
           {showCreateForm ? "Cancel" : "Add Contact"}
         </button>
@@ -473,7 +473,7 @@ export function CompanyContactsSection({
               <button
                 type="submit"
                 disabled={createSubmitting}
-                className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                className="crm-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {createSubmitting ? "Saving..." : "Save Contact"}
               </button>
@@ -528,7 +528,7 @@ export function CompanyContactsSection({
                       <button
                         type="submit"
                         disabled={editSubmitting}
-                        className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="crm-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {editSubmitting ? "Saving..." : "Save Changes"}
                       </button>
