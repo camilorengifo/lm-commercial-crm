@@ -652,13 +652,6 @@ export function CompanyDetailPage() {
                 canManage={canManageCompany}
                 onUpdated={handleAccountStatusUpdated}
               />
-              <CompanyLoadOpportunitiesSection
-                companyId={company.id}
-                userId={company.user_id}
-                currentSalesStage={company.sales_stage}
-                canManage={!isAdmin}
-                onCompanyUpdated={handleCompanyUpdated}
-              />
               <CompanyFollowUpsSection
                 companyId={company.id}
                 userId={company.user_id}
@@ -667,6 +660,13 @@ export function CompanyDetailPage() {
                 isAdmin={isAdmin}
                 onCompanyUpdated={refreshFollowUpSections}
                 externalRefreshKey={followUpsRefreshKey}
+              />
+              <CompanyLoadOpportunitiesSection
+                companyId={company.id}
+                userId={company.user_id}
+                currentSalesStage={company.sales_stage}
+                canManage={!isAdmin}
+                onCompanyUpdated={handleCompanyUpdated}
               />
               <CompanyChronologySection
                 companyId={company.id}
