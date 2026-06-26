@@ -39,6 +39,7 @@ import {
   fetchAllProfiles,
   fetchUserProfile,
   getProfileDisplayName,
+  canManageOpportunities as userCanManageOpportunities,
   isAdminProfile,
   type UserProfile,
 } from "@/lib/userProfile";
@@ -309,6 +310,10 @@ export function CompanyDetailPage() {
     Boolean(company) &&
     canManageCompany &&
     (isAdmin || user?.id === company?.user_id);
+  const canManageCompanyOpportunities =
+    Boolean(company) &&
+    canManageCompany &&
+    userCanManageOpportunities(profile);
 
   useEffect(() => {
     if (!companyId) {
@@ -665,7 +670,7 @@ export function CompanyDetailPage() {
                 companyId={company.id}
                 userId={company.user_id}
                 currentSalesStage={company.sales_stage}
-                canManage={!isAdmin}
+                canManage={canManageCompanyOpportunities}
                 onCompanyUpdated={handleCompanyUpdated}
               />
               <CompanyChronologySection

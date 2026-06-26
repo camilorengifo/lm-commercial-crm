@@ -23,6 +23,12 @@ export function isAdminProfile(profile: UserProfile | null | undefined): boolean
   return profile?.role === "admin";
 }
 
+export function canManageOpportunities(
+  profile: UserProfile | null | undefined,
+): boolean {
+  return profile?.role === "broker" || profile?.role === "admin";
+}
+
 export function isActiveProfile(profile: UserProfile | null | undefined): boolean {
   return profile?.is_active !== false;
 }

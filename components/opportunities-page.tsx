@@ -23,6 +23,7 @@ import {
 } from "@/lib/loadOpportunities";
 import {
   fetchUserProfile,
+  canManageOpportunities as userCanManageOpportunities,
   isAdminProfile,
   type UserProfile,
 } from "@/lib/userProfile";
@@ -159,7 +160,7 @@ export function OpportunitiesPage() {
             : "Track load opportunities connected to your companies."
         }
         actions={
-          !isAdmin ? (
+          userCanManageOpportunities(profile) ? (
             <Link href="/opportunities/new" className="crm-btn-primary">
               New Opportunity
             </Link>

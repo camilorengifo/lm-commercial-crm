@@ -18,6 +18,7 @@ import {
 } from "@/lib/loadOpportunities";
 import {
   fetchUserProfile,
+  canManageOpportunities as userCanManageOpportunities,
   isAdminProfile,
   type UserProfile,
 } from "@/lib/userProfile";
@@ -42,14 +43,19 @@ export function OpportunityNewPage() {
   const isAdmin = isAdminProfile(profile);
 
   const loadContacts = useCallback(
-    async (selectedCompanyId: string, userId: string, asAdmin: boolean) => {
+    async (
+      selectedCompanyId: string,
+      userId: string,
+      asAdmin: boolean,
+      companyOwnerId?: string,
+    ) => {
       if (!selectedCompanyId) {
         setContacts([]);
         return;
       }
 
       const { data, error: contactsError } = await fetchContactsForCompany(
-        userId,
+        companyOwnerId ?? userId,
         selectedCompanyId,
         asAdmin,
       );
@@ -77,7 +83,7 @@ export function OpportunityNewPage() {
       setProfile(userProfile);
 
       const asAdmin = isAdminProfile(userProfile);
-      if (asAdmin) {
+      if (!userCanManageOpportunities(userProfile)) {
         router.replace("/opportunities");
         return;
       }
@@ -101,15 +107,26 @@ export function OpportunityNewPage() {
           : (data[0]?.id ?? "");
 
       setCompanyId(initialCompanyId);
-      await loadContacts(initialCompanyId, session.user.id, asAdmin);
+      await loadContacts(
+        initialCompanyId,
+        session.user.id,
+        asAdmin,
+        data.find((company) => company.id === initialCompanyId)?.user_id,
+      );
       setLoading(false);
     });
   }, [router, presetCompanyId, loadContacts]);
 
   useEffect(() => {
     if (!user) return;
-    loadContacts(companyId, user.id, isAdmin);
-  }, [companyId, user, isAdmin, loadContacts]);
+    const selectedCompany = companies.find((company) => company.id === companyId);
+    loadContacts(
+      companyId,
+      user.id,
+      isAdmin,
+      selectedCompany?.user_id,
+    );
+  }, [companyId, user, isAdmin, companies, loadContacts]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -125,8 +142,10 @@ export function OpportunityNewPage() {
     setSuccess(null);
     setSubmitting(true);
 
+    const ownerUserId = isAdmin ? selectedCompany.user_id : user.id;
+
     const { data, error: createError } = await createLoadOpportunity({
-      userId: user.id,
+      userId: ownerUserId,
       companyId,
       form,
       currentSalesStage: selectedCompany.sales_stage,

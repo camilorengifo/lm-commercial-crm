@@ -26,6 +26,7 @@ import {
 } from "@/lib/loadOpportunities";
 import {
   fetchUserProfile,
+  canManageOpportunities as userCanManageOpportunities,
   isAdminProfile,
   type UserProfile,
 } from "@/lib/userProfile";
@@ -61,7 +62,10 @@ export function OpportunityDetailPage() {
   const [success, setSuccess] = useState<string | null>(null);
 
   const isAdmin = isAdminProfile(profile);
-  const canEdit = !isAdmin;
+  const canEdit =
+    Boolean(opportunity) &&
+    userCanManageOpportunities(profile) &&
+    (isAdmin || user?.id === opportunity?.user_id);
 
   const loadOpportunity = useCallback(async () => {
     if (!user || !opportunityId) return;
@@ -129,7 +133,7 @@ export function OpportunityDetailPage() {
     setSubmitting(true);
 
     const { error: updateError } = await updateLoadOpportunity({
-      userId: user.id,
+      userId: opportunity.user_id,
       companyId: opportunity.company_id,
       opportunityId: opportunity.id,
       form,
@@ -160,7 +164,7 @@ export function OpportunityDetailPage() {
     setError(null);
 
     const { error: deleteError } = await deleteLoadOpportunity(
-      user.id,
+      opportunity.user_id,
       opportunity.company_id,
       opportunity.id,
     );

@@ -51,6 +51,7 @@ export interface CompanyOption {
   id: string;
   name: string;
   sales_stage: SalesStage;
+  user_id: string;
 }
 
 export interface ContactOption {
@@ -388,7 +389,7 @@ export async function fetchCompaniesForOpportunities(
 ) {
   let query = supabase
     .from("companies")
-    .select("id, name, sales_stage")
+    .select("id, name, sales_stage, user_id")
     .order("name", { ascending: true });
 
   if (!asAdmin) {
@@ -398,13 +399,14 @@ export async function fetchCompaniesForOpportunities(
   const { data, error } = await query;
 
   return {
-    data: ((data ?? []) as Array<{ id: string; name: string; sales_stage: string }>).map(
+    data: ((data ?? []) as Array<{ id: string; name: string; sales_stage: string; user_id: string }>).map(
       (company) => ({
         id: company.id,
         name: company.name,
         sales_stage: isSalesStage(company.sales_stage)
           ? company.sales_stage
           : DEFAULT_SALES_STAGE,
+        user_id: company.user_id,
       }),
     ) as CompanyOption[],
     error,
