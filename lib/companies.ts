@@ -1,3 +1,4 @@
+import type { AccountDisposition, AccountStatus } from "@/lib/accountStatus";
 import type { CompanyPriority } from "@/lib/crmConstants";
 
 export interface CompanyRecord {
@@ -16,6 +17,12 @@ export interface CompanyRecord {
   deleted_at?: string | null;
   deleted_by?: string | null;
   delete_reason?: string | null;
+  account_status?: AccountStatus | string | null;
+  account_disposition?: AccountDisposition | string | null;
+  archived_at?: string | null;
+  archived_by?: string | null;
+  archive_reason?: string | null;
+  archive_notes?: string | null;
 }
 
 export type CompanySortOption =
@@ -121,7 +128,7 @@ export function filterCompaniesBySearch<T extends CompanyRecord>(
 }
 
 export const COMPANY_LIST_SELECT =
-  "id, user_id, name, city, state, country, priority, sales_stage, general_notes, last_contact_at, next_follow_up_at, created_at, deleted_at, deleted_by, delete_reason";
+  "id, user_id, name, city, state, country, priority, sales_stage, general_notes, last_contact_at, next_follow_up_at, created_at, deleted_at, deleted_by, delete_reason, account_status, account_disposition, archived_at, archived_by, archive_reason, archive_notes";
 
 export function toDatetimeLocalValue(value: string | null): string {
   if (!value) return "";

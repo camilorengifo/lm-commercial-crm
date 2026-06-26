@@ -2,12 +2,20 @@
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FollowUpTypeFormFields } from "@/components/follow-up-type-form-fields";
 import {
   FOLLOW_UP_STATUS_LABELS,
   priorityBadgeClass,
   type CompanyPriority,
 } from "@/lib/crmConstants";
-import { formatDateTime, formatSupabaseError } from "@/lib/crmFormat";
+import { formatDate, formatDateTime, formatSupabaseError } from "@/lib/crmFormat";
+import {
+  DEFAULT_FOLLOW_UP_TYPE_FORM,
+  FOLLOW_UP_TYPE_LABELS,
+  followUpTypeBadgeClass,
+  normalizeFollowUpType,
+  type FollowUpTypeFormValues,
+} from "@/lib/followUpSeasonal";
 import {
   completeFollowUp,
   createFollowUp,
@@ -26,6 +34,7 @@ interface ScheduleFollowUpFormState {
   title: string;
   notes: string;
   due_at: string;
+  typeFields: FollowUpTypeFormValues;
 }
 
 function emptyScheduleFollowUpForm(): ScheduleFollowUpFormState {
@@ -33,6 +42,7 @@ function emptyScheduleFollowUpForm(): ScheduleFollowUpFormState {
     title: "",
     notes: "",
     due_at: "",
+    typeFields: { ...DEFAULT_FOLLOW_UP_TYPE_FORM },
   };
 }
 
@@ -141,6 +151,7 @@ export function CompanyFollowUpsSection({
       title,
       notes: scheduleForm.notes.trim() || null,
       dueAt,
+      typeFields: scheduleForm.typeFields,
     });
 
     if (error) {
@@ -274,6 +285,16 @@ export function CompanyFollowUpsSection({
               </div>
 
               <div className="sm:col-span-2">
+                <FollowUpTypeFormFields
+                  idPrefix="company-follow-up"
+                  values={scheduleForm.typeFields}
+                  onChange={(typeFields) =>
+                    setScheduleForm((prev) => ({ ...prev, typeFields }))
+                  }
+                />
+              </div>
+
+              <div className="sm:col-span-2">
                 <label
                   htmlFor="company-follow-up-notes"
                   className="mb-1.5 block text-sm font-medium text-zinc-700"
@@ -341,6 +362,8 @@ export function CompanyFollowUpsSection({
             const bucket = getFollowUpBucket(followUp.due_at);
             const nextStep = followUp.notes?.trim() || followUp.title;
             const isCompleting = completingId === followUp.id;
+            const followUpType = normalizeFollowUpType(followUp.follow_up_type);
+            const isSeasonal = followUpType === "seasonal";
 
             return (
               <li
@@ -365,12 +388,45 @@ export function CompanyFollowUpsSection({
                     >
                       {companyPriority}
                     </span>
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${followUpTypeBadgeClass(followUpType)}`}
+                    >
+                      {FOLLOW_UP_TYPE_LABELS[followUpType]}
+                    </span>
                   </div>
 
-                  <p className="text-sm text-zinc-700">
-                    <span className="font-medium text-zinc-600">Due:</span>{" "}
-                    {formatDateTime(followUp.due_at)}
-                  </p>
+                  {isSeasonal ? (
+                    <>
+                      <p className="text-sm text-zinc-700">
+                        <span className="font-medium text-zinc-600">
+                          Target date:
+                        </span>{" "}
+                        {formatDateTime(followUp.due_at)}
+                      </p>
+                      {followUp.reminder_start_date && (
+                        <p className="text-sm text-zinc-700">
+                          <span className="font-medium text-zinc-600">
+                            Start reminding:
+                          </span>{" "}
+                          {formatDate(followUp.reminder_start_date)}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-sm text-zinc-700">
+                      <span className="font-medium text-zinc-600">Due:</span>{" "}
+                      {formatDateTime(followUp.due_at)}
+                    </p>
+                  )}
+
+                  {isSeasonal && followUp.seasonal_context && (
+                    <p className="text-sm text-zinc-700">
+                      <span className="font-medium text-zinc-600">
+                        Seasonal context:
+                      </span>{" "}
+                      {followUp.seasonal_context}
+                    </p>
+                  )}
 
                   {primaryContactName && (
                     <p className="text-sm text-zinc-700">

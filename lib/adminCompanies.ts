@@ -1,3 +1,4 @@
+import { normalizeAccountStatus, type AccountStatus, type AccountStatusFilter } from "@/lib/accountStatus";
 import { COMPANY_PRIORITIES, isOpenOpportunityStage } from "@/lib/crmConstants";
 import { getOpportunityPipelineValue } from "@/lib/brokerProductivity";
 import { getFollowUpBucket } from "@/lib/followUps";
@@ -52,6 +53,8 @@ export interface AdminCompanyOversightRow {
   isArchived: boolean;
   deletedAt: string | null;
   deleteReason: string | null;
+  accountStatus: AccountStatus;
+  accountDisposition: string | null;
 }
 
 export interface AdminCompaniesSummary {
@@ -186,6 +189,7 @@ export function filterAdminCompanies(
     country: string;
     attention: AdminCompanyAttentionStatus;
     lifecycle: AdminCompanyLifecycleStatus;
+    accountStatus: AccountStatusFilter;
     sort: AdminCompanySortOption;
   },
 ): AdminCompanyOversightRow[] {
@@ -194,6 +198,13 @@ export function filterAdminCompanies(
   let rows = companies.filter((company) => {
     if (filters.lifecycle === "active" && company.isArchived) return false;
     if (filters.lifecycle === "archived" && !company.isArchived) return false;
+
+    if (
+      filters.accountStatus !== "all" &&
+      !matchesAdminAccountStatusFilter(company.accountStatus, filters.accountStatus)
+    ) {
+      return false;
+    }
 
     if (normalizedSearch) {
       if (!company.companyName.toLowerCase().includes(normalizedSearch)) {
@@ -246,6 +257,17 @@ export function filterAdminCompanies(
   return rows;
 }
 
+function matchesAdminAccountStatusFilter(
+  status: AccountStatus,
+  filter: AccountStatusFilter,
+): boolean {
+  if (filter === "working") {
+    return status === "active" || status === "paused";
+  }
+  if (filter === "all") return true;
+  return status === filter;
+}
+
 export async function fetchAdminCompaniesOversight(): Promise<{
   data: AdminCompaniesOversightData | null;
   error: { message?: string } | null;
@@ -264,7 +286,7 @@ export async function fetchAdminCompaniesOversight(): Promise<{
     supabase
       .from("companies")
       .select(
-        "id, user_id, name, country, priority, last_contact_at, next_follow_up_at, created_at, deleted_at, delete_reason",
+        "id, user_id, name, country, priority, last_contact_at, next_follow_up_at, created_at, deleted_at, delete_reason, account_status, account_disposition",
       )
       .order("name", { ascending: true }),
     supabase.from("contacts").select("id, company_id"),
@@ -448,6 +470,8 @@ export async function fetchAdminCompaniesOversight(): Promise<{
       isArchived: Boolean(company.deleted_at),
       deletedAt: company.deleted_at ?? null,
       deleteReason: company.delete_reason ?? null,
+      accountStatus: normalizeAccountStatus(company.account_status),
+      accountDisposition: company.account_disposition ?? null,
     };
   });
 

@@ -5,6 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
+import { CompanyAccountArchiveModal } from "@/components/company-account-archive-modal";
+import { CompanyAccountStatusSection } from "@/components/company-account-status-section";
 import { CompanyArchiveModal } from "@/components/company-archive-modal";
 import { CompanyEditModal } from "@/components/company-edit-modal";
 import { AiOutreachAssistantSection } from "@/components/ai-outreach-assistant-section";
@@ -24,7 +26,13 @@ import {
 import { formatDate, formatSupabaseError } from "@/lib/crmFormat";
 import { reassignCompanyOwner } from "@/lib/adminStats";
 import { COMPANY_LIST_SELECT, type CompanyRecord } from "@/lib/companies";
-import { restoreCompanies } from "@/lib/companyClient";
+import { restoreCompanies, updateCompanyAccountStatus } from "@/lib/companyClient";
+import {
+  ACCOUNT_STATUS_LABELS,
+  accountStatusBadgeClass,
+  getAccountDispositionLabel,
+  normalizeAccountStatus,
+} from "@/lib/accountStatus";
 import {
   fetchAllProfiles,
   fetchUserProfile,
@@ -78,9 +86,11 @@ export function CompanyDetailPage() {
   const [reassignSuccess, setReassignSuccess] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [accountArchiveOpen, setAccountArchiveOpen] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [restoringAccount, setRestoringAccount] = useState(false);
 
   const isAdmin = isAdminProfile(profile);
 
@@ -225,8 +235,37 @@ export function CompanyDetailPage() {
     }
   }
 
-  const isArchived = Boolean(company?.deleted_at);
-  const canManageCompany = !isArchived || isAdmin;
+  async function handleRestoreAccount() {
+    if (!company) return;
+
+    setActionError(null);
+    setActionMessage(null);
+    setRestoringAccount(true);
+
+    const { data, error } = await updateCompanyAccountStatus({
+      companyId: company.id,
+      accountStatus: "active",
+    });
+
+    setRestoringAccount(false);
+
+    if (error || !data) {
+      setActionError(error ?? "Unable to restore account.");
+      return;
+    }
+
+    setActionMessage(data.message);
+    if (user && companyId && profile) {
+      await fetchCompany(user.id, companyId, isAdminProfile(profile));
+      setChronologyRefreshKey((key) => key + 1);
+    }
+  }
+
+  const isSoftDeleted = Boolean(company?.deleted_at);
+  const accountStatus = normalizeAccountStatus(company?.account_status);
+  const isAccountArchived = accountStatus === "archived";
+  const dispositionLabel = getAccountDispositionLabel(company?.account_disposition);
+  const canManageCompany = !isSoftDeleted || isAdmin;
 
   useEffect(() => {
     if (!companyId) {
@@ -325,11 +364,21 @@ export function CompanyDetailPage() {
         {company && (
           <>
             <div className="mb-8 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-              {isArchived && (
+              {isSoftDeleted && (
                 <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                  This company is archived.
+                  This company has been deleted from your active list.
                   {company.delete_reason
                     ? ` Reason: ${company.delete_reason}`
+                    : ""}
+                </div>
+              )}
+
+              {!isSoftDeleted && isAccountArchived && (
+                <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-800">
+                  This account is archived and hidden from your default working
+                  list.
+                  {company.archive_reason
+                    ? ` Reason: ${company.archive_reason}`
                     : ""}
                 </div>
               )}
@@ -350,6 +399,16 @@ export function CompanyDetailPage() {
                   >
                     {company.priority}
                   </span>
+                  <span
+                    className={`inline-flex rounded-full px-3 py-1 text-sm font-medium ${accountStatusBadgeClass(accountStatus)}`}
+                  >
+                    {ACCOUNT_STATUS_LABELS[accountStatus]}
+                  </span>
+                  {dispositionLabel && (
+                    <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
+                      {dispositionLabel}
+                    </span>
+                  )}
                   {canManageCompany && !isAdmin && (
                     <>
                       <button
@@ -359,6 +418,25 @@ export function CompanyDetailPage() {
                       >
                         Edit company
                       </button>
+                      {!isAccountArchived && (
+                        <button
+                          type="button"
+                          onClick={() => setAccountArchiveOpen(true)}
+                          className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                        >
+                          Archive account
+                        </button>
+                      )}
+                      {isAccountArchived && (
+                        <button
+                          type="button"
+                          onClick={handleRestoreAccount}
+                          disabled={restoringAccount}
+                          className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
+                        >
+                          {restoringAccount ? "Restoring..." : "Restore account"}
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setArchiveOpen(true)}
@@ -377,23 +455,42 @@ export function CompanyDetailPage() {
                       >
                         Edit company
                       </button>
-                      {!isArchived && (
+                      {!isAccountArchived && (
+                        <button
+                          type="button"
+                          onClick={() => setAccountArchiveOpen(true)}
+                          className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                        >
+                          Archive account
+                        </button>
+                      )}
+                      {isAccountArchived && (
+                        <button
+                          type="button"
+                          onClick={handleRestoreAccount}
+                          disabled={restoringAccount}
+                          className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
+                        >
+                          {restoringAccount ? "Restoring..." : "Restore account"}
+                        </button>
+                      )}
+                      {!isSoftDeleted && (
                         <button
                           type="button"
                           onClick={() => setArchiveOpen(true)}
                           className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-800 transition hover:bg-red-100"
                         >
-                          Archive company
+                          Delete company
                         </button>
                       )}
-                      {isArchived && (
+                      {isSoftDeleted && (
                         <button
                           type="button"
                           onClick={handleRestoreCompany}
                           disabled={restoring}
                           className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
                         >
-                          {restoring ? "Restoring..." : "Restore company"}
+                          {restoring ? "Restoring..." : "Restore deleted company"}
                         </button>
                       )}
                     </>
@@ -502,6 +599,14 @@ export function CompanyDetailPage() {
             </div>
 
             <div className="space-y-6">
+              <CompanyAccountStatusSection
+                company={company}
+                canManage={canManageCompany}
+                onUpdated={() => {
+                  handleCompanyUpdated();
+                  setChronologyRefreshKey((key) => key + 1);
+                }}
+              />
               <div className="flex flex-wrap gap-2 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
                 <Link
                   href="/assistant"
@@ -560,6 +665,18 @@ export function CompanyDetailPage() {
         onClose={() => setEditOpen(false)}
         onSaved={() => {
           setActionMessage("Company updated successfully.");
+          handleCompanyUpdated();
+          setChronologyRefreshKey((key) => key + 1);
+        }}
+      />
+
+      <CompanyAccountArchiveModal
+        open={accountArchiveOpen}
+        companyName={company?.name ?? "Company"}
+        companyId={company?.id ?? ""}
+        onClose={() => setAccountArchiveOpen(false)}
+        onArchived={(message) => {
+          setActionMessage(message);
           handleCompanyUpdated();
           setChronologyRefreshKey((key) => key + 1);
         }}

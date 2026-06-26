@@ -7,6 +7,11 @@ import {
   activityTypeBadgeClass,
   type ActivityType,
 } from "@/lib/crmConstants";
+import { FollowUpTypeFormFields } from "@/components/follow-up-type-form-fields";
+import {
+  DEFAULT_FOLLOW_UP_TYPE_FORM,
+  type FollowUpTypeFormValues,
+} from "@/lib/followUpSeasonal";
 import { formatDate, formatDateTime, formatSupabaseError } from "@/lib/crmFormat";
 import { supabase } from "@/lib/supabaseClient";
 import { createFollowUp } from "@/lib/followUps";
@@ -29,6 +34,7 @@ interface ActivityFormState {
   notes: string;
   schedule_follow_up: string;
   follow_up_notes: string;
+  followUpTypeFields: FollowUpTypeFormValues;
 }
 
 function nowDatetimeLocal(): string {
@@ -59,6 +65,7 @@ function emptyActivityForm(): ActivityFormState {
     notes: "",
     schedule_follow_up: "",
     follow_up_notes: "",
+    followUpTypeFields: { ...DEFAULT_FOLLOW_UP_TYPE_FORM },
   };
 }
 
@@ -70,6 +77,7 @@ function activityToForm(activity: Activity): ActivityFormState {
     notes: activity.notes ?? "",
     schedule_follow_up: "",
     follow_up_notes: "",
+    followUpTypeFields: { ...DEFAULT_FOLLOW_UP_TYPE_FORM },
   };
 }
 
@@ -246,6 +254,16 @@ function ActivityFormFields({
               placeholder="Reason or reminder"
             />
           </div>
+
+          <div className="sm:col-span-2">
+            <FollowUpTypeFormFields
+              idPrefix={`${idPrefix}-follow-up`}
+              values={form.followUpTypeFields}
+              onChange={(followUpTypeFields) =>
+                setForm((prev) => ({ ...prev, followUpTypeFields }))
+              }
+            />
+          </div>
         </>
       )}
     </div>
@@ -379,6 +397,7 @@ export function CompanyChronologySection({
       title,
       notes: form.follow_up_notes.trim() || null,
       dueAt,
+      typeFields: form.followUpTypeFields,
     });
 
     if (error) {

@@ -1,4 +1,13 @@
+import {
+  normalizeAccountStatus,
+  type AccountStatus,
+} from "@/lib/accountStatus";
 import type { ActivityType, CompanyPriority, FollowUpStatus } from "@/lib/crmConstants";
+import {
+  resolveFollowUpSeasonalFields,
+  type FollowUpType,
+  type FollowUpTypeFormValues,
+} from "@/lib/followUpSeasonal";
 import { supabase } from "@/lib/supabaseClient";
 
 export const FOLLOW_UP_PENDING_LIMIT = 200;
@@ -7,7 +16,7 @@ export const FOLLOW_UP_COMPLETED_LIMIT = 100;
 export type { FollowUpStatus };
 
 export const FOLLOW_UP_SELECT_FIELDS =
-  "id, user_id, company_id, title, notes, due_at, status, completed_at, created_at";
+  "id, user_id, company_id, title, notes, due_at, status, completed_at, created_at, follow_up_type, reminder_lead_days, reminder_start_date, seasonal_context";
 
 export interface FollowUpRecord {
   id: string;
@@ -19,6 +28,10 @@ export interface FollowUpRecord {
   status: FollowUpStatus;
   completed_at: string | null;
   created_at: string;
+  follow_up_type?: FollowUpType | string | null;
+  reminder_lead_days?: number | null;
+  reminder_start_date?: string | null;
+  seasonal_context?: string | null;
 }
 
 export interface FollowUpWithCompany extends FollowUpRecord {
@@ -28,6 +41,7 @@ export interface FollowUpWithCompany extends FollowUpRecord {
 export interface FollowUpEnriched extends FollowUpWithCompany {
   contactName: string | null;
   companyPriority: CompanyPriority;
+  companyAccountStatus: AccountStatus;
   brokerName: string | null;
   brokerEmail: string | null;
 }
@@ -135,6 +149,7 @@ interface CompanyJoinRow {
   name: string;
   priority: CompanyPriority;
   user_id: string;
+  account_status: string | null;
 }
 
 interface ContactJoinRow {
@@ -201,7 +216,7 @@ async function fetchCompaniesForFollowUps(
 
   let query = supabase
     .from("companies")
-    .select("id, name, priority, user_id")
+    .select("id, name, priority, user_id, account_status")
     .in("id", companyIds);
 
   if (!asAdmin) {
@@ -281,6 +296,7 @@ function enrichFollowUpRows(
       companyName: company?.name ?? "Unknown company",
       contactName: contactNameByCompany.get(row.company_id) ?? null,
       companyPriority: company?.priority ?? ("Medium" as CompanyPriority),
+      companyAccountStatus: normalizeAccountStatus(company?.account_status),
       brokerName: profile ? getProfileDisplayName(profile) : null,
       brokerEmail: profile?.email ?? null,
     };
@@ -340,6 +356,7 @@ export interface CreateFollowUpInput {
   title: string;
   notes?: string | null;
   dueAt: string;
+  typeFields?: FollowUpTypeFormValues;
 }
 
 export async function fetchPendingFollowUpsForCompany(
@@ -530,6 +547,13 @@ export async function fetchCancelledFollowUps(
 export async function createFollowUp(
   input: CreateFollowUpInput,
 ): Promise<{ error: { message?: string } | null }> {
+  const seasonalFields = input.typeFields
+    ? resolveFollowUpSeasonalFields(input.typeFields, input.dueAt)
+    : resolveFollowUpSeasonalFields(
+        { followUpType: "regular", reminderLeadDays: 30, seasonalContext: "" },
+        input.dueAt,
+      );
+
   const { error } = await supabase.from("follow_ups").insert({
     user_id: input.userId,
     company_id: input.companyId,
@@ -537,6 +561,7 @@ export async function createFollowUp(
     notes: input.notes ?? null,
     due_at: input.dueAt,
     status: "pending" as FollowUpStatus,
+    ...seasonalFields,
   });
 
   if (error) {
@@ -602,12 +627,13 @@ export interface RescheduleFollowUpInput {
   dueAt: string;
   title?: string;
   notes?: string | null;
+  typeFields?: FollowUpTypeFormValues;
 }
 
 export async function rescheduleFollowUp(
   input: RescheduleFollowUpInput,
 ): Promise<{ error: { message?: string } | null }> {
-  const updates: Record<string, string | null> = {
+  const updates: Record<string, string | number | null> = {
     due_at: input.dueAt,
     status: "pending",
   };
@@ -618,6 +644,13 @@ export async function rescheduleFollowUp(
 
   if (input.notes !== undefined) {
     updates.notes = input.notes?.trim() || null;
+  }
+
+  if (input.typeFields) {
+    Object.assign(
+      updates,
+      resolveFollowUpSeasonalFields(input.typeFields, input.dueAt),
+    );
   }
 
   const { error } = await supabase

@@ -23,6 +23,16 @@ import {
   type CompanyRecord,
   type CompanySortOption,
 } from "@/lib/companies";
+import {
+  ACCOUNT_STATUS_FILTER_OPTIONS,
+  ACCOUNT_STATUS_LABELS,
+  accountDispositionBadgeClass,
+  accountStatusBadgeClass,
+  getAccountDispositionLabel,
+  matchesAccountStatusFilter,
+  normalizeAccountStatus,
+  type AccountStatusFilter,
+} from "@/lib/accountStatus";
 import { formatDate, formatSupabaseError } from "@/lib/crmFormat";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -51,6 +61,8 @@ export function CompaniesPage() {
   const [search, setSearch] = useState("");
   const [countryFilter, setCountryFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
+  const [accountStatusFilter, setAccountStatusFilter] =
+    useState<AccountStatusFilter>("working");
   const [sortBy, setSortBy] = useState<CompanySortOption>("name_asc");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -120,13 +132,21 @@ export function CompaniesPage() {
       rows = rows.filter((company) => company.priority === priorityFilter);
     }
 
+    rows = rows.filter((company) =>
+      matchesAccountStatusFilter(
+        normalizeAccountStatus(company.account_status),
+        accountStatusFilter,
+      ),
+    );
+
     return sortCompanies(rows, sortBy);
-  }, [companies, search, countryFilter, priorityFilter, sortBy]);
+  }, [companies, search, countryFilter, priorityFilter, accountStatusFilter, sortBy]);
 
   function resetFilters() {
     setSearch("");
     setCountryFilter("all");
     setPriorityFilter("all");
+    setAccountStatusFilter("working");
     setSortBy("name_asc");
   }
 
@@ -230,7 +250,27 @@ export function CompaniesPage() {
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <div>
+              <label htmlFor="account-status-filter" className="mb-1.5 block text-sm font-medium text-zinc-700">
+                Account status
+              </label>
+              <select
+                id="account-status-filter"
+                value={accountStatusFilter}
+                onChange={(event) =>
+                  setAccountStatusFilter(event.target.value as AccountStatusFilter)
+                }
+                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              >
+                {ACCOUNT_STATUS_FILTER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div>
               <label htmlFor="country-filter" className="mb-1.5 block text-sm font-medium text-zinc-700">
                 Country
@@ -556,7 +596,14 @@ export function CompaniesPage() {
               <p className="text-sm text-zinc-500">
                 {companies.length === 0
                   ? "No companies yet. Click Add Company to get started."
-                  : "No companies match your filters."}
+                  : accountStatusFilter === "archived"
+                    ? "No archived accounts yet."
+                    : accountStatusFilter === "working" &&
+                        !search &&
+                        countryFilter === "all" &&
+                        priorityFilter === "all"
+                      ? "No working accounts found."
+                      : "No companies match your filters."}
               </p>
             </div>
           ) : (
@@ -578,6 +625,9 @@ export function CompaniesPage() {
                       Priority
                     </th>
                     <th className="px-4 py-3 font-medium text-zinc-600">
+                      Account status
+                    </th>
+                    <th className="px-4 py-3 font-medium text-zinc-600">
                       Sales stage
                     </th>
                     <th className="px-4 py-3 font-medium text-zinc-600">
@@ -592,7 +642,13 @@ export function CompaniesPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100">
-                  {filteredCompanies.map((company) => (
+                  {filteredCompanies.map((company) => {
+                    const status = normalizeAccountStatus(company.account_status);
+                    const dispositionLabel = getAccountDispositionLabel(
+                      company.account_disposition,
+                    );
+
+                    return (
                     <tr key={company.id} className="hover:bg-zinc-50/50">
                       <td className="px-4 py-3">
                         <Link
@@ -619,6 +675,22 @@ export function CompaniesPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${accountStatusBadgeClass(status)}`}
+                          >
+                            {ACCOUNT_STATUS_LABELS[status]}
+                          </span>
+                          {dispositionLabel && (
+                            <span
+                              className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${accountDispositionBadgeClass(company.account_disposition ?? "")}`}
+                            >
+                              {dispositionLabel}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
                         <span
                           className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${salesStageBadgeClass(company.sales_stage)}`}
                         >
@@ -635,7 +707,8 @@ export function CompaniesPage() {
                         {formatDate(company.created_at)}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

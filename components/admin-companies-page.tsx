@@ -30,6 +30,14 @@ import {
 import { restoreCompanies } from "@/lib/companyClient";
 import { formatPipelineValue } from "@/lib/brokerProductivity";
 import { priorityBadgeClass, type CompanyPriority } from "@/lib/crmConstants";
+import {
+  ACCOUNT_STATUS_FILTER_OPTIONS,
+  ACCOUNT_STATUS_LABELS,
+  accountDispositionBadgeClass,
+  accountStatusBadgeClass,
+  getAccountDispositionLabel,
+  type AccountStatusFilter,
+} from "@/lib/accountStatus";
 import { formatDate, formatSupabaseError } from "@/lib/crmFormat";
 import { fetchAllProfiles, type UserProfile } from "@/lib/userProfile";
 
@@ -52,6 +60,8 @@ export function AdminCompaniesPage() {
     useState<AdminCompanyAttentionStatus>("all");
   const [lifecycleFilter, setLifecycleFilter] =
     useState<AdminCompanyLifecycleStatus>("active");
+  const [accountStatusFilter, setAccountStatusFilter] =
+    useState<AccountStatusFilter>("working");
   const [sortBy, setSortBy] = useState<AdminCompanySortOption>("name_asc");
 
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<Set<string>>(
@@ -109,6 +119,7 @@ export function AdminCompaniesPage() {
       country: countryFilter,
       attention: attentionFilter,
       lifecycle: lifecycleFilter,
+      accountStatus: accountStatusFilter,
       sort: sortBy,
     });
   }, [
@@ -119,6 +130,7 @@ export function AdminCompaniesPage() {
     countryFilter,
     attentionFilter,
     lifecycleFilter,
+    accountStatusFilter,
     sortBy,
   ]);
 
@@ -365,10 +377,33 @@ export function AdminCompaniesPage() {
 
         <div>
           <label
+            htmlFor="account-status-filter"
+            className="mb-1.5 block text-sm font-medium text-zinc-700"
+          >
+            Account status
+          </label>
+          <select
+            id="account-status-filter"
+            value={accountStatusFilter}
+            onChange={(event) =>
+              setAccountStatusFilter(event.target.value as AccountStatusFilter)
+            }
+            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+          >
+            {ACCOUNT_STATUS_FILTER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label
             htmlFor="lifecycle-filter"
             className="mb-1.5 block text-sm font-medium text-zinc-700"
           >
-            Status
+            Deleted status
           </label>
           <select
             id="lifecycle-filter"
@@ -535,9 +570,23 @@ export function AdminCompaniesPage() {
                     </Link>
                     {company.isArchived && (
                       <span className="ml-2 inline-flex rounded-full bg-zinc-200 px-2 py-0.5 text-xs font-medium text-zinc-700">
-                        Archived
+                        Deleted
                       </span>
                     )}
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${accountStatusBadgeClass(company.accountStatus)}`}
+                      >
+                        {ACCOUNT_STATUS_LABELS[company.accountStatus]}
+                      </span>
+                      {getAccountDispositionLabel(company.accountDisposition) && (
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${accountDispositionBadgeClass(company.accountDisposition ?? "")}`}
+                        >
+                          {getAccountDispositionLabel(company.accountDisposition)}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-zinc-500">
                       Created {formatDate(company.createdAt)}
                     </p>

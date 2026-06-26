@@ -74,3 +74,19 @@ export async function restoreCompanies(companyIds: string[]) {
     restored: number;
   }>("/api/companies/restore", { companyIds });
 }
+
+export async function updateCompanyAccountStatus(input: {
+  companyId: string;
+  accountStatus: string;
+  accountDisposition?: string | null;
+  archiveReason?: string | null;
+  archiveNotes?: string | null;
+}) {
+  return companyRequest<{ message: string }>("/api/companies/account-status", {
+    companyId: input.companyId,
+    accountStatus: input.accountStatus,
+    accountDisposition: input.accountDisposition ?? null,
+    archiveReason: input.archiveReason ?? null,
+    archiveNotes: input.archiveNotes ?? null,
+  });
+}

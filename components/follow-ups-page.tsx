@@ -4,7 +4,16 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
+import { FollowUpTypeFormFields } from "@/components/follow-up-type-form-fields";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
+import {
+  followUpTypeFormFromRecord,
+  type FollowUpTypeFormValues,
+} from "@/lib/followUpSeasonal";
+import {
+  ACCOUNT_STATUS_LABELS,
+  accountStatusBadgeClass,
+} from "@/lib/accountStatus";
 import {
   ACTIVITY_TYPES,
   COMPANY_PRIORITIES,
@@ -110,11 +119,26 @@ function RescheduleModal({
   saving: boolean;
   error: string | null;
   onClose: () => void;
-  onSave: (input: { dueAt: string; title: string; notes: string }) => void;
+  onSave: (input: {
+    dueAt: string;
+    title: string;
+    notes: string;
+    typeFields: FollowUpTypeFormValues;
+  }) => void;
 }) {
   const [dueAt, setDueAt] = useState(toDatetimeLocalValue(followUp.due_at));
   const [title, setTitle] = useState(followUp.title);
   const [notes, setNotes] = useState(followUp.notes ?? "");
+  const [typeFields, setTypeFields] = useState<FollowUpTypeFormValues>(() =>
+    followUpTypeFormFromRecord(followUp),
+  );
+
+  useEffect(() => {
+    setDueAt(toDatetimeLocalValue(followUp.due_at));
+    setTitle(followUp.title);
+    setNotes(followUp.notes ?? "");
+    setTypeFields(followUpTypeFormFromRecord(followUp));
+  }, [followUp]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -132,6 +156,7 @@ function RescheduleModal({
       dueAt: parsedDueAt,
       title: title.trim(),
       notes,
+      typeFields,
     });
   }
 
@@ -194,6 +219,12 @@ function RescheduleModal({
               placeholder="What should happen next?"
             />
           </div>
+
+          <FollowUpTypeFormFields
+            idPrefix="reschedule"
+            values={typeFields}
+            onChange={setTypeFields}
+          />
 
           {error && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -405,6 +436,14 @@ function FollowUpCard({
             <span className="inline-flex rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-700">
               {FOLLOW_UP_STATUS_LABELS[followUp.status]}
             </span>
+            {followUp.companyAccountStatus === "archived" && (
+              <span
+                className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${accountStatusBadgeClass("archived")}`}
+                title="This follow-up belongs to an archived account and is outside your main active workflow"
+              >
+                {ACCOUNT_STATUS_LABELS.archived} account
+              </span>
+            )}
           </div>
 
           {followUp.contactName && (
@@ -771,6 +810,7 @@ export function FollowUpsPage() {
     dueAt: string;
     title: string;
     notes: string;
+    typeFields: FollowUpTypeFormValues;
   }) {
     if (!rescheduleTarget || !user) return;
 
@@ -784,6 +824,7 @@ export function FollowUpsPage() {
       dueAt: input.dueAt,
       title: input.title,
       notes: input.notes.trim() || null,
+      typeFields: input.typeFields,
     });
 
     if (error) {
