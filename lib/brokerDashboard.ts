@@ -14,6 +14,7 @@ import {
   getDayBounds,
   type FollowUpWithCompany,
 } from "@/lib/followUps";
+import { isWorkingCompanyRecord } from "@/lib/accountStatus";
 import {
   fetchLoadOpportunitiesWithCompanies,
   formatLane,
@@ -35,6 +36,8 @@ export interface CompanyDashboardRow {
   sales_stage: SalesStage;
   last_contact_at: string | null;
   next_follow_up_at: string | null;
+  account_status?: string | null;
+  deleted_at?: string | null;
 }
 
 export interface FollowUpDashboardItem extends FollowUpWithCompany {
@@ -388,7 +391,7 @@ export async function fetchBrokerDashboardData(
     supabase
       .from("companies")
       .select(
-        "id, name, priority, sales_stage, last_contact_at, next_follow_up_at",
+        "id, name, priority, sales_stage, last_contact_at, next_follow_up_at, account_status, deleted_at",
       )
       .eq("user_id", userId),
     fetchPendingFollowUpsWithCompanies(userId),
@@ -429,21 +432,33 @@ export async function fetchBrokerDashboardData(
     Omit<CompanyDashboardRow, "sales_stage" | "priority"> & {
       sales_stage: string;
       priority: CompanyPriority;
+      account_status?: string | null;
+      deleted_at?: string | null;
     }
-  >).map((company) => ({
-    ...company,
-    sales_stage: isSalesStage(company.sales_stage)
-      ? company.sales_stage
-      : DEFAULT_SALES_STAGE,
-  }));
+  >)
+    .filter((company) => isWorkingCompanyRecord(company))
+    .map((company) => ({
+      ...company,
+      sales_stage: isSalesStage(company.sales_stage)
+        ? company.sales_stage
+        : DEFAULT_SALES_STAGE,
+    }));
+
+  const workingCompanyIds = new Set(companies.map((company) => company.id));
 
   const { priorityByCompany, nameByCompany } = buildCompanyMaps(companies);
-  const activities = (activitiesResult.data as ActivityRow[]) ?? [];
+  const activities = ((activitiesResult.data as ActivityRow[]) ?? []).filter(
+    (activity) => workingCompanyIds.has(activity.company_id),
+  );
   const contactNameByCompany = buildContactNameByCompany(
-    (contactsResult.data as ContactRow[]) ?? [],
+    ((contactsResult.data as ContactRow[]) ?? []).filter((contact) =>
+      workingCompanyIds.has(contact.company_id),
+    ),
   );
   const followUps = enrichFollowUps(
-    followUpsResult.data,
+    followUpsResult.data.filter((followUp) =>
+      workingCompanyIds.has(followUp.company_id),
+    ),
     contactNameByCompany,
     priorityByCompany,
   );
@@ -493,6 +508,7 @@ export async function fetchBrokerDashboardData(
   );
 
   const openOpportunities = (opportunitiesResult.data ?? [])
+    .filter((opportunity) => workingCompanyIds.has(opportunity.company_id))
     .filter((opportunity) =>
       OPEN_OPPORTUNITY_STATUSES.includes(
         normalizeOpportunityStage(opportunity.status),

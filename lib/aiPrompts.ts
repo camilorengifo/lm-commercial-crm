@@ -248,7 +248,8 @@ Requirements:
 - emailDraft and callOpener are DRAFTS for manual use — never imply they were sent
 - Be direct, professional, and freight-broker focused
 - quickWins should be same-day actions with low friction
-- followUpDisciplineReminders should coach on overdue items and scheduling discipline`;
+- followUpDisciplineReminders should coach on overdue items and scheduling discipline
+- When seasonalFollowUps > 0, include seasonal / future opportunity timing in priorities`;
 }
 
 export function buildAccountOutreachQuickUserPrompt(

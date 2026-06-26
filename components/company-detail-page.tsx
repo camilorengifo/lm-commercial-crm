@@ -32,6 +32,7 @@ import {
   accountStatusBadgeClass,
   getAccountDispositionLabel,
   normalizeAccountStatus,
+  type CompanyAccountStatusFields,
 } from "@/lib/accountStatus";
 import {
   fetchAllProfiles,
@@ -176,9 +177,31 @@ export function CompanyDetailPage() {
 
   const handleCompanyUpdated = useCallback(() => {
     if (user && companyId && profile) {
-      fetchCompany(user.id, companyId, isAdminProfile(profile));
+      return fetchCompany(user.id, companyId, isAdminProfile(profile));
     }
+    return Promise.resolve();
   }, [user, companyId, profile, fetchCompany]);
+
+  const handleAccountStatusUpdated = useCallback(
+    async (fields: CompanyAccountStatusFields) => {
+      setCompany((prev) =>
+        prev
+          ? {
+              ...prev,
+              account_status: fields.account_status,
+              account_disposition: fields.account_disposition,
+              archived_at: fields.archived_at,
+              archived_by: fields.archived_by,
+              archive_reason: fields.archive_reason,
+              archive_notes: fields.archive_notes,
+            }
+          : prev,
+      );
+      await handleCompanyUpdated();
+      setChronologyRefreshKey((key) => key + 1);
+    },
+    [handleCompanyUpdated],
+  );
 
   const refreshFollowUpSections = useCallback(() => {
     setFollowUpsRefreshKey((key) => key + 1);
@@ -256,6 +279,21 @@ export function CompanyDetailPage() {
 
     setActionMessage(data.message);
     if (user && companyId && profile) {
+      if (data.company) {
+        setCompany((prev) =>
+          prev
+            ? {
+                ...prev,
+                account_status: data.company!.account_status,
+                account_disposition: data.company!.account_disposition,
+                archived_at: data.company!.archived_at,
+                archived_by: data.company!.archived_by,
+                archive_reason: data.company!.archive_reason,
+                archive_notes: data.company!.archive_notes,
+              }
+            : prev,
+        );
+      }
       await fetchCompany(user.id, companyId, isAdminProfile(profile));
       setChronologyRefreshKey((key) => key + 1);
     }
@@ -606,10 +644,7 @@ export function CompanyDetailPage() {
               <CompanyAccountStatusSection
                 company={company}
                 canManage={canManageCompany}
-                onUpdated={() => {
-                  handleCompanyUpdated();
-                  setChronologyRefreshKey((key) => key + 1);
-                }}
+                onUpdated={handleAccountStatusUpdated}
               />
               <div className="flex flex-wrap gap-2 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
                 <Link

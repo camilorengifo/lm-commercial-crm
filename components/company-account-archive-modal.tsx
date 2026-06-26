@@ -52,11 +52,13 @@ export function CompanyAccountArchiveModal({
     setSubmitting(true);
     setError(null);
 
+    const reason = disposition || null;
+
     const { data, error: requestError } = await updateCompanyAccountStatus({
       companyId,
       accountStatus: "archived",
-      accountDisposition: disposition || null,
-      archiveReason: archiveReason.trim() || null,
+      accountDisposition: reason,
+      archiveReason: reason,
       archiveNotes: archiveNotes.trim() || null,
     });
 

@@ -82,7 +82,17 @@ export async function updateCompanyAccountStatus(input: {
   archiveReason?: string | null;
   archiveNotes?: string | null;
 }) {
-  return companyRequest<{ message: string }>("/api/companies/account-status", {
+  return companyRequest<{
+    message: string;
+    company?: {
+      account_status: string;
+      account_disposition: string | null;
+      archived_at: string | null;
+      archived_by: string | null;
+      archive_reason: string | null;
+      archive_notes: string | null;
+    };
+  }>("/api/companies/account-status", {
     companyId: input.companyId,
     accountStatus: input.accountStatus,
     accountDisposition: input.accountDisposition ?? null,

@@ -1,5 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isWorkingCompanyRecord } from "@/lib/accountStatus";
 import { isOpenOpportunityStage, getOpportunityStageLabel } from "@/lib/crmConstants";
+import {
+  getSeasonalFollowUpHorizonEnd,
+  shouldIncludeSeasonalFollowUp,
+} from "@/lib/followUpSeasonal";
 import { getFollowUpBucket } from "@/lib/followUps";
 import { getOpportunityPipelineValue } from "@/lib/brokerProductivity";
 
@@ -15,6 +20,8 @@ interface CompanyRow {
   general_notes: string | null;
   last_contact_at: string | null;
   next_follow_up_at: string | null;
+  account_status: string | null;
+  deleted_at: string | null;
 }
 
 interface ContactRow {
@@ -34,6 +41,9 @@ interface FollowUpRow {
   notes: string | null;
   due_at: string;
   status: string;
+  follow_up_type: string | null;
+  reminder_start_date: string | null;
+  seasonal_context: string | null;
 }
 
 interface ActivityRow {
@@ -86,6 +96,7 @@ export interface BrokerAssistantFocus {
   openFollowUps: number;
   overdueFollowUps: number;
   dueTodayFollowUps: number;
+  seasonalFollowUps: number;
   openOpportunities: number;
   accountsNeedingAttention: number;
 }
@@ -96,6 +107,7 @@ export interface BrokerAssistantSnapshot {
   topAccounts: PrioritizedAccount[];
   todaysPriorities: PrioritizedAccount[];
   overdueFollowUpItems: AssistantOverdueFollowUp[];
+  seasonalFollowUpItems: AssistantSeasonalFollowUp[];
   staleAccounts: AssistantStaleAccount[];
   hotOpportunities: AssistantHotOpportunity[];
   dataQualitySuggestions: string[];
@@ -131,6 +143,17 @@ export interface AssistantHotOpportunity {
   status: string;
   pipelineValue: number;
   suggestedNextStep: string;
+}
+
+export interface AssistantSeasonalFollowUp {
+  followUpId: string;
+  companyId: string;
+  companyName: string;
+  title: string;
+  targetDate: string;
+  reminderStartDate: string | null;
+  seasonalContext: string | null;
+  suggestedAction: string;
 }
 
 function getInactivityCutoff(): Date {
@@ -335,7 +358,7 @@ export async function fetchBrokerAssistantSnapshot(
     supabase
       .from("companies")
       .select(
-        "id, name, user_id, sales_stage, priority, general_notes, last_contact_at, next_follow_up_at",
+        "id, name, user_id, sales_stage, priority, general_notes, last_contact_at, next_follow_up_at, account_status, deleted_at",
       )
       .eq("user_id", userId),
     supabase
@@ -346,7 +369,9 @@ export async function fetchBrokerAssistantSnapshot(
       .eq("user_id", userId),
     supabase
       .from("follow_ups")
-      .select("id, company_id, title, notes, due_at, status")
+      .select(
+        "id, company_id, title, notes, due_at, status, follow_up_type, reminder_start_date, seasonal_context",
+      )
       .eq("user_id", userId)
       .eq("status", "pending"),
     supabase
@@ -369,11 +394,22 @@ export async function fetchBrokerAssistantSnapshot(
   if (activitiesResult.error) throw activitiesResult.error;
   if (opportunitiesResult.error) throw opportunitiesResult.error;
 
-  const companies = (companiesResult.data as CompanyRow[]) ?? [];
-  const contacts = (contactsResult.data as ContactRow[]) ?? [];
-  const followUps = (followUpsResult.data as FollowUpRow[]) ?? [];
-  const activities = (activitiesResult.data as ActivityRow[]) ?? [];
-  const opportunities = (opportunitiesResult.data as OpportunityRow[]) ?? [];
+  const companies = ((companiesResult.data as CompanyRow[]) ?? []).filter(
+    (company) => isWorkingCompanyRecord(company),
+  );
+  const workingCompanyIds = new Set(companies.map((company) => company.id));
+  const contacts = ((contactsResult.data as ContactRow[]) ?? []).filter((contact) =>
+    workingCompanyIds.has(contact.company_id),
+  );
+  const followUps = ((followUpsResult.data as FollowUpRow[]) ?? []).filter(
+    (followUp) => workingCompanyIds.has(followUp.company_id),
+  );
+  const activities = ((activitiesResult.data as ActivityRow[]) ?? []).filter(
+    (activity) => workingCompanyIds.has(activity.company_id),
+  );
+  const opportunities = ((opportunitiesResult.data as OpportunityRow[]) ?? []).filter(
+    (opportunity) => workingCompanyIds.has(opportunity.company_id),
+  );
 
   const contactsByCompany = new Map<string, ContactRow[]>();
   for (const contact of contacts) {
@@ -536,6 +572,33 @@ export async function fetchBrokerAssistantSnapshot(
     companies.map((company) => [company.id, company]),
   );
 
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayEnd = new Date();
+  todayEnd.setHours(23, 59, 59, 999);
+  const horizonEnd = getSeasonalFollowUpHorizonEnd(todayStart);
+
+  const seasonalFollowUpItems: AssistantSeasonalFollowUp[] = followUps
+    .filter((followUp) =>
+      shouldIncludeSeasonalFollowUp(followUp, todayStart, todayEnd, horizonEnd),
+    )
+    .sort((a, b) => new Date(a.due_at).getTime() - new Date(b.due_at).getTime())
+    .slice(0, 10)
+    .map((followUp) => {
+      const company = companyById.get(followUp.company_id);
+      return {
+        followUpId: followUp.id,
+        companyId: followUp.company_id,
+        companyName: company?.name ?? "Unknown company",
+        title: followUp.title,
+        targetDate: followUp.due_at,
+        reminderStartDate: followUp.reminder_start_date,
+        seasonalContext: followUp.seasonal_context,
+        suggestedAction:
+          "Review seasonal timing and prepare outreach before the target date.",
+      };
+    });
+
   const overdueFollowUpItems: AssistantOverdueFollowUp[] = followUps
     .filter((followUp) => getFollowUpBucket(followUp.due_at) === "overdue")
     .sort((a, b) => new Date(a.due_at).getTime() - new Date(b.due_at).getTime())
@@ -608,12 +671,14 @@ export async function fetchBrokerAssistantSnapshot(
       openFollowUps: followUps.length,
       overdueFollowUps,
       dueTodayFollowUps,
+      seasonalFollowUps: seasonalFollowUpItems.length,
       openOpportunities: openOpportunityCount,
       accountsNeedingAttention,
     },
     topAccounts: prioritizedAccounts.slice(0, accountLimit),
     todaysPriorities: prioritizedAccounts.slice(0, 5),
     overdueFollowUpItems,
+    seasonalFollowUpItems,
     staleAccounts,
     hotOpportunities,
     dataQualitySuggestions,
@@ -678,6 +743,7 @@ export function summarizeAssistantContextForAi(
     focus: snapshot.focus,
     todaysPriorities: summarizePrioritizedAccountsForAi(snapshot.todaysPriorities),
     overdueFollowUps: snapshot.overdueFollowUpItems.slice(0, 10),
+    seasonalFollowUps: snapshot.seasonalFollowUpItems.slice(0, 10),
     staleAccounts: snapshot.staleAccounts.slice(0, 8),
     hotOpportunities: snapshot.hotOpportunities.slice(0, 8),
   };

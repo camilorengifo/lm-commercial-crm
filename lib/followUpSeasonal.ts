@@ -107,3 +107,43 @@ export function followUpTypeBadgeClass(type: FollowUpType): string {
 export function reminderLeadDaysLabel(days: number): string {
   return `${days} days before`;
 }
+
+const SEASONAL_FOLLOW_UP_HORIZON_DAYS = 45;
+
+export function isSeasonalFollowUpType(
+  value: string | null | undefined,
+): boolean {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "seasonal" || normalized === "future_opportunity";
+}
+
+export function shouldIncludeSeasonalFollowUp(
+  followUp: {
+    follow_up_type?: string | null;
+    due_at: string;
+    reminder_start_date?: string | null;
+  },
+  todayStart: Date,
+  todayEnd: Date,
+  horizonEnd: Date,
+): boolean {
+  if (!isSeasonalFollowUpType(followUp.follow_up_type)) return false;
+
+  const due = new Date(followUp.due_at);
+  if (Number.isNaN(due.getTime()) || due < todayStart) return false;
+
+  if (followUp.reminder_start_date) {
+    const reminderStart = new Date(followUp.reminder_start_date);
+    if (Number.isNaN(reminderStart.getTime())) return false;
+    return reminderStart <= todayEnd && due >= todayStart;
+  }
+
+  return due <= horizonEnd;
+}
+
+export function getSeasonalFollowUpHorizonEnd(from = new Date()): Date {
+  const horizonEnd = new Date(from);
+  horizonEnd.setDate(horizonEnd.getDate() + SEASONAL_FOLLOW_UP_HORIZON_DAYS);
+  horizonEnd.setHours(23, 59, 59, 999);
+  return horizonEnd;
+}

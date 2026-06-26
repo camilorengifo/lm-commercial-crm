@@ -9,6 +9,11 @@ import {
   getOpportunityPipelineValue,
 } from "@/lib/brokerProductivity";
 import { getFollowUpBucket } from "@/lib/followUps";
+import { isWorkingCompanyRecord } from "@/lib/accountStatus";
+import {
+  isSeasonalFollowUpType,
+  shouldIncludeSeasonalFollowUp,
+} from "@/lib/followUpSeasonal";
 
 const SEASONAL_HORIZON_DAYS = 45;
 const MAX_TOP_PRIORITIES = 5;
@@ -173,15 +178,7 @@ function addDays(date: Date, days: number): Date {
 }
 
 function isWorkingCompany(company: CompanyRow | undefined): boolean {
-  if (!company) return false;
-  if (company.deleted_at) return false;
-  const status = company.account_status?.trim().toLowerCase() ?? "active";
-  return status !== "archived";
-}
-
-function isSeasonalFollowUpType(value: string | null | undefined): boolean {
-  const normalized = value?.trim().toLowerCase();
-  return normalized === "seasonal" || normalized === "future_opportunity";
+  return isWorkingCompanyRecord(company ?? {});
 }
 
 function formatContactName(firstName: string, lastName: string | null): string {
@@ -213,26 +210,6 @@ function buildContactNameByCompany(contacts: ContactRow[]): Map<string, string> 
   }
 
   return result;
-}
-
-function shouldIncludeSeasonalFollowUp(
-  followUp: FollowUpRow,
-  todayStart: Date,
-  todayEnd: Date,
-  horizonEnd: Date,
-): boolean {
-  if (!isSeasonalFollowUpType(followUp.follow_up_type)) return false;
-
-  const due = new Date(followUp.due_at);
-  if (Number.isNaN(due.getTime()) || due < todayStart) return false;
-
-  if (followUp.reminder_start_date) {
-    const reminderStart = new Date(followUp.reminder_start_date);
-    if (Number.isNaN(reminderStart.getTime())) return false;
-    return reminderStart <= todayEnd && due >= todayStart;
-  }
-
-  return due <= horizonEnd;
 }
 
 function isHighPriority(priority: string): boolean {

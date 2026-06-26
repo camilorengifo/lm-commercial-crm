@@ -94,5 +94,34 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json({ message: "Account status updated successfully." });
+  const { data: updatedCompany, error: selectError } = await supabase
+    .from("companies")
+    .select(
+      "account_status, account_disposition, archived_at, archived_by, archive_reason, archive_notes",
+    )
+    .eq("id", companyId)
+    .maybeSingle();
+
+  if (selectError) {
+    return NextResponse.json(
+      {
+        error:
+          selectError.message ||
+          "Account status was updated but the latest values could not be loaded.",
+      },
+      { status: 500 },
+    );
+  }
+
+  if (!updatedCompany) {
+    return NextResponse.json(
+      { error: "Company not found after update." },
+      { status: 404 },
+    );
+  }
+
+  return NextResponse.json({
+    message: "Account status updated successfully.",
+    company: updatedCompany,
+  });
 }
