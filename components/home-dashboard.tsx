@@ -83,31 +83,6 @@ function SummaryCard({
   return <div className={className}>{content}</div>;
 }
 
-function QuickNav({ isAdmin }: { isAdmin: boolean }) {
-  const links = [
-    { href: "/companies", label: "Companies" },
-    { href: "/opportunities", label: "Opportunities" },
-    { href: "/pipeline", label: "Pipeline" },
-    { href: "/follow-ups", label: "Follow-ups" },
-    { href: "/assistant", label: "AI Assistant" },
-    ...(isAdmin ? [{ href: "/admin", label: "Admin" }] : []),
-  ];
-
-  return (
-    <div className="flex flex-wrap gap-2">
-      {links.map((link) => (
-        <Link
-          key={link.href}
-          href={link.href}
-          className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
-        >
-          {link.label}
-        </Link>
-      ))}
-    </div>
-  );
-}
-
 function actionPlanBadgeClass(kind: ActionPlanItem["kind"]): string {
   switch (kind) {
     case "overdue":
@@ -870,7 +845,6 @@ export function HomeDashboard() {
         </div>
 
         <div className="flex flex-col items-stretch gap-3 sm:items-end">
-          <QuickNav isAdmin={isAdmin} />
           {!isAdmin && (
             <Link
               href="/companies"
