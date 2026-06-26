@@ -4,6 +4,7 @@ import { getOpportunityPipelineValue } from "@/lib/brokerProductivity";
 import { getFollowUpBucket } from "@/lib/followUps";
 import { getProfileDisplayName } from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
+import { verifyAdminAccess } from "@/lib/admin";
 import {
   UNASSIGNED_OFFICE_LABEL,
   type Office,
@@ -288,6 +289,14 @@ export async function fetchAdminCompaniesOversight(): Promise<{
   data: AdminCompaniesOversightData | null;
   error: { message?: string } | null;
 }> {
+  const access = await verifyAdminAccess();
+  if (!access.allowed) {
+    return {
+      data: null,
+      error: { message: "Admin access required." },
+    };
+  }
+
   const [
     profilesResult,
     officesResult,

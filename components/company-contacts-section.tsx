@@ -228,10 +228,14 @@ function ContactDetailRow({
 
 export function CompanyContactsSection({
   companyId,
-  userId,
+  ownerUserId,
+  viewerUserId,
+  isAdmin = false,
 }: {
   companyId: string;
-  userId: string;
+  ownerUserId: string;
+  viewerUserId: string;
+  isAdmin?: boolean;
 }) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
@@ -249,6 +253,8 @@ export function CompanyContactsSection({
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  const scopedUserId = isAdmin ? ownerUserId : viewerUserId;
+
   const fetchContacts = useCallback(async () => {
     setFetchError(null);
 
@@ -258,7 +264,7 @@ export function CompanyContactsSection({
         "id, user_id, company_id, first_name, last_name, email, phone, job_title, notes, is_primary, created_at",
       )
       .eq("company_id", companyId)
-      .eq("user_id", userId)
+      .eq("user_id", scopedUserId)
       .order("is_primary", { ascending: false })
       .order("first_name", { ascending: true });
 
@@ -268,7 +274,7 @@ export function CompanyContactsSection({
     }
 
     setContacts((data as Contact[]) ?? []);
-  }, [companyId, userId]);
+  }, [companyId, scopedUserId]);
 
   useEffect(() => {
     setLoading(true);
@@ -280,7 +286,7 @@ export function CompanyContactsSection({
       .from("contacts")
       .update({ is_primary: false })
       .eq("company_id", companyId)
-      .eq("user_id", userId)
+      .eq("user_id", scopedUserId)
       .eq("is_primary", true);
 
     if (excludeContactId) {
@@ -312,7 +318,7 @@ export function CompanyContactsSection({
       }
 
       const payload = {
-        user_id: userId,
+        user_id: scopedUserId,
         company_id: companyId,
         ...buildContactPayload(createForm),
         first_name: trimmedFirstName,
@@ -379,7 +385,7 @@ export function CompanyContactsSection({
         .update(payload)
         .eq("id", editingId)
         .eq("company_id", companyId)
-        .eq("user_id", userId);
+        .eq("user_id", scopedUserId);
 
       if (error) {
         setEditError(formatSupabaseError(error));
@@ -412,7 +418,7 @@ export function CompanyContactsSection({
       .delete()
       .eq("id", contact.id)
       .eq("company_id", companyId)
-      .eq("user_id", userId);
+      .eq("user_id", scopedUserId);
 
     if (error) {
       setFetchError(formatSupabaseError(error));

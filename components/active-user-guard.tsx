@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  signOutAndClearSession,
+} from "@/lib/authSession";
 import { supabase } from "@/lib/supabaseClient";
 import { sessionNeedsPasswordSetup } from "@/lib/invitationSession";
 import {
@@ -30,8 +33,8 @@ export function ActiveUserGuard({ children }: { children: React.ReactNode }) {
       const { data: profile } = await fetchUserProfile(session.user.id);
 
       if (profile && !isActiveProfile(profile)) {
-        await supabase.auth.signOut();
-        router.replace("/login?inactive=1");
+        await signOutAndClearSession();
+        window.location.href = "/login?inactive=1";
         return;
       }
 
@@ -67,8 +70,8 @@ export function ActiveUserGuard({ children }: { children: React.ReactNode }) {
       const { data: profile } = await fetchUserProfile(session.user.id);
 
       if (profile && !isActiveProfile(profile)) {
-        await supabase.auth.signOut();
-        router.replace("/login?inactive=1");
+        await signOutAndClearSession();
+        window.location.href = "/login?inactive=1";
         return;
       }
 

@@ -652,14 +652,14 @@ export function FollowUpsPage() {
         );
       }
 
-      await loadFollowUps(session.user.id, admin);
+      await loadFollowUps(session.user.id, false);
       setLoading(false);
     });
   }, [router, loadFollowUps]);
 
   useEffect(() => {
     if (statusFilter !== "cancelled" || !user) return;
-    loadCancelled(user.id, isAdmin);
+    loadCancelled(user.id, false);
   }, [statusFilter, user, isAdmin, loadCancelled]);
 
   const buckets = useMemo(
@@ -764,9 +764,9 @@ export function FollowUpsPage() {
 
   async function refreshData() {
     if (!user) return;
-    await loadFollowUps(user.id, isAdmin);
+    await loadFollowUps(user.id, false);
     if (statusFilter === "cancelled") {
-      await loadCancelled(user.id, isAdmin);
+      await loadCancelled(user.id, false);
     }
   }
 

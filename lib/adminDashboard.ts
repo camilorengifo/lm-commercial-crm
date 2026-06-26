@@ -11,6 +11,7 @@ import {
   type UserProfile,
 } from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
+import { verifyAdminAccess } from "@/lib/admin";
 import {
   UNASSIGNED_OFFICE_LABEL,
   type Office,
@@ -837,6 +838,14 @@ export async function fetchAdminOverview(): Promise<{
   data: AdminOverviewData | null;
   error: { message?: string } | null;
 }> {
+  const access = await verifyAdminAccess();
+  if (!access.allowed) {
+    return {
+      data: null,
+      error: { message: "Admin access required." },
+    };
+  }
+
   const { data: raw, error } = await fetchRawCrmData();
   if (error || !raw) {
     return { data: null, error };
@@ -872,6 +881,14 @@ export async function fetchBrokerAdminDetail(
   data: AdminBrokerDetailData | null;
   error: { message?: string } | null;
 }> {
+  const access = await verifyAdminAccess();
+  if (!access.allowed) {
+    return {
+      data: null,
+      error: { message: "Admin access required." },
+    };
+  }
+
   const { data: raw, error } = await fetchRawCrmData();
   if (error || !raw) {
     return { data: null, error };

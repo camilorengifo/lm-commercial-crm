@@ -70,12 +70,11 @@ export function OpportunitiesPage() {
 
   const isAdmin = isAdminProfile(profile);
 
-  const loadOpportunities = useCallback(
-    async (userId: string, asAdmin: boolean) => {
+  const loadOpportunities = useCallback(async (userId: string) => {
       setFetchError(null);
       const { data, error } = await fetchLoadOpportunitiesWithCompanies(
         userId,
-        asAdmin,
+        false,
       );
 
       if (error) {
@@ -98,10 +97,7 @@ export function OpportunitiesPage() {
       setUser(session.user);
       const { data: userProfile } = await fetchUserProfile(session.user.id);
       setProfile(userProfile);
-      await loadOpportunities(
-        session.user.id,
-        isAdminProfile(userProfile),
-      );
+      await loadOpportunities(session.user.id);
       setLoading(false);
     });
   }, [router, loadOpportunities]);

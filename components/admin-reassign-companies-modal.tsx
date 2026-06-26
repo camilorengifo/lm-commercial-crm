@@ -29,20 +29,24 @@ export function AdminReassignCompaniesModal({
   const currentOwnerSummary = useMemo(() => {
     if (selectedCompanies.length === 0) return null;
 
-    const uniqueOwners = new Map<string, { name: string; email: string }>();
+    const uniqueOwners = new Map<
+      string,
+      { name: string; email: string; userId: string }
+    >();
     for (const company of selectedCompanies) {
       uniqueOwners.set(company.brokerUserId, {
         name: company.brokerName,
         email: company.brokerEmail,
+        userId: company.brokerUserId,
       });
     }
 
     if (uniqueOwners.size === 1) {
       const owner = Array.from(uniqueOwners.values())[0];
-      return `${owner.name} (${owner.email})`;
+      return `${owner.email} (${owner.name}) · ${owner.userId}`;
     }
 
-    return `${uniqueOwners.size} different brokers`;
+    return `${uniqueOwners.size} different owners`;
   }, [selectedCompanies]);
 
   const targetOwner = assignableOwners.find(
@@ -76,18 +80,21 @@ export function AdminReassignCompaniesModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="reassign-companies-title"
-        className="w-full max-w-lg rounded-xl border border-zinc-200 bg-white p-6 shadow-xl"
+        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 shadow-xl"
       >
         <h2
           id="reassign-companies-title"
           className="text-lg font-semibold text-zinc-900"
         >
-          Reassign broker
+          Reassign company owner
         </h2>
 
         <p className="mt-2 text-sm text-zinc-600">
           {selectedCompanies.length} compan
-          {selectedCompanies.length === 1 ? "y" : "ies"} selected.
+          {selectedCompanies.length === 1 ? "y" : "ies"} selected. This updates{" "}
+          <span className="font-medium">companies.user_id</span> and moves
+          contacts, activities, follow-ups, and opportunities to the new broker.
+          Nothing is deleted.
         </p>
 
         {currentOwnerSummary && (
@@ -97,12 +104,41 @@ export function AdminReassignCompaniesModal({
           </p>
         )}
 
+        <div className="mt-4 max-h-48 overflow-y-auto rounded-lg border border-zinc-200">
+          <table className="min-w-full text-xs">
+            <thead className="bg-zinc-50">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium text-zinc-600">
+                  Company
+                </th>
+                <th className="px-3 py-2 text-left font-medium text-zinc-600">
+                  Owner email
+                </th>
+                <th className="px-3 py-2 text-left font-medium text-zinc-600">
+                  companies.user_id
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {selectedCompanies.map((company) => (
+                <tr key={company.companyId}>
+                  <td className="px-3 py-2 text-zinc-900">{company.companyName}</td>
+                  <td className="px-3 py-2 text-zinc-700">{company.brokerEmail}</td>
+                  <td className="px-3 py-2 font-mono text-zinc-600 break-all">
+                    {company.brokerUserId}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
         <div className="mt-4">
           <label
             htmlFor="target-broker"
             className="mb-1.5 block text-sm font-medium text-zinc-700"
           >
-            New broker
+            New owner broker
           </label>
           <select
             id="target-broker"
@@ -114,21 +150,26 @@ export function AdminReassignCompaniesModal({
             <option value="">Select a broker...</option>
             {assignableOwners.map((owner) => (
               <option key={owner.userId} value={owner.userId}>
-                {owner.name} ({owner.email})
+                {owner.email} — {owner.name}
               </option>
             ))}
           </select>
+          {targetOwner && (
+            <p className="mt-2 font-mono text-xs text-zinc-500">
+              New companies.user_id: {targetOwner.userId}
+            </p>
+          )}
         </div>
 
         <p className="mt-4 rounded-lg bg-zinc-50 px-3 py-2 text-sm text-zinc-600">
-          The selected accounts and their contacts, activities, follow-ups, and
-          opportunities will be moved to{" "}
+          After reassignment, only{" "}
           {targetOwner ? (
-            <span className="font-medium text-zinc-900">{targetOwner.name}</span>
+            <span className="font-medium text-zinc-900">{targetOwner.email}</span>
           ) : (
             "the selected broker"
-          )}
-          . The previous broker will no longer see these companies.
+          )}{" "}
+          will see these companies on <span className="font-medium">/companies</span>.
+          The previous owner will lose access immediately.
         </p>
 
         {allAlreadyAssigned && (
@@ -160,7 +201,7 @@ export function AdminReassignCompaniesModal({
             }
             className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {submitting ? "Reassigning..." : "Reassign"}
+            {submitting ? "Reassigning..." : "Reassign owner"}
           </button>
         </div>
       </div>
@@ -182,5 +223,5 @@ export function buildAssignableOwnersFromProfiles(
       name: getProfileDisplayName(profile),
       email: profile.email ?? "—",
     }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => a.email.localeCompare(b.email));
 }

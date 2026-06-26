@@ -2,8 +2,12 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import {
+  redirectToLoginAfterSignOut,
+  signOutAndClearSession,
+} from "@/lib/authSession";
 import { supabase } from "@/lib/supabaseClient";
 import {
   fetchUserProfile,
@@ -114,25 +118,24 @@ function NavIcon({ href, active }: { href: string; active: boolean }) {
 
 export function AppNav() {
   const pathname = usePathname();
-  const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!session) {
+    supabase.auth.getUser().then(async ({ data: { user: authUser }, error }) => {
+      if (error || !authUser) {
         setIsAdmin(false);
         return;
       }
 
-      const { data: profile } = await fetchUserProfile(session.user.id);
+      const { data: profile } = await fetchUserProfile(authUser.id);
       setIsAdmin(isAdminProfile(profile));
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (!session) {
+      if (!session?.user) {
         setIsAdmin(false);
         return;
       }
@@ -146,8 +149,8 @@ export function AppNav() {
 
   async function handleLogout() {
     setLoggingOut(true);
-    await supabase.auth.signOut();
-    router.replace("/login");
+    await signOutAndClearSession();
+    redirectToLoginAfterSignOut();
   }
 
   const navItems = isAdmin

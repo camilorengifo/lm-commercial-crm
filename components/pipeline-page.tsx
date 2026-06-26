@@ -17,6 +17,7 @@ import {
   type SalesStage,
 } from "@/lib/crmConstants";
 import { formatDate, formatSupabaseError } from "@/lib/crmFormat";
+import { filterCompaniesOwnedByUser } from "@/lib/brokerDataAccess";
 import { supabase } from "@/lib/supabaseClient";
 
 interface PipelineCompany {
@@ -209,7 +210,7 @@ export function PipelinePage() {
       );
     }
 
-    setCompanies(
+    const { visible } = filterCompaniesOwnedByUser(
       (companiesResult.data ?? []).map((row) => ({
         id: row.id as string,
         user_id: row.user_id as string,
@@ -221,7 +222,14 @@ export function PipelinePage() {
           : DEFAULT_SALES_STAGE,
         last_contact_at: row.last_contact_at as string | null,
         next_follow_up_at: row.next_follow_up_at as string | null,
-        contactCount: contactCountByCompany.get(row.id as string) ?? 0,
+      })),
+      userId,
+    );
+
+    setCompanies(
+      visible.map((row) => ({
+        ...row,
+        contactCount: contactCountByCompany.get(row.id) ?? 0,
       })),
     );
   }, []);

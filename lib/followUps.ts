@@ -8,6 +8,7 @@ import {
   type FollowUpType,
   type FollowUpTypeFormValues,
 } from "@/lib/followUpSeasonal";
+import { enforceBrokerOwnedRows } from "@/lib/brokerDataAccess";
 import { supabase } from "@/lib/supabaseClient";
 
 export const FOLLOW_UP_PENDING_LIMIT = 200;
@@ -226,7 +227,10 @@ async function fetchCompaniesForFollowUps(
   const { data, error } = await query;
 
   return {
-    data: (data as CompanyJoinRow[]) ?? [],
+    data: enforceBrokerOwnedRows((data as CompanyJoinRow[]) ?? [], userId, {
+      page: "fetchCompaniesForFollowUps",
+      brokerFacingRoute: !asAdmin,
+    }),
     error,
   };
 }
@@ -492,8 +496,16 @@ export async function fetchFollowUpWorkcenterData(
     };
   }
 
-  const pendingRows = (pendingResult.data as FollowUpRecord[]) ?? [];
-  const completedRows = (completedResult.data as FollowUpRecord[]) ?? [];
+  const pendingRows = enforceBrokerOwnedRows(
+    (pendingResult.data as FollowUpRecord[]) ?? [],
+    userId,
+    { page: "fetchFollowUpWorkcenterData:pending", brokerFacingRoute: !asAdmin },
+  );
+  const completedRows = enforceBrokerOwnedRows(
+    (completedResult.data as FollowUpRecord[]) ?? [],
+    userId,
+    { page: "fetchFollowUpWorkcenterData:completed", brokerFacingRoute: !asAdmin },
+  );
 
   const [pendingEnriched, completedEnriched] = await Promise.all([
     enrichFollowUpRecords(pendingRows, userId, asAdmin),

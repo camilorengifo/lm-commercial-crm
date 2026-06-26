@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
@@ -37,7 +37,19 @@ import {
   normalizeAccountStatus,
   type AccountStatusFilter,
 } from "@/lib/accountStatus";
+import {
+  CompaniesIsolationDebug,
+  type CompanyOwnershipDebugRow,
+} from "@/components/companies-isolation-debug";
 import { formatDate, formatSupabaseError } from "@/lib/crmFormat";
+import { createAuthFetchGuard, getVerifiedAuthContext } from "@/lib/authSession";
+import {
+  fetchCompaniesOwnedByUser,
+  filterCompaniesOwnedByUser,
+  type BrokerIsolationStats,
+} from "@/lib/brokerDataAccess";
+import { fetchUserProfile, isAdminProfile, type UserProfile } from "@/lib/userProfile";
+import { isSecurityDebugEnabled, logBrokerIsolationWarn } from "@/lib/securityDebug";
 import { supabase } from "@/lib/supabaseClient";
 
 interface Company extends CompanyRecord {
@@ -80,45 +92,163 @@ export function CompaniesPage() {
   const [bulkPauseOpen, setBulkPauseOpen] = useState(false);
   const [bulkActiveOpen, setBulkActiveOpen] = useState(false);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [viewerProfile, setViewerProfile] = useState<UserProfile | null>(null);
+  const [profileIdMatchesAuth, setProfileIdMatchesAuth] = useState(true);
+  const [authEmailMatchesProfile, setAuthEmailMatchesProfile] = useState(true);
+  const [isAdminViewer, setIsAdminViewer] = useState(false);
+  const [isolationStats, setIsolationStats] = useState<BrokerIsolationStats | null>(
+    null,
+  );
+  const [companyOwnershipRows, setCompanyOwnershipRows] = useState<
+    CompanyOwnershipDebugRow[]
+  >([]);
+  const fetchGuardRef = useRef(createAuthFetchGuard());
 
-  const fetchCompanies = useCallback(async (userId: string) => {
+  const fetchCompanies = useCallback(async (userId: string, email: string | null) => {
+    const fetchGeneration = fetchGuardRef.current.next();
     setFetchError(null);
+    setCompanies([]);
+    setIsolationStats(null);
+    setCompanyOwnershipRows([]);
 
-    const { data, error } = await supabase
-      .from("companies")
-      .select(COMPANY_LIST_SELECT)
-      .eq("user_id", userId)
-      .order("name", { ascending: true });
+    const authContext = await getVerifiedAuthContext();
+    if (fetchGuardRef.current.isStale(fetchGeneration)) {
+      return;
+    }
+
+    if (!authContext || authContext.userId !== userId) {
+      logBrokerIsolationWarn("auth context mismatch during companies fetch", {
+        requestedUserId: userId,
+        verifiedUserId: authContext?.userId ?? null,
+        requestedEmail: email,
+        verifiedEmail: authContext?.email ?? null,
+      });
+      return;
+    }
+
+    const { data: profile } = await fetchUserProfile(userId);
+    if (fetchGuardRef.current.isStale(fetchGeneration)) {
+      return;
+    }
+
+    setViewerProfile(profile);
+    setProfileIdMatchesAuth(profile ? profile.id === userId : false);
+    setAuthEmailMatchesProfile(authContext.authEmailMatchesProfile);
+    setIsAdminViewer(isAdminProfile(profile));
+
+    if (profile && profile.id !== userId) {
+      logBrokerIsolationWarn("profile.id !== auth.user.id", {
+        authUserId: userId,
+        profileId: profile.id,
+      });
+    }
+
+    if (profile && !authContext.authEmailMatchesProfile) {
+      logBrokerIsolationWarn("auth.user.email !== profile.email", {
+        authEmail: email,
+        profileEmail: profile.email,
+        authUserId: userId,
+        profileId: profile.id,
+      });
+    }
+
+    const { data, error, stats } = await fetchCompaniesOwnedByUser<Company>({
+      ownerUserId: userId,
+      select: COMPANY_LIST_SELECT,
+      page: "/companies",
+      profile,
+      order: { column: "name", ascending: true },
+    });
+
+    if (fetchGuardRef.current.isStale(fetchGeneration)) {
+      return;
+    }
 
     if (error) {
       setFetchError(formatSupabaseError(error));
       return;
     }
 
-    setCompanies((data as Company[]) ?? []);
+    const { visible } = filterCompaniesOwnedByUser(data, userId);
+
+    const foreignInVisible = visible.filter((company) => company.user_id !== userId);
+    if (foreignInVisible.length > 0) {
+      logBrokerIsolationWarn("foreign companies in visible list after filter", {
+        authUserId: userId,
+        authEmail: email,
+        profileRole: profile?.role ?? null,
+        isAdmin: isAdminProfile(profile),
+        foreignCompanies: foreignInVisible.map((company) => ({
+          id: company.id,
+          name: company.name,
+          user_id: company.user_id,
+        })),
+      });
+    }
+
+    setIsolationStats(stats);
+    setCompanies(visible);
+
+    if (isSecurityDebugEnabled() && visible.length > 0) {
+      const ownerIds = [...new Set(visible.map((company) => company.user_id))];
+      const { data: ownerProfiles } = await supabase
+        .from("profiles")
+        .select("id, email")
+        .in("id", ownerIds);
+
+      if (fetchGuardRef.current.isStale(fetchGeneration)) {
+        return;
+      }
+
+      const emailByUserId = new Map(
+        (ownerProfiles ?? []).map((row) => [
+          row.id as string,
+          (row.email as string | null) ?? "—",
+        ]),
+      );
+
+      setCompanyOwnershipRows(
+        visible.map((company) => ({
+          id: company.id,
+          name: company.name,
+          user_id: company.user_id,
+          ownerEmail: emailByUserId.get(company.user_id) ?? "—",
+          matchesAuth: company.user_id === userId,
+        })),
+      );
+    } else {
+      setCompanyOwnershipRows([]);
+    }
   }, []);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) {
+    supabase.auth.getUser().then(({ data: { user: authUser }, error }) => {
+      if (error || !authUser) {
         router.replace("/login");
         return;
       }
 
-      setUser(session.user);
-      fetchCompanies(session.user.id).finally(() => setLoading(false));
+      setUser(authUser);
+      fetchCompanies(authUser.id, authUser.email ?? null).finally(() =>
+        setLoading(false),
+      );
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) {
+      if (!session?.user) {
+        setUser(null);
+        setViewerProfile(null);
+        setCompanies([]);
         router.replace("/login");
         return;
       }
 
+      setCompanies([]);
+      setViewerProfile(null);
       setUser(session.user);
-      fetchCompanies(session.user.id);
+      fetchCompanies(session.user.id, session.user.email ?? null);
     });
 
     return () => subscription.unsubscribe();
@@ -234,7 +364,7 @@ export function CompaniesPage() {
     }
 
     setSuccessMessage(message);
-    await fetchCompanies(user.id);
+    await fetchCompanies(user.id, user.email ?? null);
     setBulkSubmitting(false);
   }
 
@@ -289,9 +419,14 @@ export function CompaniesPage() {
     setForm(EMPTY_FORM);
     setShowForm(false);
     setSuccessMessage(`"${trimmedName}" was added successfully.`);
-    await fetchCompanies(user.id);
+    await fetchCompanies(user.id, user.email ?? null);
     setSubmitting(false);
   }
+
+  const uniqueCompanyOwnerIds = useMemo(
+    () => [...new Set(companies.map((company) => company.user_id))],
+    [companies],
+  );
 
   if (loading) {
     return (
@@ -307,6 +442,21 @@ export function CompaniesPage() {
 
   return (
     <AuthenticatedLayout>
+        {isSecurityDebugEnabled() && (
+          <CompaniesIsolationDebug
+            authUserId={user.id}
+            authEmail={user.email ?? null}
+            profile={viewerProfile}
+            isAdmin={isAdminViewer}
+            fetchMode="broker_own_only"
+            stats={isolationStats}
+            profileIdMatchesAuth={profileIdMatchesAuth}
+            authEmailMatchesProfile={authEmailMatchesProfile}
+            uniqueCompanyOwnerIds={uniqueCompanyOwnerIds}
+            companyOwnershipRows={companyOwnershipRows}
+          />
+        )}
+
         <PageHeader
           title="Companies"
           description="Search, filter, and manage your company book of business"

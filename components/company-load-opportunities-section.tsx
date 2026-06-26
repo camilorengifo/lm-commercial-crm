@@ -25,13 +25,17 @@ import {
 
 export function CompanyLoadOpportunitiesSection({
   companyId,
-  userId,
+  ownerUserId,
+  viewerUserId,
+  isAdmin = false,
   currentSalesStage,
   canManage = true,
   onCompanyUpdated,
 }: {
   companyId: string;
-  userId: string;
+  ownerUserId: string;
+  viewerUserId: string;
+  isAdmin?: boolean;
   currentSalesStage: SalesStage;
   canManage?: boolean;
   onCompanyUpdated?: () => void;
@@ -50,6 +54,8 @@ export function CompanyLoadOpportunitiesSection({
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  const scopedUserId = isAdmin ? ownerUserId : viewerUserId;
+
   const contactNameById = new Map(
     contacts.map((contact) => [contact.id, formatContactName(contact)]),
   );
@@ -58,8 +64,8 @@ export function CompanyLoadOpportunitiesSection({
     setFetchError(null);
     try {
       const [contactsResult, opportunitiesResult] = await Promise.all([
-        fetchContactsForCompany(userId, companyId),
-        fetchLoadOpportunitiesForCompany(userId, companyId),
+        fetchContactsForCompany(scopedUserId, companyId, isAdmin),
+        fetchLoadOpportunitiesForCompany(scopedUserId, companyId, isAdmin),
       ]);
 
       if (contactsResult.error) throw contactsResult.error;
@@ -70,7 +76,7 @@ export function CompanyLoadOpportunitiesSection({
     } catch (error) {
       setFetchError(formatSupabaseError(error as { message?: string }));
     }
-  }, [companyId, userId]);
+  }, [companyId, scopedUserId, isAdmin]);
 
   useEffect(() => {
     setLoading(true);
@@ -97,7 +103,7 @@ export function CompanyLoadOpportunitiesSection({
     setEditSubmitting(true);
 
     const { error } = await updateLoadOpportunity({
-      userId,
+      userId: scopedUserId,
       companyId,
       opportunityId: editingId,
       form: editForm,
@@ -127,7 +133,7 @@ export function CompanyLoadOpportunitiesSection({
     setDeletingId(opportunity.id);
 
     const { error } = await deleteLoadOpportunity(
-      userId,
+      scopedUserId,
       companyId,
       opportunity.id,
     );

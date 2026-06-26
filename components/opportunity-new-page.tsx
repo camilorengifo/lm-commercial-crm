@@ -82,7 +82,6 @@ export function OpportunityNewPage() {
       const { data: userProfile } = await fetchUserProfile(session.user.id);
       setProfile(userProfile);
 
-      const asAdmin = isAdminProfile(userProfile);
       if (!userCanManageOpportunities(userProfile)) {
         router.replace("/opportunities");
         return;
@@ -90,7 +89,7 @@ export function OpportunityNewPage() {
 
       const { data, error: companiesError } = await fetchCompaniesForOpportunities(
         session.user.id,
-        asAdmin,
+        false,
       );
 
       if (companiesError) {
@@ -110,7 +109,7 @@ export function OpportunityNewPage() {
       await loadContacts(
         initialCompanyId,
         session.user.id,
-        asAdmin,
+        false,
         data.find((company) => company.id === initialCompanyId)?.user_id,
       );
       setLoading(false);
@@ -123,10 +122,10 @@ export function OpportunityNewPage() {
     loadContacts(
       companyId,
       user.id,
-      isAdmin,
+      false,
       selectedCompany?.user_id,
     );
-  }, [companyId, user, isAdmin, companies, loadContacts]);
+  }, [companyId, user, companies, loadContacts]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

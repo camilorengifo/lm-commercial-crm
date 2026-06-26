@@ -1,5 +1,7 @@
 import { AppNav } from "@/components/app-nav";
 import { ActiveUserGuard } from "@/components/active-user-guard";
+import { isSecurityDebugEnabled } from "@/lib/securityDebug";
+import { SecurityDebugPanel } from "@/components/security-debug-panel";
 
 export function AuthenticatedLayout({
   children,
@@ -15,6 +17,7 @@ export function AuthenticatedLayout({
         <main className="crm-main">
           <div className={`crm-page-inner ${maxWidthClass}`}>{children}</div>
         </main>
+        {isSecurityDebugEnabled() ? <SecurityDebugPanel /> : null}
       </div>
     </ActiveUserGuard>
   );

@@ -45,6 +45,7 @@ import {
 } from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
 import { UNASSIGNED_OFFICE_LABEL } from "@/lib/offices";
+import { brokerCanAccessCompany, fetchCompanyByIdForViewer, resolveBrokerScopedUserId } from "@/lib/brokerDataAccess";
 
 interface CompanyOwnerInfo {
   name: string;
@@ -101,46 +102,46 @@ export function CompanyDetailPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [restoringAccount, setRestoringAccount] = useState(false);
+  const [companyAccessVerified, setCompanyAccessVerified] = useState(false);
 
   const isAdmin = isAdminProfile(profile);
 
   const fetchCompany = useCallback(
-    async (userId: string, id: string, asAdmin: boolean) => {
+    async (userId: string, id: string, userProfile: UserProfile | null) => {
       setFetchError(null);
       setNotFound(false);
+      setCompanyAccessVerified(false);
+      setCompany(null);
+      setOwnerInfo(null);
 
-      let query = supabase
-        .from("companies")
-        .select(COMPANY_LIST_SELECT)
-        .eq("id", id);
-
-      if (!asAdmin) {
-        query = query.eq("user_id", userId);
-      }
-
-      const { data, error } = await query.maybeSingle();
+      const { data, error, denied } = await fetchCompanyByIdForViewer<Company>({
+        companyId: id,
+        viewerUserId: userId,
+        select: COMPANY_LIST_SELECT,
+        profile: userProfile,
+        allowAdminBypass: isAdminProfile(userProfile),
+      });
 
       if (error) {
         setFetchError(formatSupabaseError(error));
-        setCompany(null);
         return;
       }
 
-      if (!data) {
+      if (denied || !data) {
         setNotFound(true);
-        setCompany(null);
         return;
       }
 
       const nextCompany = {
-        ...(data as Company),
-        sales_stage: isSalesStage((data as Company).sales_stage)
-          ? (data as Company).sales_stage
+        ...data,
+        sales_stage: isSalesStage(data.sales_stage)
+          ? data.sales_stage
           : DEFAULT_SALES_STAGE,
       };
 
       setCompany(nextCompany);
       setReassignBrokerId(nextCompany.user_id);
+      setCompanyAccessVerified(true);
 
       const { data: ownerProfile } = await supabase
         .from("profiles")
@@ -212,7 +213,7 @@ export function CompanyDetailPage() {
 
   const handleCompanyUpdated = useCallback(() => {
     if (user && companyId && profile) {
-      return fetchCompany(user.id, companyId, isAdminProfile(profile));
+      return fetchCompany(user.id, companyId, profile);
     }
     return Promise.resolve();
   }, [user, companyId, profile, fetchCompany]);
@@ -263,7 +264,7 @@ export function CompanyDetailPage() {
 
     setReassignSuccess("Company ownership updated.");
     if (user && companyId && profile) {
-      await fetchCompany(user.id, companyId, isAdminProfile(profile));
+      await fetchCompany(user.id, companyId, profile);
       setChronologyRefreshKey((key) => key + 1);
     }
 
@@ -288,7 +289,7 @@ export function CompanyDetailPage() {
 
     setActionMessage(data.message);
     if (user && companyId && profile) {
-      await fetchCompany(user.id, companyId, isAdminProfile(profile));
+      await fetchCompany(user.id, companyId, profile);
       setChronologyRefreshKey((key) => key + 1);
     }
   }
@@ -329,7 +330,7 @@ export function CompanyDetailPage() {
             : prev,
         );
       }
-      await fetchCompany(user.id, companyId, isAdminProfile(profile));
+      await fetchCompany(user.id, companyId, profile);
       setChronologyRefreshKey((key) => key + 1);
     }
   }
@@ -355,15 +356,15 @@ export function CompanyDetailPage() {
       return;
     }
 
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!session) {
+    supabase.auth.getUser().then(async ({ data: { user: authUser }, error }) => {
+      if (error || !authUser) {
         router.replace("/login");
         return;
       }
 
-      setUser(session.user);
+      setUser(authUser);
 
-      const { data: userProfile } = await fetchUserProfile(session.user.id);
+      const { data: userProfile } = await fetchUserProfile(authUser.id);
       setProfile(userProfile);
 
       if (isAdminProfile(userProfile)) {
@@ -371,17 +372,15 @@ export function CompanyDetailPage() {
         setBrokers(allProfiles.filter((item) => item.role === "broker"));
       }
 
-      fetchCompany(
-        session.user.id,
-        companyId,
-        isAdminProfile(userProfile),
-      ).finally(() => setLoading(false));
+      fetchCompany(authUser.id, companyId, userProfile).finally(() =>
+        setLoading(false),
+      );
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (!session) {
+      if (!session?.user) {
         router.replace("/login");
         return;
       }
@@ -391,11 +390,7 @@ export function CompanyDetailPage() {
       setProfile(userProfile);
 
       if (companyId) {
-        fetchCompany(
-          session.user.id,
-          companyId,
-          isAdminProfile(userProfile),
-        );
+        fetchCompany(session.user.id, companyId, userProfile);
       }
     });
 
@@ -413,6 +408,23 @@ export function CompanyDetailPage() {
   if (!user) {
     return null;
   }
+
+  const canViewCompany =
+    company &&
+    brokerCanAccessCompany({
+      companyUserId: company.user_id,
+      viewerUserId: user.id,
+      isAdmin,
+    });
+
+  const scopedUserId =
+    company && user
+      ? resolveBrokerScopedUserId({
+          ownerUserId: company.user_id,
+          viewerUserId: user.id,
+          isAdmin,
+        })
+      : user.id;
 
   return (
     <AuthenticatedLayout maxWidthClass="max-w-4xl">
@@ -442,7 +454,7 @@ export function CompanyDetailPage() {
           </div>
         )}
 
-        {company && (
+        {company && companyAccessVerified && canViewCompany && (
           <>
             <div className="crm-company-header">
               <div className="crm-company-header-bar" aria-hidden />
@@ -684,7 +696,9 @@ export function CompanyDetailPage() {
             <div className="space-y-5">
               <CompanyContactsSection
                 companyId={company.id}
-                userId={company.user_id}
+                ownerUserId={company.user_id}
+                viewerUserId={user.id}
+                isAdmin={isAdmin}
               />
               <CompanyAccountStatusSection
                 company={company}
@@ -693,7 +707,7 @@ export function CompanyDetailPage() {
               />
               <CompanyFollowUpsSection
                 companyId={company.id}
-                userId={company.user_id}
+                userId={scopedUserId}
                 companyPriority={company.priority}
                 canManage={canManageFollowUps}
                 isAdmin={isAdmin}
@@ -702,14 +716,16 @@ export function CompanyDetailPage() {
               />
               <CompanyLoadOpportunitiesSection
                 companyId={company.id}
-                userId={company.user_id}
+                ownerUserId={company.user_id}
+                viewerUserId={user.id}
+                isAdmin={isAdmin}
                 currentSalesStage={company.sales_stage}
                 canManage={canManageCompanyOpportunities}
                 onCompanyUpdated={handleCompanyUpdated}
               />
               <CompanyChronologySection
                 companyId={company.id}
-                userId={company.user_id}
+                userId={scopedUserId}
                 isAdmin={isAdmin}
                 externalRefreshKey={chronologyRefreshKey}
               />
@@ -730,7 +746,9 @@ export function CompanyDetailPage() {
               <AiOutreachAssistantSection
                 companyId={company.id}
                 companyName={company.name}
-                userId={company.user_id}
+                ownerUserId={company.user_id}
+                viewerUserId={user.id}
+                isAdmin={isAdmin}
                 onActivitySaved={() => {
                   refreshFollowUpSections();
                 }}

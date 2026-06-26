@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
+import { verifyAdminAccess } from "@/lib/admin";
 
 export const USER_ROLES = ["admin", "broker"] as const;
 
@@ -20,7 +21,11 @@ export function normalizeUserRole(value: string | null | undefined): UserRole {
 }
 
 export function isAdminProfile(profile: UserProfile | null | undefined): boolean {
-  return profile?.role === "admin";
+  if (!profile || profile.role !== "admin") {
+    return false;
+  }
+
+  return profile.is_active === true;
 }
 
 export function canManageOpportunities(
@@ -73,6 +78,14 @@ export async function fetchAllProfiles(): Promise<{
   data: UserProfile[];
   error: { message?: string } | null;
 }> {
+  const access = await verifyAdminAccess();
+  if (!access.allowed) {
+    return {
+      data: [],
+      error: { message: "Admin access required." },
+    };
+  }
+
   const { data, error } = await supabase
     .from("profiles")
     .select("id, email, full_name, role, is_active, is_blocked, blocked_at, blocked_reason")

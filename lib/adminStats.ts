@@ -1,6 +1,7 @@
 import { getFollowUpBucket } from "@/lib/followUps";
 import { isOpenOpportunityStage } from "@/lib/crmConstants";
 import { supabase } from "@/lib/supabaseClient";
+import { verifyAdminAccess } from "@/lib/admin";
 import {
   getProfileDisplayName,
   type UserProfile,
@@ -63,6 +64,14 @@ export async function fetchAdminDashboardStats(): Promise<{
   data: AdminDashboardStats | null;
   error: { message?: string } | null;
 }> {
+  const access = await verifyAdminAccess();
+  if (!access.allowed) {
+    return {
+      data: null,
+      error: { message: "Admin access required." },
+    };
+  }
+
   const [
     profilesResult,
     companiesResult,

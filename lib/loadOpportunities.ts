@@ -9,6 +9,7 @@ import {
   type LoadOpportunityStatus,
   type SalesStage,
 } from "@/lib/crmConstants";
+import { enforceBrokerOwnedRows } from "@/lib/brokerDataAccess";
 import { supabase } from "@/lib/supabaseClient";
 
 export const LOAD_OPPORTUNITY_SELECT_FIELDS =
@@ -398,17 +399,22 @@ export async function fetchCompaniesForOpportunities(
 
   const { data, error } = await query;
 
+  const rows = ((data ?? []) as Array<{ id: string; name: string; sales_stage: string; user_id: string }>).map(
+    (company) => ({
+      id: company.id,
+      name: company.name,
+      sales_stage: isSalesStage(company.sales_stage)
+        ? company.sales_stage
+        : DEFAULT_SALES_STAGE,
+      user_id: company.user_id,
+    }),
+  ) as CompanyOption[];
+
   return {
-    data: ((data ?? []) as Array<{ id: string; name: string; sales_stage: string; user_id: string }>).map(
-      (company) => ({
-        id: company.id,
-        name: company.name,
-        sales_stage: isSalesStage(company.sales_stage)
-          ? company.sales_stage
-          : DEFAULT_SALES_STAGE,
-        user_id: company.user_id,
-      }),
-    ) as CompanyOption[],
+    data: enforceBrokerOwnedRows(rows, userId, {
+      page: "fetchCompaniesForOpportunities",
+      brokerFacingRoute: !asAdmin,
+    }),
     error,
   };
 }
@@ -459,7 +465,15 @@ export async function fetchLoadOpportunitiesWithCompanies(
   }
 
   const rows = ((data ?? []) as LoadOpportunityQueryRow[]).map(mapOpportunityRow);
-  return { data: sortOpportunitiesByRecent(rows), error: null };
+  return {
+    data: sortOpportunitiesByRecent(
+      enforceBrokerOwnedRows(rows, userId, {
+        page: "fetchLoadOpportunitiesWithCompanies",
+        brokerFacingRoute: !asAdmin,
+      }),
+    ),
+    error: null,
+  };
 }
 
 export async function fetchLoadOpportunityById(
@@ -484,8 +498,13 @@ export async function fetchLoadOpportunityById(
     return { data: null, error };
   }
 
+  const row = mapOpportunityRow(data as LoadOpportunityQueryRow);
+  if (!asAdmin && row.user_id !== userId) {
+    return { data: null, error: null };
+  }
+
   return {
-    data: mapOpportunityRow(data as LoadOpportunityQueryRow),
+    data: row,
     error: null,
   };
 }

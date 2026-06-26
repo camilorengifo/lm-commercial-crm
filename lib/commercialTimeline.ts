@@ -1,6 +1,7 @@
 import type { ActivityType } from "@/lib/crmConstants";
 import { formatContactName } from "@/lib/loadOpportunities";
 import { supabase } from "@/lib/supabaseClient";
+import { brokerCanAccessCompany } from "@/lib/brokerDataAccess";
 
 export const COMMERCIAL_TIMELINE_ACTIVITY_FIELDS =
   "id, user_id, company_id, contact_id, activity_type, subject, notes, activity_at, created_at, scheduled_follow_up_at";
@@ -31,6 +32,30 @@ export async function fetchCommercialTimelineActivities(input: {
   userId: string;
   isAdmin?: boolean;
 }): Promise<{ data: CommercialTimelineActivity[]; error: { message?: string } | null }> {
+  if (!input.isAdmin) {
+    const { data: company, error: companyError } = await supabase
+      .from("companies")
+      .select("id, user_id")
+      .eq("id", input.companyId)
+      .eq("user_id", input.userId)
+      .maybeSingle();
+
+    if (companyError) {
+      return { data: [], error: companyError };
+    }
+
+    if (
+      !company ||
+      !brokerCanAccessCompany({
+        companyUserId: company.user_id,
+        viewerUserId: input.userId,
+        isAdmin: false,
+      })
+    ) {
+      return { data: [], error: { message: "Company not found." } };
+    }
+  }
+
   let query = supabase
     .from("activities")
     .select(COMMERCIAL_TIMELINE_ACTIVITY_FIELDS)
@@ -66,10 +91,16 @@ export async function fetchCommercialTimelineActivities(input: {
   const profilesByUserId = new Map<string, string | null>();
 
   if (contactIds.length > 0) {
-    const { data: contacts, error: contactsError } = await supabase
+    let contactsQuery = supabase
       .from("contacts")
       .select("id, first_name, last_name")
       .in("id", contactIds);
+
+    if (!input.isAdmin) {
+      contactsQuery = contactsQuery.eq("user_id", input.userId);
+    }
+
+    const { data: contacts, error: contactsError } = await contactsQuery;
 
     if (contactsError) {
       return { data: [], error: contactsError };
@@ -80,7 +111,7 @@ export async function fetchCommercialTimelineActivities(input: {
     }
   }
 
-  if (userIds.length > 0) {
+  if (userIds.length > 0 && input.isAdmin) {
     const { data: profiles, error: profilesError } = await supabase
       .from("profiles")
       .select("id, email")

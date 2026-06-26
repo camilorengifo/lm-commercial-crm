@@ -19,22 +19,23 @@ export type AdminAccessResult =
 
 export async function verifyAdminAccess(): Promise<AdminAccessResult> {
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
 
-  if (!session?.user) {
+  if (authError || !user) {
     return { allowed: false, reason: "unauthenticated" };
   }
 
-  const { data: profile, error } = await fetchUserProfile(session.user.id);
+  const { data: profile, error } = await fetchUserProfile(user.id);
 
-  if (error || !profile || !isAdminProfile(profile) || !profile.is_active) {
+  if (error || !profile || !isAdminProfile(profile)) {
     return { allowed: false, reason: "forbidden" };
   }
 
   return {
     allowed: true,
-    user: session.user,
+    user,
     profile,
   };
 }

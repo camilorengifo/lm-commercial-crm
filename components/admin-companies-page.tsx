@@ -146,6 +146,27 @@ export function AdminCompaniesPage() {
     );
   }, [oversight, selectedCompanyIds]);
 
+  const activeBrokerOwnershipSummary = useMemo(() => {
+    if (brokerFilter === "all" || !oversight) {
+      return null;
+    }
+
+    const broker = oversight.brokers.find((item) => item.userId === brokerFilter);
+    if (!broker) {
+      return null;
+    }
+
+    const ownedCount = oversight.companies.filter(
+      (company) => company.brokerUserId === brokerFilter,
+    ).length;
+
+    return {
+      broker,
+      ownedCount,
+      filteredCount: filteredCompanies.length,
+    };
+  }, [brokerFilter, oversight, filteredCompanies.length]);
+
   const visibleCompanyIds = useMemo(
     () => filteredCompanies.map((company) => company.companyId),
     [filteredCompanies],
@@ -256,8 +277,9 @@ export function AdminCompaniesPage() {
           Companies oversight
         </h1>
         <p className="mt-2 text-sm text-zinc-600">
-          All companies across brokers — identify overdue follow-ups, abandoned
-          accounts, missing contacts, and hot leads.
+          All companies across brokers. Broker visibility is driven by{" "}
+          <span className="font-medium">companies.user_id</span> — use this page
+          to verify owner email and reassign accounts to the correct broker.
         </p>
       </div>
 
@@ -273,6 +295,24 @@ export function AdminCompaniesPage() {
         <p className="mb-6 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
           {reassignSuccess}
         </p>
+      )}
+
+      {activeBrokerOwnershipSummary && (
+        <div className="mb-6 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+          <p className="font-medium">Ownership filter active</p>
+          <p className="mt-1">
+            {activeBrokerOwnershipSummary.broker.name} (
+            {activeBrokerOwnershipSummary.broker.email}) owns{" "}
+            {activeBrokerOwnershipSummary.ownedCount} compan
+            {activeBrokerOwnershipSummary.ownedCount === 1 ? "y" : "ies"} in
+            the CRM (profiles.id / companies.user_id:{" "}
+            <span className="font-mono text-xs">
+              {activeBrokerOwnershipSummary.broker.userId}
+            </span>
+            ). Showing {activeBrokerOwnershipSummary.filteredCount} after other
+            filters.
+          </p>
+        </div>
       )}
 
       <StatGrid columns={5}>
@@ -330,7 +370,7 @@ export function AdminCompaniesPage() {
             <option value="all">All brokers</option>
             {oversight.brokers.map((broker) => (
               <option key={broker.userId} value={broker.userId}>
-                {broker.name}
+                {broker.name} ({broker.email})
               </option>
             ))}
           </select>
@@ -508,7 +548,7 @@ export function AdminCompaniesPage() {
           disabled={selectedCompanyIds.size === 0}
           className="crm-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Reassign Broker
+          Reassign owner ({selectedCompanyIds.size || 0})
         </button>
         {lifecycleFilter !== "active" && (
           <button
@@ -546,7 +586,10 @@ export function AdminCompaniesPage() {
                   Company
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-zinc-600">
-                  Broker
+                  Owner broker
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-zinc-600">
+                  Owner user ID
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-zinc-600">
                   Office / Agency
@@ -623,8 +666,13 @@ export function AdminCompaniesPage() {
                     </p>
                   </td>
                   <td className="px-4 py-3">
-                    <p className="text-zinc-900">{company.brokerName}</p>
-                    <p className="text-xs text-zinc-500">{company.brokerEmail}</p>
+                    <p className="font-medium text-zinc-900">{company.brokerEmail}</p>
+                    <p className="text-xs text-zinc-500">{company.brokerName}</p>
+                  </td>
+                  <td className="px-4 py-3">
+                    <p className="font-mono text-xs text-zinc-700 break-all">
+                      {company.brokerUserId}
+                    </p>
                   </td>
                   <td className="px-4 py-3 text-zinc-700">
                     {company.brokerOfficeName}

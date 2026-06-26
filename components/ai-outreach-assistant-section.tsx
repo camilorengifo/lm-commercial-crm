@@ -24,12 +24,16 @@ const DEFAULT_TONE: OutreachTone = "Professional";
 export function AiOutreachAssistantSection({
   companyId,
   companyName,
-  userId,
+  ownerUserId,
+  viewerUserId,
+  isAdmin = false,
   onActivitySaved,
 }: {
   companyId: string;
   companyName: string;
-  userId: string;
+  ownerUserId: string;
+  viewerUserId: string;
+  isAdmin?: boolean;
   onActivitySaved?: () => void;
 }) {
   const [contacts, setContacts] = useState<ContactOption[]>([]);
@@ -48,11 +52,14 @@ export function AiOutreachAssistantSection({
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [draft, setDraft] = useState<OutreachDraftResponse | null>(null);
 
+  const scopedUserId = isAdmin ? ownerUserId : viewerUserId;
+
   const loadContacts = useCallback(async () => {
     setContactsLoading(true);
     const { data, error: contactsError } = await fetchContactsForCompany(
-      userId,
+      scopedUserId,
       companyId,
+      isAdmin,
     );
 
     if (contactsError) {
@@ -63,7 +70,7 @@ export function AiOutreachAssistantSection({
     }
 
     setContactsLoading(false);
-  }, [companyId, userId]);
+  }, [companyId, scopedUserId, isAdmin]);
 
   useEffect(() => {
     loadContacts();
@@ -133,7 +140,7 @@ export function AiOutreachAssistantSection({
     ].filter((part) => part !== null);
 
     const { error: insertError } = await supabase.from("activities").insert({
-      user_id: userId,
+      user_id: scopedUserId,
       company_id: companyId,
       activity_type: "note",
       subject: "AI outreach draft generated",

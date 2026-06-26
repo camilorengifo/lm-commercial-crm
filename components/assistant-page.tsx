@@ -82,7 +82,7 @@ export function AssistantPage() {
   >(null);
 
   const isAdmin = isAdminProfile(profile);
-  const dataOwnerId = isAdmin && selectedBrokerId ? selectedBrokerId : user?.id ?? "";
+  const dataOwnerId = user?.id ?? "";
 
   const loadSnapshot = useCallback(async (ownerId: string) => {
     setFetchError(null);

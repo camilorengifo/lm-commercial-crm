@@ -76,7 +76,7 @@ export function OpportunityDetailPage() {
     const { data, error: fetchError } = await fetchLoadOpportunityById(
       opportunityId,
       user.id,
-      isAdmin,
+      false,
     );
 
     if (fetchError) {
@@ -94,7 +94,7 @@ export function OpportunityDetailPage() {
     setForm(opportunityToForm(data));
 
     const { data: contactList, error: contactsError } =
-      await fetchContactsForCompany(user.id, data.company_id, isAdmin);
+      await fetchContactsForCompany(user.id, data.company_id, false);
 
     if (contactsError) {
       setError(formatSupabaseError(contactsError));
