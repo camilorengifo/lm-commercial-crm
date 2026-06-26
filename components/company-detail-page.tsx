@@ -266,6 +266,10 @@ export function CompanyDetailPage() {
   const isAccountArchived = accountStatus === "archived";
   const dispositionLabel = getAccountDispositionLabel(company?.account_disposition);
   const canManageCompany = !isSoftDeleted || isAdmin;
+  const canManageFollowUps =
+    Boolean(company) &&
+    canManageCompany &&
+    (isAdmin || user?.id === company?.user_id);
 
   useEffect(() => {
     if (!companyId) {
@@ -644,7 +648,8 @@ export function CompanyDetailPage() {
                 companyId={company.id}
                 userId={company.user_id}
                 companyPriority={company.priority}
-                canManage={!isAdmin}
+                canManage={canManageFollowUps}
+                isAdmin={isAdmin}
                 onCompanyUpdated={refreshFollowUpSections}
                 externalRefreshKey={followUpsRefreshKey}
               />

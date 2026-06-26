@@ -73,6 +73,7 @@ export function CompanyFollowUpsSection({
   userId,
   companyPriority,
   canManage = true,
+  isAdmin = false,
   onCompanyUpdated,
   externalRefreshKey,
 }: {
@@ -80,6 +81,7 @@ export function CompanyFollowUpsSection({
   userId: string;
   companyPriority: CompanyPriority;
   canManage?: boolean;
+  isAdmin?: boolean;
   onCompanyUpdated?: () => void;
   externalRefreshKey?: number;
 }) {
@@ -107,8 +109,8 @@ export function CompanyFollowUpsSection({
 
     try {
       const [followUpsResult, contactsResult] = await Promise.all([
-        fetchPendingFollowUpsForCompany(companyId, userId),
-        fetchContactsForCompany(userId, companyId, true),
+        fetchPendingFollowUpsForCompany(companyId, userId, isAdmin),
+        fetchContactsForCompany(userId, companyId, isAdmin),
       ]);
 
       if (followUpsResult.error) throw followUpsResult.error;
@@ -119,7 +121,7 @@ export function CompanyFollowUpsSection({
     } catch (error) {
       setFetchError(formatSupabaseError(error as { message?: string }));
     }
-  }, [companyId, userId]);
+  }, [companyId, userId, isAdmin]);
 
   useEffect(() => {
     setLoading(true);
@@ -176,6 +178,7 @@ export function CompanyFollowUpsSection({
       followUp.id,
       userId,
       companyId,
+      isAdmin,
     );
 
     if (error) {
@@ -220,6 +223,13 @@ export function CompanyFollowUpsSection({
           </button>
         )}
       </div>
+
+      {!canManage && (
+        <p className="mb-4 text-sm text-zinc-500">
+          Only the assigned broker or an admin can schedule follow-ups for this
+          company.
+        </p>
+      )}
 
       {successMessage && (
         <p className="mb-4 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
@@ -354,7 +364,7 @@ export function CompanyFollowUpsSection({
           No open follow-ups for this company.
           {canManage
             ? " Click New Follow-up to schedule one."
-            : " The assigned broker can schedule follow-ups from here."}
+            : ""}
         </p>
       ) : (
         <ul className="divide-y divide-zinc-100 rounded-lg border border-zinc-200">

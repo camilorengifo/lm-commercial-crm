@@ -361,15 +361,21 @@ export interface CreateFollowUpInput {
 
 export async function fetchPendingFollowUpsForCompany(
   companyId: string,
-  userId: string,
+  ownerUserId: string,
+  asAdmin = false,
 ): Promise<{ data: FollowUpRecord[]; error: { message?: string } | null }> {
-  const { data, error } = await supabase
+  let query = supabase
     .from("follow_ups")
     .select(FOLLOW_UP_SELECT_FIELDS)
     .eq("company_id", companyId)
-    .eq("user_id", userId)
     .eq("status", "pending")
     .order("due_at", { ascending: true });
+
+  if (!asAdmin) {
+    query = query.eq("user_id", ownerUserId);
+  }
+
+  const { data, error } = await query;
 
   return {
     data: (data as FollowUpRecord[]) ?? [],
@@ -600,24 +606,30 @@ export async function syncCompanyNextFollowUpAt(
 
 export async function completeFollowUp(
   followUpId: string,
-  userId: string,
+  ownerUserId: string,
   companyId: string,
+  asAdmin = false,
 ): Promise<{ error: { message?: string } | null }> {
-  const { error } = await supabase
+  let query = supabase
     .from("follow_ups")
     .update({
       status: "completed" as FollowUpStatus,
       completed_at: new Date().toISOString(),
     })
     .eq("id", followUpId)
-    .eq("user_id", userId)
     .eq("company_id", companyId);
+
+  if (!asAdmin) {
+    query = query.eq("user_id", ownerUserId);
+  }
+
+  const { error } = await query;
 
   if (error) {
     return { error };
   }
 
-  return syncCompanyNextFollowUpAt(companyId, userId);
+  return syncCompanyNextFollowUpAt(companyId, ownerUserId);
 }
 
 export interface RescheduleFollowUpInput {
