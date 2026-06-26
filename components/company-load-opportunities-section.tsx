@@ -19,7 +19,6 @@ import {
   fetchLoadOpportunitiesForCompany,
   formatContactName,
   formatLane,
-  formatOpportunityRate,
   opportunityToForm,
   updateLoadOpportunity,
 } from "@/lib/loadOpportunities";
@@ -236,9 +235,6 @@ export function CompanyLoadOpportunitiesSection({
                         >
                           {getOpportunityStageLabel(opportunity.status)}
                         </span>
-                        <span className="text-xs text-zinc-500">
-                          {opportunity.probability}% prob.
-                        </span>
                       </div>
 
                       <p className="text-sm text-zinc-700">
@@ -260,26 +256,6 @@ export function CompanyLoadOpportunitiesSection({
                             Commodity:
                           </span>{" "}
                           {opportunity.commodity || "—"}
-                        </p>
-                        <p>
-                          <span className="font-medium text-zinc-600">
-                            Est. loads:
-                          </span>{" "}
-                          {opportunity.estimated_loads ||
-                            opportunity.estimated_loads_per_week ||
-                            "—"}
-                        </p>
-                        <p>
-                          <span className="font-medium text-zinc-600">
-                            Est. revenue:
-                          </span>{" "}
-                          {formatOpportunityRate(opportunity.estimated_revenue_usd)}
-                        </p>
-                        <p>
-                          <span className="font-medium text-zinc-600">
-                            Next step:
-                          </span>{" "}
-                          {opportunity.next_step || "—"}
                         </p>
                         <p>
                           <span className="font-medium text-zinc-600">

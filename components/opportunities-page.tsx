@@ -17,7 +17,7 @@ import {
   buildOpportunityListMetrics,
   fetchLoadOpportunitiesWithCompanies,
   formatLane,
-  formatOpportunityRate,
+  formatContactName,
   truncateNotesPreview,
   type LoadOpportunityWithCompany,
 } from "@/lib/loadOpportunities";
@@ -175,20 +175,10 @@ export function OpportunitiesPage() {
         <StatCard
           label="Open Opportunities"
           value={metrics.openCount}
-          subtext={`Won: ${metrics.wonCount} · Lost: ${metrics.lostCount}`}
         />
-        <StatCard
-          label="Estimated revenue"
-          value={formatOpportunityRate(metrics.estimatedRevenue)}
-        />
-        <StatCard
-          label="Estimated margin"
-          value={formatOpportunityRate(metrics.estimatedMargin)}
-        />
-        <StatCard
-          label="High probability (≥70%)"
-          value={metrics.highProbabilityCount}
-        />
+        <StatCard label="Won" value={metrics.wonCount} />
+        <StatCard label="Lost" value={metrics.lostCount} />
+        <StatCard label="Total" value={opportunities.length} />
       </StatGrid>
 
       <CrmCard className="mb-5" padding>
@@ -287,19 +277,19 @@ export function OpportunitiesPage() {
                     Lane
                   </th>
                   <th className="px-4 py-3 text-left font-medium text-zinc-600">
+                    Equipment
+                  </th>
+                  <th className="px-4 py-3 text-left font-medium text-zinc-600">
+                    Commodity
+                  </th>
+                  <th className="px-4 py-3 text-left font-medium text-zinc-600">
+                    Contact
+                  </th>
+                  <th className="px-4 py-3 text-left font-medium text-zinc-600">
                     Stage
                   </th>
-                  <th className="px-4 py-3 text-right font-medium text-zinc-600">
-                    Prob.
-                  </th>
-                  <th className="px-4 py-3 text-right font-medium text-zinc-600">
-                    Est. revenue
-                  </th>
                   <th className="px-4 py-3 text-left font-medium text-zinc-600">
-                    Est. close
-                  </th>
-                  <th className="px-4 py-3 text-left font-medium text-zinc-600">
-                    Updated
+                    Created
                   </th>
                 </tr>
               </thead>
@@ -336,6 +326,20 @@ export function OpportunitiesPage() {
                           opportunity.lane_destination,
                         )}
                       </td>
+                      <td className="px-4 py-3 text-zinc-700">
+                        {opportunity.equipment_type || "—"}
+                      </td>
+                      <td className="px-4 py-3 text-zinc-700">
+                        {opportunity.commodity || "—"}
+                      </td>
+                      <td className="px-4 py-3 text-zinc-700">
+                        {opportunity.contactFirstName
+                          ? formatContactName({
+                              first_name: opportunity.contactFirstName,
+                              last_name: opportunity.contactLastName,
+                            })
+                          : "—"}
+                      </td>
                       <td className="px-4 py-3">
                         <span
                           className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${loadOpportunityStatusBadgeClass(opportunity.status)}`}
@@ -343,19 +347,8 @@ export function OpportunitiesPage() {
                           {getOpportunityStageLabel(opportunity.status)}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right text-zinc-900">
-                        {opportunity.probability}%
-                      </td>
-                      <td className="px-4 py-3 text-right text-zinc-900">
-                        {formatOpportunityRate(opportunity.estimated_revenue_usd)}
-                      </td>
-                      <td className="px-4 py-3 text-zinc-700">
-                        {opportunity.expected_close_date
-                          ? formatDate(opportunity.expected_close_date)
-                          : "—"}
-                      </td>
                       <td className="px-4 py-3 text-zinc-600">
-                        {formatDate(opportunity.updated_at)}
+                        {formatDate(opportunity.created_at)}
                       </td>
                     </tr>
                   );

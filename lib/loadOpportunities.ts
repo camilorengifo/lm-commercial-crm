@@ -254,16 +254,6 @@ export function buildOpportunityPayload(form: OpportunityFormState) {
     lane_destination: form.lane_destination.trim() || null,
     equipment_type: form.equipment_type.trim() || null,
     commodity: form.commodity.trim() || null,
-    frequency: form.frequency.trim() || null,
-    estimated_loads: form.estimated_loads.trim() || null,
-    estimated_loads_per_week: parseOptionalInt(form.estimated_loads_per_week),
-    target_rate: parseOptionalNumber(form.target_rate),
-    quoted_rate: parseOptionalNumber(form.quoted_rate),
-    estimated_revenue_usd: parseOptionalNumber(form.estimated_revenue_usd),
-    estimated_margin_usd: parseOptionalNumber(form.estimated_margin_usd),
-    probability: parseProbability(form.probability),
-    expected_close_date: form.expected_close_date.trim() || null,
-    next_step: form.next_step.trim() || null,
     status: form.status,
     notes: form.notes.trim() || null,
   };
@@ -306,22 +296,6 @@ export function buildOpportunitySummary(
 
   if (payload.equipment_type) lines.push(`Equipment: ${payload.equipment_type}`);
   if (payload.commodity) lines.push(`Commodity: ${payload.commodity}`);
-  if (payload.frequency) lines.push(`Frequency: ${payload.frequency}`);
-  if (payload.estimated_loads) lines.push(`Est. loads: ${payload.estimated_loads}`);
-  if (payload.estimated_loads_per_week !== null) {
-    lines.push(`Loads/week: ${payload.estimated_loads_per_week}`);
-  }
-  if (payload.estimated_revenue_usd !== null) {
-    lines.push(
-      `Est. revenue: ${formatOpportunityRate(payload.estimated_revenue_usd)}`,
-    );
-  }
-  if (payload.estimated_margin_usd !== null) {
-    lines.push(
-      `Est. margin: ${formatOpportunityRate(payload.estimated_margin_usd)}`,
-    );
-  }
-  if (payload.next_step) lines.push(`Next step: ${payload.next_step}`);
   if (payload.notes) lines.push(`Notes: ${payload.notes}`);
 
   return lines.join("\n");

@@ -20,7 +20,7 @@ import {
   fetchContactsForCompany,
   fetchLoadOpportunityById,
   formatLane,
-  formatOpportunityRate,
+  formatContactName,
   opportunityToForm,
   updateLoadOpportunity,
 } from "@/lib/loadOpportunities";
@@ -294,24 +294,37 @@ export function OpportunityDetailPage() {
           </form>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
-            <DetailItem label="Probability" value={`${opportunity.probability}%`} />
             <DetailItem
-              label="Expected close"
+              label="Contact"
               value={
-                opportunity.expected_close_date
-                  ? formatDate(opportunity.expected_close_date)
+                opportunity.contactFirstName
+                  ? formatContactName({
+                      first_name: opportunity.contactFirstName,
+                      last_name: opportunity.contactLastName,
+                    })
                   : "—"
               }
             />
             <DetailItem
-              label="Estimated revenue"
-              value={formatOpportunityRate(opportunity.estimated_revenue_usd)}
+              label="Lane"
+              value={formatLane(
+                opportunity.lane_origin,
+                opportunity.lane_destination,
+              )}
             />
             <DetailItem
-              label="Estimated margin"
-              value={formatOpportunityRate(opportunity.estimated_margin_usd)}
+              label="Equipment type"
+              value={opportunity.equipment_type || "—"}
             />
-            <DetailItem label="Next step" value={opportunity.next_step || "—"} />
+            <DetailItem label="Commodity" value={opportunity.commodity || "—"} />
+            <DetailItem
+              label="Stage"
+              value={getOpportunityStageLabel(opportunity.status)}
+            />
+            <DetailItem
+              label="Created"
+              value={formatDate(opportunity.created_at)}
+            />
             <DetailItem label="Notes" value={opportunity.notes || "—"} />
           </div>
         )}
