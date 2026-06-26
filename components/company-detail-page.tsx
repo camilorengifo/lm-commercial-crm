@@ -643,36 +643,14 @@ export function CompanyDetailPage() {
             </div>
 
             <div className="space-y-5">
+              <CompanyContactsSection
+                companyId={company.id}
+                userId={company.user_id}
+              />
               <CompanyAccountStatusSection
                 company={company}
                 canManage={canManageCompany}
                 onUpdated={handleAccountStatusUpdated}
-              />
-              <div className="crm-workspace-toolbar">
-                <Link
-                  href="/assistant"
-                  className="crm-btn-secondary crm-btn-sm"
-                >
-                  Open in AI Assistant
-                </Link>
-                <Link
-                  href={`/assistant?company=${company.id}`}
-                  className="crm-btn-secondary crm-btn-sm"
-                >
-                  Draft next outreach
-                </Link>
-              </div>
-              <AiOutreachAssistantSection
-                companyId={company.id}
-                companyName={company.name}
-                userId={company.user_id}
-                onActivitySaved={() => {
-                  refreshFollowUpSections();
-                }}
-              />
-              <CompanyContactsSection
-                companyId={company.id}
-                userId={company.user_id}
               />
               <CompanyLoadOpportunitiesSection
                 companyId={company.id}
@@ -696,6 +674,28 @@ export function CompanyDetailPage() {
                 onCompanyUpdated={refreshFollowUpSections}
                 externalRefreshKey={chronologyRefreshKey}
                 canManage={!isAdmin}
+              />
+              <div className="crm-workspace-toolbar">
+                <Link
+                  href="/assistant"
+                  className="crm-btn-secondary crm-btn-sm"
+                >
+                  Open in AI Assistant
+                </Link>
+                <Link
+                  href={`/assistant?company=${company.id}`}
+                  className="crm-btn-secondary crm-btn-sm"
+                >
+                  Draft next outreach
+                </Link>
+              </div>
+              <AiOutreachAssistantSection
+                companyId={company.id}
+                companyName={company.name}
+                userId={company.user_id}
+                onActivitySaved={() => {
+                  refreshFollowUpSections();
+                }}
               />
             </div>
           </>
