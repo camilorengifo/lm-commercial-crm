@@ -14,6 +14,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { verifyAdminAccess } from "@/lib/admin";
 import {
   UNASSIGNED_OFFICE_LABEL,
+  ALL_OFFICES_LABEL,
   type Office,
 } from "@/lib/offices";
 
@@ -145,6 +146,8 @@ export interface AdminOverviewData {
   };
 }
 
+export type AdminOfficeFilter = "all" | "unassigned" | string;
+
 export interface AdminBrokerDetailData {
   profile: {
     id: string;
@@ -222,7 +225,7 @@ function buildActivityPreview(
   return trimmedSubject || trimmedNotes || "No details recorded";
 }
 
-interface RawCrmData {
+export interface RawCrmData {
   profiles: Array<{
     id: string;
     email: string | null;
@@ -356,8 +359,69 @@ async function fetchRawCrmData(): Promise<{
   };
 }
 
+function brokerMatchesOfficeFilter(
+  officeId: string | null | undefined,
+  officeFilter: AdminOfficeFilter,
+): boolean {
+  if (officeFilter === "all") {
+    return true;
+  }
+
+  if (officeFilter === "unassigned") {
+    return !officeId;
+  }
+
+  return officeId === officeFilter;
+}
+
+function getBrokerUserIdsForOfficeFilter(
+  raw: RawCrmData,
+  officeFilter: AdminOfficeFilter,
+): Set<string> {
+  return new Set(
+    raw.profiles
+      .filter((profile) => profile.role === "broker")
+      .filter((profile) =>
+        brokerMatchesOfficeFilter(profile.office_id, officeFilter),
+      )
+      .map((profile) => profile.id),
+  );
+}
+
+export function filterRawCrmDataByOffice(
+  raw: RawCrmData,
+  officeFilter: AdminOfficeFilter,
+): RawCrmData {
+  if (officeFilter === "all") {
+    return raw;
+  }
+
+  const brokerUserIds = getBrokerUserIdsForOfficeFilter(raw, officeFilter);
+  const companyIds = new Set(
+    raw.companies
+      .filter((company) => brokerUserIds.has(company.user_id))
+      .map((company) => company.id),
+  );
+
+  return {
+    ...raw,
+    companies: raw.companies.filter((company) => brokerUserIds.has(company.user_id)),
+    contacts: raw.contacts.filter((contact) => brokerUserIds.has(contact.user_id)),
+    followUps: raw.followUps.filter((followUp) =>
+      companyIds.has(followUp.company_id),
+    ),
+    opportunities: raw.opportunities.filter((opportunity) =>
+      companyIds.has(opportunity.company_id),
+    ),
+    activities: raw.activities.filter((activity) =>
+      companyIds.has(activity.company_id),
+    ),
+  };
+}
+
 function buildBrokerProductivityRows(
   raw: RawCrmData,
+  officeFilter: AdminOfficeFilter = "all",
 ): BrokerProductivityRow[] {
   const cutoff7d = getCutoffDays(7);
   const cutoff30d = getCutoffDays(30);
@@ -368,6 +432,9 @@ function buildBrokerProductivityRows(
 
   const brokerProfiles = raw.profiles
     .filter((profile) => profile.role === "broker")
+    .filter((profile) =>
+      brokerMatchesOfficeFilter(profile.office_id, officeFilter),
+    )
     .map((profile) => ({
       id: profile.id,
       email: profile.email ?? "",
@@ -518,6 +585,7 @@ function buildBrokerProductivityRows(
 function buildOfficeProductivitySummaries(
   raw: RawCrmData,
   brokerRows: BrokerProductivityRow[],
+  officeFilter: AdminOfficeFilter = "all",
 ): OfficeProductivitySummary[] {
   const officeNameById = new Map(
     raw.offices.map((office) => [office.id, office.name]),
@@ -534,7 +602,7 @@ function buildOfficeProductivitySummaries(
     null as string | null,
   ];
 
-  return officeIds.map((officeId) => {
+  const summaries = officeIds.map((officeId) => {
     const brokerUserIds = new Set(
       brokerRows
         .filter((broker) => broker.officeId === officeId)
@@ -592,6 +660,16 @@ function buildOfficeProductivitySummaries(
       ).length,
     };
   });
+
+  if (officeFilter === "all") {
+    return summaries;
+  }
+
+  if (officeFilter === "unassigned") {
+    return summaries.filter((summary) => summary.officeId === null);
+  }
+
+  return summaries.filter((summary) => summary.officeId === officeFilter);
 }
 
 function buildOverviewKpis(
@@ -834,8 +912,38 @@ function buildCommercialPulse(raw: RawCrmData): AdminOverviewData["commercialPul
   };
 }
 
-export async function fetchAdminOverview(): Promise<{
-  data: AdminOverviewData | null;
+export function buildAdminOverview(
+  raw: RawCrmData,
+  officeFilter: AdminOfficeFilter = "all",
+): AdminOverviewData {
+  const scoped = filterRawCrmDataByOffice(raw, officeFilter);
+  const brokerProductivity = buildBrokerProductivityRows(
+    scoped,
+    officeFilter,
+  ).sort((a, b) => b.productivityScore - a.productivityScore);
+  const officeSummaries = buildOfficeProductivitySummaries(
+    scoped,
+    brokerProductivity,
+    officeFilter,
+  );
+
+  return {
+    kpis: buildOverviewKpis(scoped, brokerProductivity),
+    brokerProductivity,
+    officeSummaries,
+    offices: raw.offices.map((office) => ({
+      id: office.id,
+      name: office.name,
+      city: office.city,
+      isActive: office.is_active ?? true,
+    })),
+    needsAttention: buildNeedsAttention(scoped, brokerProductivity),
+    commercialPulse: buildCommercialPulse(scoped),
+  };
+}
+
+export async function fetchAdminDashboardSource(): Promise<{
+  data: RawCrmData | null;
   error: { message?: string } | null;
 }> {
   const access = await verifyAdminAccess();
@@ -846,33 +954,39 @@ export async function fetchAdminOverview(): Promise<{
     };
   }
 
-  const { data: raw, error } = await fetchRawCrmData();
+  return fetchRawCrmData();
+}
+
+export async function fetchAdminOverview(
+  officeFilter: AdminOfficeFilter = "all",
+): Promise<{
+  data: AdminOverviewData | null;
+  error: { message?: string } | null;
+}> {
+  const { data: raw, error } = await fetchAdminDashboardSource();
   if (error || !raw) {
     return { data: null, error };
   }
 
-  const brokerProductivity = buildBrokerProductivityRows(raw).sort(
-    (a, b) => b.productivityScore - a.productivityScore,
-  );
-
-  const officeSummaries = buildOfficeProductivitySummaries(raw, brokerProductivity);
-
   return {
-    data: {
-      kpis: buildOverviewKpis(raw, brokerProductivity),
-      brokerProductivity,
-      officeSummaries,
-      offices: raw.offices.map((office) => ({
-        id: office.id,
-        name: office.name,
-        city: office.city,
-        isActive: office.is_active ?? true,
-      })),
-      needsAttention: buildNeedsAttention(raw, brokerProductivity),
-      commercialPulse: buildCommercialPulse(raw),
-    },
+    data: buildAdminOverview(raw, officeFilter),
     error: null,
   };
+}
+
+export function resolveAdminOfficeFilterLabel(
+  officeFilter: AdminOfficeFilter,
+  offices: Office[],
+): string {
+  if (officeFilter === "all") {
+    return ALL_OFFICES_LABEL;
+  }
+
+  if (officeFilter === "unassigned") {
+    return UNASSIGNED_OFFICE_LABEL;
+  }
+
+  return offices.find((office) => office.id === officeFilter)?.name ?? officeFilter;
 }
 
 export async function fetchBrokerAdminDetail(
