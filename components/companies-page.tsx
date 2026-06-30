@@ -65,7 +65,6 @@ const EMPTY_FORM = {
   sales_stage: DEFAULT_SALES_STAGE,
   general_notes: "",
   last_contact_at: "",
-  next_follow_up_at: "",
 };
 
 export function CompaniesPage() {
@@ -403,12 +402,13 @@ export function CompaniesPage() {
       last_contact_at: form.last_contact_at
         ? new Date(form.last_contact_at).toISOString()
         : null,
-      next_follow_up_at: form.next_follow_up_at
-        ? new Date(form.next_follow_up_at).toISOString()
-        : null,
     };
 
-    const { error } = await supabase.from("companies").insert(payload);
+    const { data: created, error } = await supabase
+      .from("companies")
+      .insert(payload)
+      .select("id")
+      .single();
 
     if (error) {
       setFormError(formatSupabaseError(error));
@@ -418,9 +418,15 @@ export function CompaniesPage() {
 
     setForm(EMPTY_FORM);
     setShowForm(false);
+    setSubmitting(false);
+
+    if (created?.id) {
+      router.push(`/companies/${created.id}`);
+      return;
+    }
+
     setSuccessMessage(`"${trimmedName}" was added successfully.`);
     await fetchCompanies(user.id, user.email ?? null);
-    setSubmitting(false);
   }
 
   const uniqueCompanyOwnerIds = useMemo(
@@ -797,27 +803,6 @@ export function CompaniesPage() {
                       setForm((prev) => ({
                         ...prev,
                         last_contact_at: event.target.value,
-                      }))
-                    }
-                    className="crm-input"
-                  />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="next_follow_up_at"
-                    className="crm-label"
-                  >
-                    Next follow-up
-                  </label>
-                  <input
-                    id="next_follow_up_at"
-                    type="datetime-local"
-                    value={form.next_follow_up_at}
-                    onChange={(event) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        next_follow_up_at: event.target.value,
                       }))
                     }
                     className="crm-input"
