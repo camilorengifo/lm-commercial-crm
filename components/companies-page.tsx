@@ -37,6 +37,7 @@ import {
   normalizeAccountStatus,
   type AccountStatusFilter,
 } from "@/lib/accountStatus";
+import { CompanyCreateContactsSection } from "@/components/company-create-contacts-section";
 import {
   CompaniesIsolationDebug,
   type CompanyOwnershipDebugRow,
@@ -50,6 +51,12 @@ import {
 } from "@/lib/brokerDataAccess";
 import { fetchUserProfile, isAdminProfile, type UserProfile } from "@/lib/userProfile";
 import { isSecurityDebugEnabled, logBrokerIsolationWarn } from "@/lib/securityDebug";
+import {
+  buildContactInsertPayload,
+  EMPTY_COMPANY_CREATE_CONTACT,
+  filterNonEmptyContacts,
+  type CompanyCreateContactForm,
+} from "@/lib/companyCreateContacts";
 import { supabase } from "@/lib/supabaseClient";
 
 interface Company extends CompanyRecord {
@@ -81,6 +88,10 @@ export function CompaniesPage() {
   const [sortBy, setSortBy] = useState<CompanySortOption>("name_asc");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [contactRows, setContactRows] = useState<CompanyCreateContactForm[]>([
+    EMPTY_COMPANY_CREATE_CONTACT,
+  ]);
+  const [contactsSectionOpen, setContactsSectionOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -375,6 +386,40 @@ export function CompaniesPage() {
     setSortBy("name_asc");
   }
 
+  function resetCreateForm() {
+    setForm(EMPTY_FORM);
+    setContactRows([EMPTY_COMPANY_CREATE_CONTACT]);
+    setContactsSectionOpen(false);
+    setFormError(null);
+  }
+
+  function addContactRow() {
+    setContactRows((current) => [...current, { ...EMPTY_COMPANY_CREATE_CONTACT }]);
+    setContactsSectionOpen(true);
+  }
+
+  function removeContactRow(index: number) {
+    setContactRows((current) => {
+      if (current.length <= 1) {
+        return [{ ...EMPTY_COMPANY_CREATE_CONTACT }];
+      }
+
+      return current.filter((_, rowIndex) => rowIndex !== index);
+    });
+  }
+
+  function updateContactField(
+    index: number,
+    field: keyof CompanyCreateContactForm,
+    value: string,
+  ) {
+    setContactRows((current) =>
+      current.map((contact, rowIndex) =>
+        rowIndex === index ? { ...contact, [field]: value } : contact,
+      ),
+    );
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user) return;
@@ -416,17 +461,45 @@ export function CompaniesPage() {
       return;
     }
 
-    setForm(EMPTY_FORM);
-    setShowForm(false);
-    setSubmitting(false);
-
-    if (created?.id) {
-      router.push(`/companies/${created.id}`);
+    if (!created?.id) {
+      setFormError("Company was created but could not be opened. Refresh the list.");
+      setSubmitting(false);
       return;
     }
 
-    setSuccessMessage(`"${trimmedName}" was added successfully.`);
-    await fetchCompanies(user.id, user.email ?? null);
+    const contactsToCreate = filterNonEmptyContacts(contactRows);
+    let contactsWarning = false;
+
+    if (contactsToCreate.length > 0) {
+      const contactPayloads = contactsToCreate.map((contact, index) =>
+        buildContactInsertPayload(contact, {
+          userId: user.id,
+          companyId: created.id,
+          isPrimary: index === 0,
+        }),
+      );
+
+      const { error: contactsError } = await supabase
+        .from("contacts")
+        .insert(contactPayloads);
+
+      if (contactsError) {
+        contactsWarning = true;
+      }
+    }
+
+    resetCreateForm();
+    setShowForm(false);
+    setSubmitting(false);
+
+    const params = new URLSearchParams({ created: "1" });
+    if (contactsWarning) {
+      params.set("contactsWarning", "1");
+    } else if (contactsToCreate.length > 0) {
+      params.set("contacts", String(contactsToCreate.length));
+    }
+
+    router.push(`/companies/${created.id}?${params.toString()}`);
   }
 
   const uniqueCompanyOwnerIds = useMemo(
@@ -653,6 +726,11 @@ export function CompaniesPage() {
             <SectionHeader title="New Company" className="mb-5" />
 
             <form onSubmit={handleSubmit} className="space-y-5">
+              <SectionHeader
+                title="Company information"
+                className="mb-1"
+              />
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="sm:col-span-2">
                   <label
@@ -832,6 +910,15 @@ export function CompaniesPage() {
                 </div>
               </div>
 
+              <CompanyCreateContactsSection
+                open={contactsSectionOpen}
+                onToggle={() => setContactsSectionOpen((current) => !current)}
+                contacts={contactRows}
+                onAddRow={addContactRow}
+                onRemoveRow={removeContactRow}
+                onUpdateField={updateContactField}
+              />
+
               {formError && (
                 <CrmAlert variant="error" className="mb-0">
                   {formError}
@@ -850,8 +937,7 @@ export function CompaniesPage() {
                   type="button"
                   onClick={() => {
                     setShowForm(false);
-                    setForm(EMPTY_FORM);
-                    setFormError(null);
+                    resetCreateForm();
                   }}
                   className="crm-btn-secondary"
                 >

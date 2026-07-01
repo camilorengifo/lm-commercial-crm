@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
@@ -45,7 +45,15 @@ import {
 } from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
 import { UNASSIGNED_OFFICE_LABEL } from "@/lib/offices";
-import { brokerCanAccessCompany, fetchCompanyByIdForViewer, resolveBrokerScopedUserId } from "@/lib/brokerDataAccess";
+import {
+  brokerCanAccessCompany,
+  fetchCompanyByIdForViewer,
+  resolveBrokerScopedUserId,
+} from "@/lib/brokerDataAccess";
+import {
+  createCompanyContactsWarningMessage,
+  createCompanySuccessMessage,
+} from "@/lib/companyCreateContacts";
 
 interface CompanyOwnerInfo {
   name: string;
@@ -76,6 +84,7 @@ function DetailField({
 
 export function CompanyDetailPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const params = useParams();
   const companyId = typeof params.id === "string" ? params.id : "";
 
@@ -348,6 +357,25 @@ export function CompanyDetailPage() {
     Boolean(company) &&
     canManageCompany &&
     userCanManageOpportunities(profile);
+
+  useEffect(() => {
+    if (searchParams.get("created") !== "1") {
+      return;
+    }
+
+    if (searchParams.get("contactsWarning") === "1") {
+      setActionError(createCompanyContactsWarningMessage());
+      setActionMessage(null);
+    } else {
+      const contactCount = Number.parseInt(searchParams.get("contacts") ?? "0", 10);
+      setActionMessage(
+        createCompanySuccessMessage(Number.isFinite(contactCount) ? contactCount : 0),
+      );
+      setActionError(null);
+    }
+
+    router.replace(`/companies/${companyId}`, { scroll: false });
+  }, [searchParams, companyId, router]);
 
   useEffect(() => {
     if (!companyId) {
