@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabaseClient";
 import type { CompanyPriority } from "@/lib/crmConstants";
+import type { CompanyCreateContactForm } from "@/lib/companyCreateContacts";
 
 async function getAccessToken(): Promise<string | null> {
   const {
@@ -119,5 +120,28 @@ export async function bulkUpdateCompanyAccountStatus(input: {
     accountDisposition: input.accountDisposition ?? null,
     archiveReason: input.archiveReason ?? null,
     archiveNotes: input.archiveNotes ?? null,
+  });
+}
+
+export interface CreateCompanyInput {
+  name: string;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  priority: CompanyPriority;
+  sales_stage: string;
+  general_notes: string | null;
+  last_contact_at: string | null;
+  contacts?: CompanyCreateContactForm[];
+}
+
+export async function createCompany(input: CreateCompanyInput) {
+  return companyRequest<{
+    message: string;
+    companyId: string;
+    contactsCreated: number;
+    contactsWarning: boolean;
+  }>("/api/companies/create", {
+    ...input,
   });
 }

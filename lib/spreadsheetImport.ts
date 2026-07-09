@@ -9,6 +9,7 @@ import {
   type SalesStage,
 } from "@/lib/crmConstants";
 import { supabase } from "@/lib/supabaseClient";
+import { buildCompanyInsertPayload } from "@/lib/companyCreate";
 
 export const IMPORT_FIELD_DEFINITIONS = [
   { key: "company_name", label: "Company name", required: true },
@@ -632,6 +633,20 @@ export async function executeSpreadsheetImport(
     errors: [],
   };
 
+  const {
+    data: { user: authUser },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !authUser || authUser.id !== userId) {
+    result.errors.push(
+      "Import aborted: authenticated user does not match the import owner.",
+    );
+    return result;
+  }
+
+  const ownerUserId = authUser.id;
+
   const companyByNormalizedName = new Map<string, ExistingCompany>();
   for (const company of existingCompanies) {
     companyByNormalizedName.set(normalizeCompanyName(company.name), company);
@@ -674,7 +689,7 @@ export async function executeSpreadsheetImport(
           .from("companies")
           .update(updates)
           .eq("id", companyRecord.id)
-          .eq("user_id", userId);
+          .eq("user_id", ownerUserId);
 
         if (error) {
           result.errors.push(
@@ -691,16 +706,18 @@ export async function executeSpreadsheetImport(
     } else {
       const { data, error } = await supabase
         .from("companies")
-        .insert({
-          user_id: userId,
-          name: row.companyName.trim(),
-          city: row.city,
-          state: row.state,
-          country: row.country,
-          priority: row.priority ?? "Medium",
-          sales_stage: row.salesStage ?? DEFAULT_SALES_STAGE,
-          general_notes: row.generalNotes,
-        })
+        .insert(
+          buildCompanyInsertPayload(ownerUserId, {
+            name: row.companyName.trim(),
+            city: row.city,
+            state: row.state,
+            country: row.country,
+            priority: row.priority ?? "Medium",
+            sales_stage: row.salesStage ?? DEFAULT_SALES_STAGE,
+            general_notes: row.generalNotes,
+            last_contact_at: null,
+          }),
+        )
         .select(
           "id, name, city, state, country, priority, sales_stage, general_notes",
         )
@@ -738,7 +755,7 @@ export async function executeSpreadsheetImport(
     }
 
     const { error: contactError } = await supabase.from("contacts").insert({
-      user_id: userId,
+      user_id: ownerUserId,
       company_id: companyId,
       first_name: row.resolvedFirstName,
       last_name: row.resolvedLastName,

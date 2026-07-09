@@ -52,11 +52,11 @@ import {
 import { fetchUserProfile, isAdminProfile, type UserProfile } from "@/lib/userProfile";
 import { isSecurityDebugEnabled, logBrokerIsolationWarn } from "@/lib/securityDebug";
 import {
-  buildContactInsertPayload,
   EMPTY_COMPANY_CREATE_CONTACT,
   filterNonEmptyContacts,
   type CompanyCreateContactForm,
 } from "@/lib/companyCreateContacts";
+import { createCompany } from "@/lib/companyClient";
 import { supabase } from "@/lib/supabaseClient";
 
 interface Company extends CompanyRecord {
@@ -422,11 +422,17 @@ export function CompaniesPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!user) return;
 
     setFormError(null);
     setSuccessMessage(null);
     setSubmitting(true);
+
+    const authContext = await getVerifiedAuthContext();
+    if (!authContext) {
+      setFormError("You must be signed in.");
+      setSubmitting(false);
+      return;
+    }
 
     const trimmedName = form.name.trim();
     if (!trimmedName) {
@@ -435,8 +441,9 @@ export function CompaniesPage() {
       return;
     }
 
-    const payload = {
-      user_id: user.id,
+    const contactsToCreate = filterNonEmptyContacts(contactRows);
+
+    const { data, error } = await createCompany({
       name: trimmedName,
       city: form.city.trim() || null,
       state: form.state.trim() || null,
@@ -447,45 +454,13 @@ export function CompaniesPage() {
       last_contact_at: form.last_contact_at
         ? new Date(form.last_contact_at).toISOString()
         : null,
-    };
+      contacts: contactsToCreate,
+    });
 
-    const { data: created, error } = await supabase
-      .from("companies")
-      .insert(payload)
-      .select("id")
-      .single();
-
-    if (error) {
-      setFormError(formatSupabaseError(error));
+    if (error || !data) {
+      setFormError(error ?? "Unable to create company.");
       setSubmitting(false);
       return;
-    }
-
-    if (!created?.id) {
-      setFormError("Company was created but could not be opened. Refresh the list.");
-      setSubmitting(false);
-      return;
-    }
-
-    const contactsToCreate = filterNonEmptyContacts(contactRows);
-    let contactsWarning = false;
-
-    if (contactsToCreate.length > 0) {
-      const contactPayloads = contactsToCreate.map((contact, index) =>
-        buildContactInsertPayload(contact, {
-          userId: user.id,
-          companyId: created.id,
-          isPrimary: index === 0,
-        }),
-      );
-
-      const { error: contactsError } = await supabase
-        .from("contacts")
-        .insert(contactPayloads);
-
-      if (contactsError) {
-        contactsWarning = true;
-      }
     }
 
     resetCreateForm();
@@ -493,13 +468,13 @@ export function CompaniesPage() {
     setSubmitting(false);
 
     const params = new URLSearchParams({ created: "1" });
-    if (contactsWarning) {
+    if (data.contactsWarning) {
       params.set("contactsWarning", "1");
-    } else if (contactsToCreate.length > 0) {
-      params.set("contacts", String(contactsToCreate.length));
+    } else if (data.contactsCreated > 0) {
+      params.set("contacts", String(data.contactsCreated));
     }
 
-    router.push(`/companies/${created.id}?${params.toString()}`);
+    router.push(`/companies/${data.companyId}?${params.toString()}`);
   }
 
   const uniqueCompanyOwnerIds = useMemo(

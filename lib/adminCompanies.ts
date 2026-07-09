@@ -2,7 +2,7 @@ import { normalizeAccountStatus, type AccountStatus, type AccountStatusFilter } 
 import { COMPANY_PRIORITIES, isOpenOpportunityStage } from "@/lib/crmConstants";
 import { getOpportunityPipelineValue } from "@/lib/brokerProductivity";
 import { getFollowUpBucket } from "@/lib/followUps";
-import { getProfileDisplayName } from "@/lib/userProfile";
+import { getProfileDisplayName, type UserProfile, type UserRole } from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
 import { verifyAdminAccess } from "@/lib/admin";
 import {
@@ -76,6 +76,14 @@ export interface AdminCompaniesBrokerOption {
   userId: string;
   name: string;
   email: string;
+  role: UserRole;
+}
+
+export function formatAssignableOwnerLabel(
+  owner: Pick<AdminCompaniesBrokerOption, "name" | "email" | "role">,
+): string {
+  const roleLabel = owner.role === "admin" ? "Admin" : "Broker";
+  return `${owner.name} (${owner.email}) · ${roleLabel}`;
 }
 
 export interface AdminCompaniesOversightData {
@@ -529,6 +537,7 @@ export async function fetchAdminCompaniesOversight(): Promise<{
           userId,
           name: "Unknown broker",
           email: "—",
+          role: "broker" as const,
         };
       }
 
@@ -545,6 +554,7 @@ export async function fetchAdminCompaniesOversight(): Promise<{
           blocked_reason: profile.blocked_reason,
         }),
         email: profile.email,
+        role: profile.role as UserRole,
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -566,35 +576,26 @@ export async function fetchAdminCompaniesOversight(): Promise<{
 export const ADMIN_COMPANY_PRIORITIES = COMPANY_PRIORITIES;
 
 export function getAssignableCompanyOwners(
-  profiles: Array<{
-    id: string;
-    email: string | null;
-    full_name: string | null;
-    role: string;
-    is_active: boolean;
-  }>,
+  profiles: UserProfile[],
 ): AdminCompaniesBrokerOption[] {
   return profiles
     .filter(
       (profile) =>
         profile.is_active !== false &&
+        !profile.is_blocked &&
         (profile.role === "broker" || profile.role === "admin"),
     )
     .map((profile) => ({
       userId: profile.id,
-      name: getProfileDisplayName({
-        id: profile.id,
-        email: profile.email ?? "",
-        full_name: profile.full_name,
-        role: profile.role as "admin" | "broker",
-        is_active: profile.is_active,
-        is_blocked: false,
-        blocked_at: null,
-        blocked_reason: null,
-      }),
+      name: getProfileDisplayName(profile),
       email: profile.email ?? "—",
+      role: profile.role,
     }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => {
+      const roleOrder = a.role === b.role ? 0 : a.role === "admin" ? -1 : 1;
+      if (roleOrder !== 0) return roleOrder;
+      return a.name.localeCompare(b.name);
+    });
 }
 
 export function attentionBadgeLabel(badge: AdminCompanyAttentionBadge): string {

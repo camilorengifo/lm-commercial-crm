@@ -11,10 +11,7 @@ import {
 } from "@/components/admin-shared";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { StatGrid } from "@/components/crm-ui";
-import {
-  AdminReassignCompaniesModal,
-  buildAssignableOwnersFromProfiles,
-} from "@/components/admin-reassign-companies-modal";
+import { AdminReassignCompaniesModal } from "@/components/admin-reassign-companies-modal";
 import { reassignAdminCompanies } from "@/lib/adminClient";
 import { verifyAdminAccess } from "@/lib/admin";
 import {
@@ -23,6 +20,8 @@ import {
   attentionBadgeLabel,
   fetchAdminCompaniesOversight,
   filterAdminCompanies,
+  getAssignableCompanyOwners,
+  type AdminCompaniesBrokerOption,
   type AdminCompaniesOversightData,
   type AdminCompanyAttentionStatus,
   type AdminCompanyLifecycleStatus,
@@ -71,7 +70,7 @@ export function AdminCompaniesPage() {
     new Set(),
   );
   const [assignableOwners, setAssignableOwners] = useState<
-    ReturnType<typeof buildAssignableOwnersFromProfiles>
+    AdminCompaniesBrokerOption[]
   >([]);
   const [reassignModalOpen, setReassignModalOpen] = useState(false);
   const [targetBrokerId, setTargetBrokerId] = useState("");
@@ -105,7 +104,7 @@ export function AdminCompaniesPage() {
       setProfile(result.profile);
 
       void fetchAllProfiles().then(({ data }) => {
-        setAssignableOwners(buildAssignableOwnersFromProfiles(data));
+        setAssignableOwners(getAssignableCompanyOwners(data));
       });
 
       loadData().finally(() => setLoading(false));

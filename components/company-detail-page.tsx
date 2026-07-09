@@ -26,6 +26,11 @@ import {
 } from "@/lib/crmConstants";
 import { formatDate, formatSupabaseError } from "@/lib/crmFormat";
 import { reassignCompanyOwner } from "@/lib/adminStats";
+import {
+  formatAssignableOwnerLabel,
+  getAssignableCompanyOwners,
+  type AdminCompaniesBrokerOption,
+} from "@/lib/adminCompanies";
 import { COMPANY_LIST_SELECT, type CompanyRecord } from "@/lib/companies";
 import { restoreCompanies, updateCompanyAccountStatus } from "@/lib/companyClient";
 import {
@@ -98,9 +103,11 @@ export function CompanyDetailPage() {
   const [chronologyRefreshKey, setChronologyRefreshKey] = useState(0);
   const [followUpsRefreshKey, setFollowUpsRefreshKey] = useState(0);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [brokers, setBrokers] = useState<UserProfile[]>([]);
+  const [assignableOwners, setAssignableOwners] = useState<
+    AdminCompaniesBrokerOption[]
+  >([]);
+  const [reassignOwnerId, setReassignOwnerId] = useState("");
   const [ownerInfo, setOwnerInfo] = useState<CompanyOwnerInfo | null>(null);
-  const [reassignBrokerId, setReassignBrokerId] = useState("");
   const [reassigning, setReassigning] = useState(false);
   const [reassignError, setReassignError] = useState<string | null>(null);
   const [reassignSuccess, setReassignSuccess] = useState<string | null>(null);
@@ -149,7 +156,7 @@ export function CompanyDetailPage() {
       };
 
       setCompany(nextCompany);
-      setReassignBrokerId(nextCompany.user_id);
+      setReassignOwnerId(nextCompany.user_id);
       setCompanyAccessVerified(true);
 
       const { data: ownerProfile } = await supabase
@@ -255,7 +262,7 @@ export function CompanyDetailPage() {
   }, [handleCompanyUpdated]);
 
   async function handleReassignOwner() {
-    if (!company || !reassignBrokerId || reassignBrokerId === company.user_id) {
+    if (!company || !reassignOwnerId || reassignOwnerId === company.user_id) {
       return;
     }
 
@@ -263,7 +270,7 @@ export function CompanyDetailPage() {
     setReassignSuccess(null);
     setReassigning(true);
 
-    const { error } = await reassignCompanyOwner(company.id, reassignBrokerId);
+    const { error } = await reassignCompanyOwner(company.id, reassignOwnerId);
 
     if (error) {
       setReassignError(formatSupabaseError(error));
@@ -397,7 +404,7 @@ export function CompanyDetailPage() {
 
       if (isAdminProfile(userProfile)) {
         const { data: allProfiles } = await fetchAllProfiles();
-        setBrokers(allProfiles.filter((item) => item.role === "broker"));
+        setAssignableOwners(getAssignableCompanyOwners(allProfiles));
       }
 
       fetchCompany(authUser.id, companyId, userProfile).finally(() =>
@@ -671,17 +678,16 @@ export function CompanyDetailPage() {
                   <DetailField label="Reassign owner">
                       <div className="space-y-2">
                         <select
-                          value={reassignBrokerId}
+                          value={reassignOwnerId}
                           onChange={(event) =>
-                            setReassignBrokerId(event.target.value)
+                            setReassignOwnerId(event.target.value)
                           }
                           disabled={reassigning}
                           className="block w-full max-w-md rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          {brokers.map((broker) => (
-                            <option key={broker.id} value={broker.id}>
-                              {getProfileDisplayName(broker)} (
-                              {broker.email ?? "no email"})
+                          {assignableOwners.map((owner) => (
+                            <option key={owner.userId} value={owner.userId}>
+                              {formatAssignableOwnerLabel(owner)}
                             </option>
                           ))}
                         </select>
@@ -690,7 +696,7 @@ export function CompanyDetailPage() {
                           onClick={handleReassignOwner}
                           disabled={
                             reassigning ||
-                            reassignBrokerId === company.user_id
+                            reassignOwnerId === company.user_id
                           }
                           className="crm-btn-secondary crm-btn-sm disabled:cursor-not-allowed disabled:opacity-60"
                         >

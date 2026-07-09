@@ -42,14 +42,14 @@ export async function POST(request: Request) {
 
   if (!newUserId) {
     return NextResponse.json(
-      { error: "Target broker is required." },
+      { error: "Target owner is required." },
       { status: 400 },
     );
   }
 
   if (!isUuid(newUserId)) {
     return NextResponse.json(
-      { error: "Invalid target broker ID." },
+      { error: "Invalid target owner ID." },
       { status: 400 },
     );
   }

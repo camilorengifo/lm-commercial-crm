@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import type { AdminCompaniesBrokerOption } from "@/lib/adminCompanies";
-import type { AdminCompanyOversightRow } from "@/lib/adminCompanies";
-import { getProfileDisplayName, type UserProfile } from "@/lib/userProfile";
+import {
+  formatAssignableOwnerLabel,
+  type AdminCompaniesBrokerOption,
+  type AdminCompanyOversightRow,
+} from "@/lib/adminCompanies";
 
 export function AdminReassignCompaniesModal({
   open,
@@ -93,7 +95,7 @@ export function AdminReassignCompaniesModal({
           {selectedCompanies.length} compan
           {selectedCompanies.length === 1 ? "y" : "ies"} selected. This updates{" "}
           <span className="font-medium">companies.user_id</span> and moves
-          contacts, activities, follow-ups, and opportunities to the new broker.
+          contacts, activities, follow-ups, and opportunities to the new owner.
           Nothing is deleted.
         </p>
 
@@ -138,7 +140,7 @@ export function AdminReassignCompaniesModal({
             htmlFor="target-broker"
             className="mb-1.5 block text-sm font-medium text-zinc-700"
           >
-            New owner broker
+            New owner
           </label>
           <select
             id="target-broker"
@@ -147,10 +149,10 @@ export function AdminReassignCompaniesModal({
             disabled={submitting}
             className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <option value="">Select a broker...</option>
+            <option value="">Select an owner...</option>
             {assignableOwners.map((owner) => (
               <option key={owner.userId} value={owner.userId}>
-                {owner.email} — {owner.name}
+                {formatAssignableOwnerLabel(owner)}
               </option>
             ))}
           </select>
@@ -166,7 +168,7 @@ export function AdminReassignCompaniesModal({
           {targetOwner ? (
             <span className="font-medium text-zinc-900">{targetOwner.email}</span>
           ) : (
-            "the selected broker"
+            "the selected owner"
           )}{" "}
           will see these companies on <span className="font-medium">/companies</span>.
           The previous owner will lose access immediately.
@@ -174,7 +176,7 @@ export function AdminReassignCompaniesModal({
 
         {allAlreadyAssigned && (
           <p className="mt-3 text-sm text-amber-700">
-            All selected companies already belong to this broker.
+            All selected companies already belong to this owner.
           </p>
         )}
 
@@ -207,21 +209,4 @@ export function AdminReassignCompaniesModal({
       </div>
     </div>
   );
-}
-
-export function buildAssignableOwnersFromProfiles(
-  profiles: UserProfile[],
-): AdminCompaniesBrokerOption[] {
-  return profiles
-    .filter(
-      (profile) =>
-        profile.is_active !== false &&
-        (profile.role === "broker" || profile.role === "admin"),
-    )
-    .map((profile) => ({
-      userId: profile.id,
-      name: getProfileDisplayName(profile),
-      email: profile.email ?? "—",
-    }))
-    .sort((a, b) => a.email.localeCompare(b.email));
 }
