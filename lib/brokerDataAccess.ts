@@ -12,10 +12,45 @@ import {
 } from "@/lib/userProfile";
 
 export const COMPANY_OWNER_USER_ID_COLUMN = "user_id";
+export const COMPANIES_FETCH_PAGE_SIZE = 1000;
 
 /** Canonical personal-book owner: always the authenticated viewer on broker-facing routes. */
 export function resolvePersonalCompanyOwnerUserId(viewerUserId: string): string {
   return viewerUserId;
+}
+
+export interface CanonicalCompanyViewer {
+  viewerUserId: string;
+  authUserId: string;
+  profileId: string | null;
+  profileIdMatchesAuth: boolean;
+}
+
+/**
+ * Resolves the user id used for companies.user_id ownership on personal broker routes.
+ * companies.user_id and profiles.id both reference auth.users.id — the viewer id is auth.user.id.
+ */
+export function resolveCanonicalCompanyViewerId(input: {
+  authUserId: string;
+  profile: UserProfile | null | undefined;
+}): CanonicalCompanyViewer {
+  const profileId = input.profile?.id ?? null;
+  const profileIdMatchesAuth =
+    profileId === null || profileId === input.authUserId;
+
+  if (profileId && !profileIdMatchesAuth) {
+    logBrokerIsolationWarn(
+      "resolveCanonicalCompanyViewerId: profile.id differs from auth.user.id",
+      { authUserId: input.authUserId, profileId },
+    );
+  }
+
+  return {
+    viewerUserId: input.authUserId,
+    authUserId: input.authUserId,
+    profileId,
+    profileIdMatchesAuth,
+  };
 }
 
 export function companyOwnedByViewer(
@@ -32,23 +67,41 @@ export async function fetchOwnedCompanyIdsForViewer(
   data: string[];
   error: { message?: string } | null;
 }> {
-  let query = supabase
-    .from("companies")
-    .select("id")
-    .eq(COMPANY_OWNER_USER_ID_COLUMN, viewerUserId);
+  const ids: string[] = [];
+  let offset = 0;
 
-  if (!options?.includeSoftDeleted) {
-    query = query.is("deleted_at", null);
-  }
+  while (true) {
+    let query = supabase
+      .from("companies")
+      .select("id")
+      .eq(COMPANY_OWNER_USER_ID_COLUMN, viewerUserId)
+      .order("id", { ascending: true });
 
-  const { data, error } = await query;
+    if (!options?.includeSoftDeleted) {
+      query = query.is("deleted_at", null);
+    }
 
-  if (error) {
-    return { data: [], error };
+    const { data, error } = await query.range(
+      offset,
+      offset + COMPANIES_FETCH_PAGE_SIZE - 1,
+    );
+
+    if (error) {
+      return { data: [], error };
+    }
+
+    const batch = (data ?? []).map((row) => row.id as string);
+    ids.push(...batch);
+
+    if (batch.length < COMPANIES_FETCH_PAGE_SIZE) {
+      break;
+    }
+
+    offset += COMPANIES_FETCH_PAGE_SIZE;
   }
 
   return {
-    data: (data ?? []).map((row) => row.id as string),
+    data: ids,
     error: null,
   };
 }
@@ -218,36 +271,53 @@ export async function fetchCompaniesOwnedByUser<T extends { user_id: string; id:
       "Personal companies book: companies.user_id = viewer (brokers and admins).",
   });
 
-  let query = supabase
-    .from("companies")
-    .select(input.select)
-    .eq(COMPANY_OWNER_USER_ID_COLUMN, input.ownerUserId)
-    .is("deleted_at", null);
+  const allRows: T[] = [];
+  let offset = 0;
 
-  if (input.order) {
-    query = query.order(input.order.column, {
-      ascending: input.order.ascending ?? true,
-    });
-  }
+  while (true) {
+    let query = supabase
+      .from("companies")
+      .select(input.select)
+      .eq(COMPANY_OWNER_USER_ID_COLUMN, input.ownerUserId)
+      .is("deleted_at", null);
 
-  const { data, error } = await query;
+    if (input.order) {
+      query = query.order(input.order.column, {
+        ascending: input.order.ascending ?? true,
+      });
+    }
 
-  if (error) {
-    return {
-      data: [],
-      error,
-      stats: {
-        rawCount: 0,
-        visibleCount: 0,
-        foreignCount: 0,
-        foreignCompanies: [],
-      },
-      fetchMode,
-    };
+    const { data, error } = await query.range(
+      offset,
+      offset + COMPANIES_FETCH_PAGE_SIZE - 1,
+    );
+
+    if (error) {
+      return {
+        data: [],
+        error,
+        stats: {
+          rawCount: 0,
+          visibleCount: 0,
+          foreignCount: 0,
+          foreignCompanies: [],
+        },
+        fetchMode,
+      };
+    }
+
+    const batch = (data ?? []) as unknown as T[];
+    allRows.push(...batch);
+
+    if (batch.length < COMPANIES_FETCH_PAGE_SIZE) {
+      break;
+    }
+
+    offset += COMPANIES_FETCH_PAGE_SIZE;
   }
 
   const { visible, stats } = filterCompaniesOwnedByUser(
-    (data ?? []) as unknown as T[],
+    allRows,
     input.ownerUserId,
   );
 

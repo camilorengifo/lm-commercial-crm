@@ -49,6 +49,7 @@ import {
   fetchCompaniesOwnedByUser,
   filterCompaniesOwnedByUser,
   getAuthenticatedViewerContext,
+  resolveCanonicalCompanyViewerId,
   type BrokerIsolationStats,
 } from "@/lib/brokerDataAccess";
 import { fetchUserProfile, isAdminProfile, type UserProfile } from "@/lib/userProfile";
@@ -160,8 +161,13 @@ export function CompaniesPage() {
       });
     }
 
+    const canonicalViewer = resolveCanonicalCompanyViewerId({
+      authUserId: userId,
+      profile: resolvedProfile,
+    });
+
     const { data, error, stats } = await fetchCompaniesOwnedByUser<Company>({
-      ownerUserId: userId,
+      ownerUserId: canonicalViewer.viewerUserId,
       select: COMPANY_LIST_SELECT,
       page: "/companies",
       profile: resolvedProfile,
@@ -177,9 +183,14 @@ export function CompaniesPage() {
       return;
     }
 
-    const { visible } = filterCompaniesOwnedByUser(data, userId);
+    const { visible } = filterCompaniesOwnedByUser(
+      data,
+      canonicalViewer.viewerUserId,
+    );
 
-    const foreignInVisible = visible.filter((company) => company.user_id !== userId);
+    const foreignInVisible = visible.filter(
+      (company) => company.user_id !== canonicalViewer.viewerUserId,
+    );
     if (foreignInVisible.length > 0) {
       logBrokerIsolationWarn("foreign companies in visible list after filter", {
         authUserId: userId,
