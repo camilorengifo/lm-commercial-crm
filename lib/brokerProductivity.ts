@@ -3,10 +3,11 @@ import type { UserRole } from "@/lib/userProfile";
 export function isBrokerProductivityEligibleRole(
   role: UserRole | string | null | undefined,
 ): boolean {
-  return role === "broker" || role === "admin";
+  return role === "broker" || role === "admin" || role === "super_admin";
 }
 
 export function productivityRoleLabel(role: UserRole): string {
+  if (role === "super_admin") return "Super admin";
   return role === "admin" ? "Admin" : "Broker";
 }
 

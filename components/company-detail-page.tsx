@@ -46,6 +46,7 @@ import {
   getProfileDisplayName,
   canManageOpportunities as userCanManageOpportunities,
   isAdminProfile,
+  normalizeUserRole,
   type UserProfile,
 } from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
@@ -184,7 +185,7 @@ export function CompanyDetailPage() {
             id: nextCompany.user_id,
             email: ownerProfile.email ?? "",
             full_name: ownerProfile.full_name,
-            role: ownerProfile.role === "admin" ? "admin" : "broker",
+            role: normalizeUserRole(ownerProfile.role),
             is_active: ownerProfile.is_active ?? true,
             is_blocked: ownerProfile.is_blocked ?? false,
             blocked_at: ownerProfile.blocked_at ?? null,

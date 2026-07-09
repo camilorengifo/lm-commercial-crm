@@ -91,7 +91,12 @@ export interface AdminCompaniesBrokerOption {
 export function formatAssignableOwnerLabel(
   owner: Pick<AdminCompaniesBrokerOption, "name" | "email" | "role">,
 ): string {
-  const roleLabel = owner.role === "admin" ? "Admin" : "Broker";
+  const roleLabel =
+    owner.role === "super_admin"
+      ? "Super admin"
+      : owner.role === "admin"
+        ? "Admin"
+        : "Broker";
   return `${owner.name} (${owner.email}) · ${roleLabel}`;
 }
 
@@ -1216,6 +1221,68 @@ export async function fetchAdminCompaniesOversightPage(input: {
   };
 }
 
+export async function fetchOversightCompanyIdsForFilters(
+  filters: AdminCompaniesOversightFilters,
+): Promise<{
+  data: string[];
+  error: { message?: string } | null;
+}> {
+  const access = await verifyAdminAccess();
+  if (!access.allowed) {
+    return {
+      data: [],
+      error: { message: "Admin access required." },
+    };
+  }
+
+  const profilesResult = await fetchOversightProfiles();
+  if (profilesResult.error) {
+    return { data: [], error: profilesResult.error };
+  }
+
+  const profiles = profilesResult.data;
+  const officeUserIds = resolveOfficeUserIds(filters.officeId, profiles);
+
+  if (filters.officeId !== "all" && officeUserIds?.length === 0) {
+    return { data: [], error: null };
+  }
+
+  if (attentionFilterUsesCompanyIds(filters.attention)) {
+    const ids = await resolveAttentionCompanyIds(filters, profiles);
+    return { data: ids, error: null };
+  }
+
+  const ids: string[] = [];
+  let offset = 0;
+
+  while (true) {
+    let query = supabase.from("companies").select("id");
+    query = applyOversightStructuralFilters(query, filters, officeUserIds);
+    query = applyDirectAttentionFilters(query, filters.attention);
+    query = applyOversightSort(query, filters.sort);
+
+    const { data, error } = await query.range(
+      offset,
+      offset + OVERSIGHT_FETCH_PAGE_SIZE - 1,
+    );
+
+    if (error) {
+      return { data: [], error };
+    }
+
+    const batch = (data ?? []) as Array<{ id: string }>;
+    ids.push(...batch.map((row) => row.id));
+
+    if (batch.length < OVERSIGHT_FETCH_PAGE_SIZE) {
+      break;
+    }
+
+    offset += OVERSIGHT_FETCH_PAGE_SIZE;
+  }
+
+  return { data: ids, error: null };
+}
+
 function getInactivityCutoff(): Date {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - INACTIVITY_DAYS);
@@ -1580,7 +1647,9 @@ export function getAssignableCompanyOwners(
       (profile) =>
         profile.is_active !== false &&
         !profile.is_blocked &&
-        (profile.role === "broker" || profile.role === "admin"),
+        (profile.role === "broker" ||
+          profile.role === "admin" ||
+          profile.role === "super_admin"),
     )
     .map((profile) => ({
       userId: profile.id,

@@ -12,6 +12,7 @@ import {
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { StatGrid } from "@/components/crm-ui";
 import { AdminReassignCompaniesModal } from "@/components/admin-reassign-companies-modal";
+import { AdminSuperAdminBulkDeleteModal } from "@/components/admin-super-admin-bulk-delete-modal";
 import { reassignAdminCompanies } from "@/lib/adminClient";
 import { verifyAdminAccess } from "@/lib/admin";
 import {
@@ -20,6 +21,7 @@ import {
   attentionBadgeLabel,
   fetchAdminCompaniesOversightMeta,
   fetchAdminCompaniesOversightPage,
+  fetchOversightCompanyIdsForFilters,
   formatAssignableOwnerLabel,
   getAssignableCompanyOwners,
   OVERSIGHT_SEARCH_DEBOUNCE_MS,
@@ -47,7 +49,8 @@ import {
 } from "@/lib/accountStatus";
 import { formatDate, formatSupabaseError } from "@/lib/crmFormat";
 import { ALL_OFFICES_LABEL, UNASSIGNED_OFFICE_LABEL } from "@/lib/offices";
-import { fetchAllProfiles, type UserProfile } from "@/lib/userProfile";
+import type { SuperAdminDeleteScope } from "@/lib/adminSuperAdminClient";
+import { fetchAllProfiles, isSuperAdminProfile, type UserProfile } from "@/lib/userProfile";
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -116,6 +119,14 @@ export function AdminCompaniesPage() {
   const [reassigning, setReassigning] = useState(false);
   const [reassignError, setReassignError] = useState<string | null>(null);
   const [reassignSuccess, setReassignSuccess] = useState<string | null>(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteScope, setDeleteScope] = useState<SuperAdminDeleteScope>("selected");
+  const [deleteTargetIds, setDeleteTargetIds] = useState<string[]>([]);
+  const [deleteTargetCount, setDeleteTargetCount] = useState(0);
+  const [resolvingFilteredDelete, setResolvingFilteredDelete] = useState(false);
+  const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
+
+  const isSuperAdmin = isSuperAdminProfile(profile);
 
   const filters = useMemo<AdminCompaniesOversightFilters>(
     () => ({
@@ -213,6 +224,8 @@ export function AdminCompaniesPage() {
 
   useEffect(() => {
     setPage(1);
+    setSelectedCompanyIds(new Set());
+    setSelectedCompanySnapshots(new Map());
   }, [
     debouncedSearch,
     brokerFilter,
@@ -396,6 +409,71 @@ export function AdminCompaniesPage() {
     await Promise.all([loadMeta(), loadPage()]);
   }
 
+  async function handleSelectAllMatchingFilters() {
+    setFetchError(null);
+    setResolvingFilteredDelete(true);
+
+    const { data, error } = await fetchOversightCompanyIdsForFilters(filters);
+
+    setResolvingFilteredDelete(false);
+
+    if (error) {
+      setFetchError(formatSupabaseError(error));
+      return;
+    }
+
+    setSelectedCompanyIds(new Set(data));
+    setSelectedCompanySnapshots(new Map());
+  }
+
+  function clearSelection() {
+    setSelectedCompanyIds(new Set());
+    setSelectedCompanySnapshots(new Map());
+  }
+
+  async function openDeleteModal(scope: SuperAdminDeleteScope) {
+    setDeleteSuccess(null);
+    setReassignSuccess(null);
+    setDeleteScope(scope);
+
+    if (scope === "filtered") {
+      setResolvingFilteredDelete(true);
+      const { data, error } = await fetchOversightCompanyIdsForFilters(filters);
+      setResolvingFilteredDelete(false);
+
+      if (error) {
+        setFetchError(formatSupabaseError(error));
+        return;
+      }
+
+      if (data.length === 0) {
+        setFetchError("No companies match the current filters.");
+        return;
+      }
+
+      setDeleteTargetIds(data);
+      setDeleteTargetCount(data.length);
+    } else {
+      const ids = Array.from(selectedCompanyIds);
+      if (ids.length === 0) {
+        return;
+      }
+      setDeleteTargetIds(ids);
+      setDeleteTargetCount(ids.length);
+    }
+
+    setDeleteModalOpen(true);
+  }
+
+  async function handleDeleteCompleted(result: {
+    deleted: number;
+    message: string;
+  }) {
+    setDeleteSuccess(result.message);
+    clearSelection();
+    await Promise.all([loadMeta(), loadPage()]);
+  }
+
   if (metaLoading) {
     return (
       <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50">
@@ -439,6 +517,19 @@ export function AdminCompaniesPage() {
       {reassignSuccess && (
         <p className="mb-6 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
           {reassignSuccess}
+        </p>
+      )}
+
+      {deleteSuccess && (
+        <p className="mb-6 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {deleteSuccess}
+        </p>
+      )}
+
+      {isSuperAdmin && (
+        <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          Super administrator mode: you can soft-delete companies across all
+          owners. Regular admins cannot use bulk delete in Companies Oversight.
         </p>
       )}
 
@@ -707,41 +798,83 @@ export function AdminCompaniesPage() {
         </div>
       </div>
 
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-zinc-600">
-          {selectedCompanyIds.size === 0
-            ? "No companies selected"
-            : `${selectedCompanyIds.size} compan${
-                selectedCompanyIds.size === 1 ? "y" : "ies"
-              } selected`}
-          {selectedCompanyIds.size > 0 &&
-            selectedCompanyIds.size > visibleCompanyIds.filter((id) =>
-              selectedCompanyIds.has(id),
-            ).length && (
-              <span className="text-zinc-500">
-                {" "}
-                (includes selections from other pages)
-              </span>
-            )}
-        </p>
-        <button
-          type="button"
-          onClick={openReassignModal}
-          disabled={selectedCompanyIds.size === 0}
-          className="crm-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          Reassign owner ({selectedCompanyIds.size || 0})
-        </button>
-        {lifecycleFilter !== "active" && (
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="space-y-1 text-sm text-zinc-600">
+          <p>
+            {selectedCompanyIds.size === 0
+              ? "No companies selected"
+              : `${selectedCompanyIds.size.toLocaleString()} compan${
+                  selectedCompanyIds.size === 1 ? "y" : "ies"
+                } selected`}
+            {selectedCompanyIds.size > 0 &&
+              selectedCompanyIds.size >
+                visibleCompanyIds.filter((id) => selectedCompanyIds.has(id))
+                  .length && (
+                <span className="text-zinc-500">
+                  {" "}
+                  (includes selections from other pages)
+                </span>
+              )}
+          </p>
+          {isSuperAdmin && tableTotalCount > 0 && (
+            <p className="text-zinc-500">
+              {tableTotalCount.toLocaleString()} companies match the current
+              filters.
+            </p>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {isSuperAdmin && tableTotalCount > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={() => void handleSelectAllMatchingFilters()}
+                disabled={resolvingFilteredDelete || tableLoading}
+                className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {resolvingFilteredDelete
+                  ? "Loading matches..."
+                  : `Select all filtered (${tableTotalCount.toLocaleString()})`}
+              </button>
+              <button
+                type="button"
+                onClick={() => void openDeleteModal("filtered")}
+                disabled={resolvingFilteredDelete || tableLoading || tableTotalCount === 0}
+                className="inline-flex items-center justify-center rounded-lg border border-red-300 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-800 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Delete all filtered
+              </button>
+            </>
+          )}
           <button
             type="button"
-            onClick={() => void handleRestoreSelected()}
+            onClick={openReassignModal}
             disabled={selectedCompanyIds.size === 0}
-            className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="crm-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Restore selected
+            Reassign owner ({selectedCompanyIds.size || 0})
           </button>
-        )}
+          {isSuperAdmin && (
+            <button
+              type="button"
+              onClick={() => void openDeleteModal("selected")}
+              disabled={selectedCompanyIds.size === 0 || resolvingFilteredDelete}
+              className="inline-flex items-center justify-center rounded-lg bg-red-700 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Delete selected ({selectedCompanyIds.size || 0})
+            </button>
+          )}
+          {lifecycleFilter !== "active" && (
+            <button
+              type="button"
+              onClick={() => void handleRestoreSelected()}
+              disabled={selectedCompanyIds.size === 0}
+              className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Restore selected
+            </button>
+          )}
+        </div>
       </div>
 
       {tableLoading ? (
@@ -977,6 +1110,19 @@ export function AdminCompaniesPage() {
           }
         }}
         onConfirm={() => void handleConfirmReassign()}
+      />
+
+      <AdminSuperAdminBulkDeleteModal
+        open={deleteModalOpen}
+        scope={deleteScope}
+        companyCount={deleteTargetCount}
+        companyIds={deleteTargetIds}
+        onClose={() => {
+          if (!resolvingFilteredDelete) {
+            setDeleteModalOpen(false);
+          }
+        }}
+        onCompleted={(result) => void handleDeleteCompleted(result)}
       />
     </AuthenticatedLayout>
   );

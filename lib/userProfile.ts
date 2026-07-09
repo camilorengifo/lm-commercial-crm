@@ -1,7 +1,7 @@
 import { supabase } from "@/lib/supabaseClient";
 import { verifyAdminAccess } from "@/lib/admin";
 
-export const USER_ROLES = ["admin", "broker"] as const;
+export const USER_ROLES = ["admin", "broker", "super_admin"] as const;
 
 export type UserRole = (typeof USER_ROLES)[number];
 
@@ -17,21 +17,37 @@ export interface UserProfile {
 }
 
 export function normalizeUserRole(value: string | null | undefined): UserRole {
-  return value === "admin" ? "admin" : "broker";
+  if (value === "super_admin") return "super_admin";
+  if (value === "admin") return "admin";
+  return "broker";
 }
 
 export function isAdminProfile(profile: UserProfile | null | undefined): boolean {
-  if (!profile || profile.role !== "admin") {
+  if (!profile) {
+    return false;
+  }
+
+  if (profile.role !== "admin" && profile.role !== "super_admin") {
     return false;
   }
 
   return profile.is_active === true;
 }
 
+export function isSuperAdminProfile(
+  profile: UserProfile | null | undefined,
+): boolean {
+  return profile?.role === "super_admin" && profile.is_active === true;
+}
+
 export function canManageOpportunities(
   profile: UserProfile | null | undefined,
 ): boolean {
-  return profile?.role === "broker" || profile?.role === "admin";
+  return (
+    profile?.role === "broker" ||
+    profile?.role === "admin" ||
+    profile?.role === "super_admin"
+  );
 }
 
 export function isActiveProfile(profile: UserProfile | null | undefined): boolean {

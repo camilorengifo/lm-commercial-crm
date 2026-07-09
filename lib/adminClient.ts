@@ -2,7 +2,7 @@ import { supabase } from "@/lib/supabaseClient";
 import type { AdminUserListItem } from "@/lib/adminUserManagement";
 import type { UserRole } from "@/lib/userProfile";
 
-async function getAccessToken(): Promise<string | null> {
+export async function getAccessToken(): Promise<string | null> {
   const {
     data: { session },
   } = await supabase.auth.getSession();

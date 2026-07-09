@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { verifyAdminAccess } from "@/lib/admin";
 import {
   getProfileDisplayName,
+  normalizeUserRole,
   type UserProfile,
 } from "@/lib/userProfile";
 
@@ -116,7 +117,7 @@ export async function fetchAdminDashboardStats(): Promise<{
   const profiles = ((profilesResult.data ?? []) as UserProfile[]).map(
     (profile) => ({
       ...profile,
-      role: profile.role === "admin" ? "admin" : "broker",
+      role: normalizeUserRole(profile.role),
     }),
   ) as UserProfile[];
 
