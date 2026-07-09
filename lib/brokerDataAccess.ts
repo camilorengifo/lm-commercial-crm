@@ -13,6 +13,46 @@ import {
 
 export const COMPANY_OWNER_USER_ID_COLUMN = "user_id";
 
+/** Canonical personal-book owner: always the authenticated viewer on broker-facing routes. */
+export function resolvePersonalCompanyOwnerUserId(viewerUserId: string): string {
+  return viewerUserId;
+}
+
+export function companyOwnedByViewer(
+  companyUserId: string,
+  viewerUserId: string,
+): boolean {
+  return companyUserId === viewerUserId;
+}
+
+export async function fetchOwnedCompanyIdsForViewer(
+  viewerUserId: string,
+  options?: { includeSoftDeleted?: boolean },
+): Promise<{
+  data: string[];
+  error: { message?: string } | null;
+}> {
+  let query = supabase
+    .from("companies")
+    .select("id")
+    .eq(COMPANY_OWNER_USER_ID_COLUMN, viewerUserId);
+
+  if (!options?.includeSoftDeleted) {
+    query = query.is("deleted_at", null);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    return { data: [], error };
+  }
+
+  return {
+    data: (data ?? []).map((row) => row.id as string),
+    error: null,
+  };
+}
+
 export interface BrokerIsolationStats {
   rawCount: number;
   visibleCount: number;
@@ -174,13 +214,15 @@ export async function fetchCompaniesOwnedByUser<T extends { user_id: string; id:
     authEmail: input.profile?.email ?? null,
     profileRole: input.profile?.role ?? null,
     filterUserId: input.ownerUserId,
-    note: "Hard-scoped companies query with post-fetch ownership filter.",
+    note:
+      "Personal companies book: companies.user_id = viewer (brokers and admins).",
   });
 
   let query = supabase
     .from("companies")
     .select(input.select)
-    .eq(COMPANY_OWNER_USER_ID_COLUMN, input.ownerUserId);
+    .eq(COMPANY_OWNER_USER_ID_COLUMN, input.ownerUserId)
+    .is("deleted_at", null);
 
   if (input.order) {
     query = query.order(input.order.column, {
@@ -237,13 +279,16 @@ export async function fetchCompanyByIdForViewer<
   select: string;
   profile: UserProfile | null;
   allowAdminBypass?: boolean;
+  personalBookOnly?: boolean;
 }): Promise<{
   data: T | null;
   error: { message?: string } | null;
   denied: boolean;
 }> {
   const allowAdminBypass =
-    input.allowAdminBypass !== false && isAdminProfile(input.profile);
+    input.allowAdminBypass !== false &&
+    !input.personalBookOnly &&
+    isAdminProfile(input.profile);
 
   let query = supabase
     .from("companies")

@@ -8,7 +8,7 @@ import {
   type FollowUpType,
   type FollowUpTypeFormValues,
 } from "@/lib/followUpSeasonal";
-import { enforceBrokerOwnedRows } from "@/lib/brokerDataAccess";
+import { enforceBrokerOwnedRows, fetchOwnedCompanyIdsForViewer } from "@/lib/brokerDataAccess";
 import { supabase } from "@/lib/supabaseClient";
 
 export const FOLLOW_UP_PENDING_LIMIT = 200;
@@ -199,6 +199,33 @@ function buildContactNameByCompany(
   return result;
 }
 
+function filterFollowUpsToOwnedCompanies(
+  rows: FollowUpRecord[],
+  ownedCompanyIds: Set<string>,
+): FollowUpRecord[] {
+  return rows.filter((row) => ownedCompanyIds.has(row.company_id));
+}
+
+async function resolvePersonalFollowUpCompanyScope(
+  userId: string,
+  asAdmin: boolean,
+): Promise<{
+  ownedCompanyIds: Set<string> | null;
+  error: { message?: string } | null;
+}> {
+  if (asAdmin) {
+    return { ownedCompanyIds: null, error: null };
+  }
+
+  const { data, error } = await fetchOwnedCompanyIdsForViewer(userId);
+
+  if (error) {
+    return { ownedCompanyIds: null, error };
+  }
+
+  return { ownedCompanyIds: new Set(data), error: null };
+}
+
 function getProfileDisplayName(profile: ProfileJoinRow): string {
   return profile.full_name?.trim() || profile.email?.trim() || profile.id;
 }
@@ -221,7 +248,7 @@ async function fetchCompaniesForFollowUps(
     .in("id", companyIds);
 
   if (!asAdmin) {
-    query = query.eq("user_id", userId);
+    query = query.eq("user_id", userId).is("deleted_at", null);
   }
 
   const { data, error } = await query;
@@ -454,6 +481,23 @@ export async function fetchFollowUpWorkcenterData(
 }> {
   const { start: weekStart } = getWeekBounds();
 
+  const { ownedCompanyIds, error: scopeError } =
+    await resolvePersonalFollowUpCompanyScope(userId, asAdmin);
+
+  if (scopeError) {
+    return {
+      data: { pending: [], completed: [] },
+      error: scopeError,
+    };
+  }
+
+  if (ownedCompanyIds && ownedCompanyIds.size === 0) {
+    return {
+      data: { pending: [], completed: [] },
+      error: null,
+    };
+  }
+
   let pendingQuery = supabase
     .from("follow_ups")
     .select(FOLLOW_UP_SELECT_FIELDS)
@@ -461,8 +505,8 @@ export async function fetchFollowUpWorkcenterData(
     .order("due_at", { ascending: true })
     .limit(FOLLOW_UP_PENDING_LIMIT);
 
-  if (!asAdmin) {
-    pendingQuery = pendingQuery.eq("user_id", userId);
+  if (ownedCompanyIds) {
+    pendingQuery = pendingQuery.in("company_id", [...ownedCompanyIds]);
   }
 
   let completedQuery = supabase
@@ -473,8 +517,8 @@ export async function fetchFollowUpWorkcenterData(
     .order("completed_at", { ascending: false })
     .limit(FOLLOW_UP_COMPLETED_LIMIT);
 
-  if (!asAdmin) {
-    completedQuery = completedQuery.eq("user_id", userId);
+  if (ownedCompanyIds) {
+    completedQuery = completedQuery.in("company_id", [...ownedCompanyIds]);
   }
 
   const [pendingResult, completedResult] = await Promise.all([
@@ -496,16 +540,32 @@ export async function fetchFollowUpWorkcenterData(
     };
   }
 
-  const pendingRows = enforceBrokerOwnedRows(
-    (pendingResult.data as FollowUpRecord[]) ?? [],
-    userId,
-    { page: "fetchFollowUpWorkcenterData:pending", brokerFacingRoute: !asAdmin },
-  );
-  const completedRows = enforceBrokerOwnedRows(
-    (completedResult.data as FollowUpRecord[]) ?? [],
-    userId,
-    { page: "fetchFollowUpWorkcenterData:completed", brokerFacingRoute: !asAdmin },
-  );
+  const pendingRows = ownedCompanyIds
+    ? filterFollowUpsToOwnedCompanies(
+        (pendingResult.data as FollowUpRecord[]) ?? [],
+        ownedCompanyIds,
+      )
+    : enforceBrokerOwnedRows(
+        (pendingResult.data as FollowUpRecord[]) ?? [],
+        userId,
+        {
+          page: "fetchFollowUpWorkcenterData:pending",
+          brokerFacingRoute: !asAdmin,
+        },
+      );
+  const completedRows = ownedCompanyIds
+    ? filterFollowUpsToOwnedCompanies(
+        (completedResult.data as FollowUpRecord[]) ?? [],
+        ownedCompanyIds,
+      )
+    : enforceBrokerOwnedRows(
+        (completedResult.data as FollowUpRecord[]) ?? [],
+        userId,
+        {
+          page: "fetchFollowUpWorkcenterData:completed",
+          brokerFacingRoute: !asAdmin,
+        },
+      );
 
   const [pendingEnriched, completedEnriched] = await Promise.all([
     enrichFollowUpRecords(pendingRows, userId, asAdmin),
@@ -542,6 +602,17 @@ export async function fetchCancelledFollowUps(
   data: FollowUpEnriched[];
   error: { message?: string } | null;
 }> {
+  const { ownedCompanyIds, error: scopeError } =
+    await resolvePersonalFollowUpCompanyScope(userId, asAdmin);
+
+  if (scopeError) {
+    return { data: [], error: scopeError };
+  }
+
+  if (ownedCompanyIds && ownedCompanyIds.size === 0) {
+    return { data: [], error: null };
+  }
+
   let query = supabase
     .from("follow_ups")
     .select(FOLLOW_UP_SELECT_FIELDS)
@@ -549,8 +620,8 @@ export async function fetchCancelledFollowUps(
     .order("updated_at", { ascending: false })
     .limit(FOLLOW_UP_COMPLETED_LIMIT);
 
-  if (!asAdmin) {
-    query = query.eq("user_id", userId);
+  if (ownedCompanyIds) {
+    query = query.in("company_id", [...ownedCompanyIds]);
   }
 
   const { data, error } = await query;
@@ -559,7 +630,11 @@ export async function fetchCancelledFollowUps(
     return { data: [], error };
   }
 
-  return enrichFollowUpRecords((data as FollowUpRecord[]) ?? [], userId, asAdmin);
+  const rows = ownedCompanyIds
+    ? filterFollowUpsToOwnedCompanies((data as FollowUpRecord[]) ?? [], ownedCompanyIds)
+    : ((data as FollowUpRecord[]) ?? []);
+
+  return enrichFollowUpRecords(rows, userId, asAdmin);
 }
 
 export async function createFollowUp(

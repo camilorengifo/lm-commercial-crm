@@ -33,6 +33,7 @@ import {
   accountDispositionBadgeClass,
   accountStatusBadgeClass,
   getAccountDispositionLabel,
+  isWorkingCompanyRecord,
   matchesAccountStatusFilter,
   normalizeAccountStatus,
   type AccountStatusFilter,
@@ -43,10 +44,11 @@ import {
   type CompanyOwnershipDebugRow,
 } from "@/components/companies-isolation-debug";
 import { formatDate, formatSupabaseError } from "@/lib/crmFormat";
-import { createAuthFetchGuard, getVerifiedAuthContext } from "@/lib/authSession";
+import { createAuthFetchGuard } from "@/lib/authSession";
 import {
   fetchCompaniesOwnedByUser,
   filterCompaniesOwnedByUser,
+  getAuthenticatedViewerContext,
   type BrokerIsolationStats,
 } from "@/lib/brokerDataAccess";
 import { fetchUserProfile, isAdminProfile, type UserProfile } from "@/lib/userProfile";
@@ -117,48 +119,44 @@ export function CompaniesPage() {
   const fetchCompanies = useCallback(async (userId: string, email: string | null) => {
     const fetchGeneration = fetchGuardRef.current.next();
     setFetchError(null);
-    setCompanies([]);
     setIsolationStats(null);
     setCompanyOwnershipRows([]);
 
-    const authContext = await getVerifiedAuthContext();
+    const viewer = await getAuthenticatedViewerContext();
     if (fetchGuardRef.current.isStale(fetchGeneration)) {
       return;
     }
 
-    if (!authContext || authContext.userId !== userId) {
-      logBrokerIsolationWarn("auth context mismatch during companies fetch", {
-        requestedUserId: userId,
-        verifiedUserId: authContext?.userId ?? null,
-        requestedEmail: email,
-        verifiedEmail: authContext?.email ?? null,
-      });
+    if (!viewer || viewer.userId !== userId) {
+      setFetchError(
+        "Unable to verify your session. Please refresh the page and try again.",
+      );
       return;
     }
 
-    const { data: profile } = await fetchUserProfile(userId);
+    const profile = viewer.profile;
+    const { data: profileFromDb } = profile
+      ? { data: profile }
+      : await fetchUserProfile(userId);
+    const resolvedProfile = profile ?? profileFromDb;
     if (fetchGuardRef.current.isStale(fetchGeneration)) {
       return;
     }
 
-    setViewerProfile(profile);
-    setProfileIdMatchesAuth(profile ? profile.id === userId : false);
-    setAuthEmailMatchesProfile(authContext.authEmailMatchesProfile);
-    setIsAdminViewer(isAdminProfile(profile));
+    setViewerProfile(resolvedProfile);
+    setProfileIdMatchesAuth(resolvedProfile ? resolvedProfile.id === userId : false);
+    setAuthEmailMatchesProfile(
+      resolvedProfile
+        ? (viewer.email?.trim().toLowerCase() ?? "") ===
+            (resolvedProfile.email?.trim().toLowerCase() ?? "")
+        : false,
+    );
+    setIsAdminViewer(isAdminProfile(resolvedProfile));
 
-    if (profile && profile.id !== userId) {
+    if (resolvedProfile && resolvedProfile.id !== userId) {
       logBrokerIsolationWarn("profile.id !== auth.user.id", {
         authUserId: userId,
-        profileId: profile.id,
-      });
-    }
-
-    if (profile && !authContext.authEmailMatchesProfile) {
-      logBrokerIsolationWarn("auth.user.email !== profile.email", {
-        authEmail: email,
-        profileEmail: profile.email,
-        authUserId: userId,
-        profileId: profile.id,
+        profileId: resolvedProfile.id,
       });
     }
 
@@ -166,7 +164,7 @@ export function CompaniesPage() {
       ownerUserId: userId,
       select: COMPANY_LIST_SELECT,
       page: "/companies",
-      profile,
+      profile: resolvedProfile,
       order: { column: "name", ascending: true },
     });
 
@@ -255,8 +253,6 @@ export function CompaniesPage() {
         return;
       }
 
-      setCompanies([]);
-      setViewerProfile(null);
       setUser(session.user);
       fetchCompanies(session.user.id, session.user.email ?? null);
     });
@@ -283,12 +279,16 @@ export function CompaniesPage() {
       rows = rows.filter((company) => company.priority === priorityFilter);
     }
 
-    rows = rows.filter((company) =>
-      matchesAccountStatusFilter(
+    rows = rows.filter((company) => {
+      if (accountStatusFilter === "working") {
+        return isWorkingCompanyRecord(company);
+      }
+
+      return matchesAccountStatusFilter(
         normalizeAccountStatus(company.account_status),
         accountStatusFilter,
-      ),
-    );
+      );
+    });
 
     return sortCompanies(rows, sortBy);
   }, [companies, search, countryFilter, priorityFilter, accountStatusFilter, sortBy]);
@@ -427,8 +427,8 @@ export function CompaniesPage() {
     setSuccessMessage(null);
     setSubmitting(true);
 
-    const authContext = await getVerifiedAuthContext();
-    if (!authContext) {
+    const viewer = await getAuthenticatedViewerContext();
+    if (!viewer) {
       setFormError("You must be signed in.");
       setSubmitting(false);
       return;
