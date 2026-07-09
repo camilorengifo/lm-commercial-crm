@@ -707,7 +707,10 @@ export function FollowUpsPage() {
 
   const filteredFollowUps = useMemo(() => {
     return baseList.filter((followUp) => {
-      if (brokerFilter !== "all" && followUp.user_id !== brokerFilter) {
+      if (
+        brokerFilter !== "all" &&
+        followUp.companyOwnerUserId !== brokerFilter
+      ) {
         return false;
       }
 
@@ -761,7 +764,7 @@ export function FollowUpsPage() {
   function canManageFollowUp(followUp: FollowUpEnriched): boolean {
     if (!user) return false;
     if (isAdmin) return false;
-    return followUp.user_id === user.id;
+    return followUp.companyOwnerUserId === user.id;
   }
 
   async function refreshData() {
@@ -783,9 +786,10 @@ export function FollowUpsPage() {
     setActionFollowUpId(followUp.id);
     setFetchError(null);
 
+    const ownerUserId = followUp.companyOwnerUserId ?? followUp.user_id;
     const { error } = await completeFollowUp(
       followUp.id,
-      followUp.user_id,
+      ownerUserId,
       followUp.company_id,
     );
 
@@ -811,9 +815,11 @@ export function FollowUpsPage() {
     setActionFollowUpId(rescheduleTarget.id);
     setRescheduleError(null);
 
+    const ownerUserId =
+      rescheduleTarget.companyOwnerUserId ?? rescheduleTarget.user_id;
     const { error } = await rescheduleFollowUp({
       followUpId: rescheduleTarget.id,
-      ownerUserId: rescheduleTarget.user_id,
+      ownerUserId,
       companyId: rescheduleTarget.company_id,
       dueAt: input.dueAt,
       title: input.title,

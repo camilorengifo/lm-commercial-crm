@@ -94,6 +94,8 @@ export interface FollowUpEnriched extends FollowUpWithCompany {
   contactName: string | null;
   companyPriority: CompanyPriority;
   companyAccountStatus: AccountStatus;
+  /** Canonical company owner from companies.user_id */
+  companyOwnerUserId: string | null;
   brokerName: string | null;
   brokerEmail: string | null;
 }
@@ -371,7 +373,10 @@ function enrichFollowUpRows(
 ): FollowUpEnriched[] {
   return rows.map((row) => {
     const company = companyById.get(row.company_id);
-    const profile = profileById.get(row.user_id);
+    const companyOwnerUserId = company?.user_id ?? null;
+    const profile = companyOwnerUserId
+      ? profileById.get(companyOwnerUserId)
+      : null;
 
     return {
       ...row,
@@ -379,10 +384,18 @@ function enrichFollowUpRows(
       contactName: contactNameByCompany.get(row.company_id) ?? null,
       companyPriority: company?.priority ?? ("Medium" as CompanyPriority),
       companyAccountStatus: normalizeAccountStatus(company?.account_status),
+      companyOwnerUserId,
       brokerName: profile ? getProfileDisplayName(profile) : null,
       brokerEmail: profile?.email ?? null,
     };
   });
+}
+
+function filterPersonalFollowUpsToCompanyOwner(
+  rows: FollowUpEnriched[],
+  viewerUserId: string,
+): FollowUpEnriched[] {
+  return rows.filter((row) => row.companyOwnerUserId === viewerUserId);
 }
 
 async function enrichFollowUpRecords(
@@ -395,12 +408,10 @@ async function enrichFollowUpRecords(
   }
 
   const companyIds = [...new Set(rows.map((row) => row.company_id))];
-  const ownerIds = [...new Set(rows.map((row) => row.user_id))];
 
-  const [companiesResult, contactsResult, profilesResult] = await Promise.all([
+  const [companiesResult, contactsResult] = await Promise.all([
     fetchCompaniesForFollowUps(companyIds, userId, asAdmin),
     fetchContactsForCompanies(companyIds, userId, asAdmin),
-    asAdmin ? fetchProfilesForUsers(ownerIds) : Promise.resolve({ data: [], error: null }),
   ]);
 
   if (companiesResult.error) {
@@ -409,25 +420,40 @@ async function enrichFollowUpRecords(
   if (contactsResult.error) {
     return { data: [], error: contactsResult.error };
   }
-  if (profilesResult.error) {
-    return { data: [], error: profilesResult.error };
-  }
 
   const companyById = new Map(
     companiesResult.data.map((company) => [company.id, company]),
   );
+  const ownerIds = [
+    ...new Set(
+      companiesResult.data
+        .map((company) => company.user_id)
+        .filter((ownerId): ownerId is string => Boolean(ownerId)),
+    ),
+  ];
+  const { data: ownerProfiles, error: profilesError } =
+    await fetchProfilesForUsers(ownerIds);
+
+  if (profilesError) {
+    return { data: [], error: profilesError };
+  }
+
   const contactNameByCompany = buildContactNameByCompany(contactsResult.data);
   const profileById = new Map(
-    profilesResult.data.map((profile) => [profile.id, profile]),
+    ownerProfiles.map((profile) => [profile.id, profile]),
+  );
+
+  const enriched = enrichFollowUpRows(
+    rows,
+    companyById,
+    contactNameByCompany,
+    profileById,
   );
 
   return {
-    data: enrichFollowUpRows(
-      rows,
-      companyById,
-      contactNameByCompany,
-      profileById,
-    ),
+    data: asAdmin
+      ? enriched
+      : filterPersonalFollowUpsToCompanyOwner(enriched, userId),
     error: null,
   };
 }
@@ -690,6 +716,22 @@ export async function fetchCancelledFollowUps(
 export async function createFollowUp(
   input: CreateFollowUpInput,
 ): Promise<{ error: { message?: string } | null }> {
+  const { data: company, error: companyError } = await supabase
+    .from("companies")
+    .select("user_id")
+    .eq("id", input.companyId)
+    .maybeSingle();
+
+  if (companyError) {
+    return { error: companyError };
+  }
+
+  if (!company?.user_id) {
+    return { error: { message: "Company not found." } };
+  }
+
+  const ownerUserId = company.user_id as string;
+
   const seasonalFields = input.typeFields
     ? resolveFollowUpSeasonalFields(input.typeFields, input.dueAt)
     : resolveFollowUpSeasonalFields(
@@ -698,7 +740,7 @@ export async function createFollowUp(
       );
 
   const { error } = await supabase.from("follow_ups").insert({
-    user_id: input.userId,
+    user_id: ownerUserId,
     company_id: input.companyId,
     title: input.title,
     notes: input.notes ?? null,
@@ -711,7 +753,7 @@ export async function createFollowUp(
     return { error };
   }
 
-  return syncCompanyNextFollowUpAt(input.companyId, input.userId);
+  return syncCompanyNextFollowUpAt(input.companyId, ownerUserId);
 }
 
 export async function syncCompanyNextFollowUpAt(
@@ -722,7 +764,6 @@ export async function syncCompanyNextFollowUpAt(
     .from("follow_ups")
     .select("due_at")
     .eq("company_id", companyId)
-    .eq("user_id", userId)
     .eq("status", "pending")
     .order("due_at", { ascending: true })
     .limit(1)
