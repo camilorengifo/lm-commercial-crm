@@ -24,6 +24,7 @@ import {
 } from "@/lib/adminDashboard";
 import {
   formatPipelineValue,
+  productivityRoleLabel,
   PRODUCTIVITY_SCORE_EXPLANATION,
 } from "@/lib/brokerProductivity";
 import { formatDate, formatDateTime, formatSupabaseError } from "@/lib/crmFormat";
@@ -247,14 +248,17 @@ export function AdminPage() {
         <ProductivityScoreHint />
 
         {brokerProductivity.length === 0 ? (
-          <p className="text-sm text-zinc-500">No brokers registered yet.</p>
+          <p className="text-sm text-zinc-500">No team members registered yet.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="crm-table">
               <thead>
                 <tr>
                   <th className="px-3 py-2 text-left font-medium text-zinc-600">
-                    Broker
+                    Name
+                  </th>
+                  <th className="px-3 py-2 text-left font-medium text-zinc-600">
+                    Role
                   </th>
                   {officeFilter === "all" && (
                     <th className="px-3 py-2 text-left font-medium text-zinc-600">
@@ -299,6 +303,9 @@ export function AdminPage() {
                     <td className="px-3 py-3">
                       <div className="font-medium text-zinc-900">{row.name}</div>
                       <div className="text-zinc-600">{row.email}</div>
+                    </td>
+                    <td className="px-3 py-3 text-zinc-700">
+                      {productivityRoleLabel(row.role)}
                     </td>
                     {officeFilter === "all" && (
                       <td className="px-3 py-3 text-zinc-700">

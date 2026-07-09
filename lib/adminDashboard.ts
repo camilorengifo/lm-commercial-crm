@@ -3,12 +3,15 @@ import {
   classifyBrokerActivityLevel,
   computeProductivityScore,
   getOpportunityPipelineValue,
+  isBrokerProductivityEligibleRole,
   type BrokerActivityLevel,
 } from "@/lib/brokerProductivity";
 import { getFollowUpBucket, getWeekBounds } from "@/lib/followUps";
 import {
   getProfileDisplayName,
+  normalizeUserRole,
   type UserProfile,
+  type UserRole,
 } from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
 import { verifyAdminAccess } from "@/lib/admin";
@@ -22,6 +25,7 @@ export interface BrokerProductivityRow {
   userId: string;
   name: string;
   email: string;
+  role: UserRole;
   isActive: boolean;
   officeId: string | null;
   officeName: string;
@@ -153,6 +157,7 @@ export interface AdminBrokerDetailData {
     id: string;
     name: string;
     email: string;
+    role: UserRole;
     isActive: boolean;
   };
   metrics: BrokerProductivityRow;
@@ -380,7 +385,7 @@ function getBrokerUserIdsForOfficeFilter(
 ): Set<string> {
   return new Set(
     raw.profiles
-      .filter((profile) => profile.role === "broker")
+      .filter((profile) => isBrokerProductivityEligibleRole(profile.role))
       .filter((profile) =>
         brokerMatchesOfficeFilter(profile.office_id, officeFilter),
       )
@@ -431,7 +436,7 @@ function buildBrokerProductivityRows(
   );
 
   const brokerProfiles = raw.profiles
-    .filter((profile) => profile.role === "broker")
+    .filter((profile) => isBrokerProductivityEligibleRole(profile.role))
     .filter((profile) =>
       brokerMatchesOfficeFilter(profile.office_id, officeFilter),
     )
@@ -439,7 +444,7 @@ function buildBrokerProductivityRows(
       id: profile.id,
       email: profile.email ?? "",
       full_name: profile.full_name,
-      role: "broker" as const,
+      role: normalizeUserRole(profile.role),
       is_active: profile.is_active ?? true,
       is_blocked: profile.is_blocked ?? false,
       blocked_at: profile.blocked_at ?? null,
@@ -543,6 +548,7 @@ function buildBrokerProductivityRows(
       userId,
       name: getProfileDisplayName(profile),
       email: profile.email ?? "—",
+      role: profile.role,
       isActive: profile.is_active,
       officeId: profile.office_id,
       officeName: profile.office_id
@@ -591,9 +597,9 @@ function buildOfficeProductivitySummaries(
     raw.offices.map((office) => [office.id, office.name]),
   );
 
-  const brokerOfficeByUserId = new Map(
+  const userOfficeByUserId = new Map(
     raw.profiles
-      .filter((profile) => profile.role === "broker")
+      .filter((profile) => isBrokerProductivityEligibleRole(profile.role))
       .map((profile) => [profile.id, profile.office_id ?? null]),
   );
 
@@ -610,8 +616,8 @@ function buildOfficeProductivitySummaries(
     );
 
     const companies = raw.companies.filter((company) => {
-      const brokerOfficeId = brokerOfficeByUserId.get(company.user_id);
-      return brokerOfficeId === officeId;
+      const userOfficeId = userOfficeByUserId.get(company.user_id);
+      return userOfficeId === officeId;
     });
 
     const companyIds = new Set(companies.map((company) => company.id));
@@ -1009,8 +1015,8 @@ export async function fetchBrokerAdminDetail(
   }
 
   const profile = raw.profiles.find((item) => item.id === brokerId);
-  if (!profile || profile.role !== "broker") {
-    return { data: null, error: { message: "Broker not found." } };
+  if (!profile || !isBrokerProductivityEligibleRole(profile.role)) {
+    return { data: null, error: { message: "User not found." } };
   }
 
   const brokerRows = buildBrokerProductivityRows(raw);
@@ -1018,7 +1024,7 @@ export async function fetchBrokerAdminDetail(
     brokerRows.find((row) => row.userId === brokerId) ?? null;
 
   if (!metrics) {
-    return { data: null, error: { message: "Broker not found." } };
+    return { data: null, error: { message: "User not found." } };
   }
 
   const companies = raw.companies
@@ -1135,6 +1141,7 @@ export async function fetchBrokerAdminDetail(
         id: profile.id,
         name: metrics.name,
         email: profile.email ?? "—",
+        role: normalizeUserRole(profile.role),
         isActive: profile.is_active ?? true,
       },
       metrics,

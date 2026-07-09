@@ -1,5 +1,6 @@
 import { getFollowUpBucket } from "@/lib/followUps";
 import { isOpenOpportunityStage } from "@/lib/crmConstants";
+import { isBrokerProductivityEligibleRole } from "@/lib/brokerProductivity";
 import { supabase } from "@/lib/supabaseClient";
 import { verifyAdminAccess } from "@/lib/admin";
 import {
@@ -114,7 +115,9 @@ export async function fetchAdminDashboardStats(): Promise<{
     }),
   ) as UserProfile[];
 
-  const brokerProfiles = profiles.filter((profile) => profile.role === "broker");
+  const brokerProfiles = profiles.filter((profile) =>
+    isBrokerProductivityEligibleRole(profile.role),
+  );
   const companies = companiesResult.data ?? [];
   const contacts = contactsResult.data ?? [];
   const followUps = followUpsResult.data ?? [];

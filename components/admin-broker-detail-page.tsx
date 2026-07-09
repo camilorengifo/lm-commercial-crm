@@ -19,6 +19,7 @@ import {
 import {
   activityLevelLabel,
   formatPipelineValue,
+  productivityRoleLabel,
   PRODUCTIVITY_SCORE_EXPLANATION,
 } from "@/lib/brokerProductivity";
 import { formatDate, formatDateTime, formatSupabaseError } from "@/lib/crmFormat";
@@ -98,7 +99,7 @@ export function AdminBrokerDetailPage() {
       <AuthenticatedLayout maxWidthClass="max-w-[1400px]">
         <AdminSubNav />
         <p className="rounded-xl border border-zinc-200 bg-white p-6 text-sm text-zinc-600 shadow-sm">
-          Broker not found.
+          User not found.
         </p>
         <Link
           href="/admin/brokers"
@@ -127,7 +128,8 @@ export function AdminBrokerDetailPage() {
           </h1>
           <p className="mt-1 text-sm text-zinc-600">{detail.profile.email}</p>
           <p className="mt-1 text-sm text-zinc-500">
-            {detail.profile.isActive ? "Active broker" : "Inactive broker"} ·{" "}
+            {productivityRoleLabel(detail.profile.role)} ·{" "}
+            {detail.profile.isActive ? "Active" : "Inactive"} ·{" "}
             {activityLevelLabel(metrics.activityLevel)} · Productivity score{" "}
             {metrics.productivityScore}
           </p>

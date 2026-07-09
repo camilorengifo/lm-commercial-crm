@@ -22,6 +22,7 @@ import {
   activityLevelLabel,
   filterBrokersByActivityLevel,
   formatPipelineValue,
+  productivityRoleLabel,
   PRODUCTIVITY_SCORE_EXPLANATION,
   sortBrokerProductivityRows,
   type BrokerActivityLevel,
@@ -56,7 +57,7 @@ function BrokerProductivityTable({
   if (brokers.length === 0) {
     return (
       <p className="rounded-xl border border-zinc-200 bg-white p-6 text-sm text-zinc-500 shadow-sm">
-        No brokers match your current filters.
+        No team members match your current filters.
       </p>
     );
   }
@@ -67,7 +68,10 @@ function BrokerProductivityTable({
         <thead className="bg-zinc-50">
           <tr>
             <th className="px-4 py-3 text-left font-medium text-zinc-600">
-              Broker
+              Name
+            </th>
+            <th className="px-4 py-3 text-left font-medium text-zinc-600">
+              Role
             </th>
             <th className="px-4 py-3 text-left font-medium text-zinc-600">
               Office / Agency
@@ -118,6 +122,9 @@ function BrokerProductivityTable({
                     Inactive
                   </span>
                 )}
+              </td>
+              <td className="px-4 py-3 text-zinc-700">
+                {productivityRoleLabel(broker.role)}
               </td>
               <td className="px-4 py-3 text-zinc-700">{broker.officeName}</td>
               <td className="px-4 py-3 text-zinc-700">
@@ -324,11 +331,11 @@ export function AdminBrokersPage() {
     <AuthenticatedLayout maxWidthClass="max-w-[1400px]">
       <div className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-          Broker productivity
+          Broker &amp; admin productivity
         </h1>
         <p className="mt-2 text-sm text-zinc-600">
-          Compare broker activity, follow-up discipline, and pipeline results by
-          office / agency.
+          Compare broker and admin activity, follow-up discipline, and pipeline
+          results by office / agency.
         </p>
         <ProductivityScoreHint />
       </div>
@@ -354,7 +361,7 @@ export function AdminBrokersPage() {
             type="search"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Broker name or email..."
+            placeholder="Name or email..."
             className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
           />
         </div>
@@ -375,7 +382,7 @@ export function AdminBrokersPage() {
             className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
           >
             <option value="all">{ALL_OFFICES_LABEL}</option>
-            <option value="grouped">Brokers by office (grouped)</option>
+            <option value="grouped">Team by office (grouped)</option>
             <option value="unassigned">{UNASSIGNED_OFFICE_LABEL}</option>
             {offices.map((office) => (
               <option key={office.id} value={office.id}>
@@ -502,13 +509,13 @@ export function AdminBrokersPage() {
 
       <section>
         <h2 className="mb-4 text-lg font-medium text-zinc-900">
-          Broker productivity
+          Team productivity
         </h2>
 
         {officeFilter === "grouped" ? (
           groupedBrokers.length === 0 ? (
             <p className="rounded-xl border border-zinc-200 bg-white p-6 text-sm text-zinc-500 shadow-sm">
-              No brokers match your current filters.
+              No team members match your current filters.
             </p>
           ) : (
             <div className="space-y-8">

@@ -26,7 +26,7 @@ export function AdminSubNav() {
 
   const links = [
     { href: "/admin", label: "Overview" },
-    { href: "/admin/brokers", label: "Broker productivity" },
+    { href: "/admin/brokers", label: "Broker & admin productivity" },
     { href: "/admin/companies", label: "Companies" },
     { href: "/admin/users", label: "Users" },
   ];

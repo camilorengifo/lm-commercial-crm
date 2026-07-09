@@ -1,3 +1,15 @@
+import type { UserRole } from "@/lib/userProfile";
+
+export function isBrokerProductivityEligibleRole(
+  role: UserRole | string | null | undefined,
+): boolean {
+  return role === "broker" || role === "admin";
+}
+
+export function productivityRoleLabel(role: UserRole): string {
+  return role === "admin" ? "Admin" : "Broker";
+}
+
 export const PRODUCTIVITY_SCORE_EXPLANATION =
   "Score is based on recent follow-ups, notes, new accounts, contacts, opportunities, wins, and overdue items.";
 
