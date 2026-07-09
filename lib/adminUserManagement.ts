@@ -10,6 +10,14 @@ import { assertSafeInviteRedirect } from "@/lib/appUrl";
 import { sendInvitationEmail } from "@/lib/invitationEmail";
 import { createUserInvitation } from "@/lib/userInvitations";
 import { UNASSIGNED_OFFICE_LABEL } from "@/lib/offices";
+import {
+  assertPrimarySuperAdminNotRemovable,
+  assertSuperAdminRoleMutationAllowed,
+  canManageSuperAdminRole,
+  SuperAdminProtectionError,
+} from "@/lib/primarySuperAdmin";
+
+export { SuperAdminProtectionError };
 
 const CRM_OWNERSHIP_TABLES = [
   "companies",
@@ -213,6 +221,20 @@ async function getUserIdsWithCrmRecords(
   return userIds;
 }
 
+async function fetchActingAdminEmail(
+  admin: SupabaseClient,
+  actingAdminId: string,
+): Promise<string | null> {
+  const { data, error } = await admin
+    .from("profiles")
+    .select("email")
+    .eq("id", actingAdminId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data?.email ?? null;
+}
+
 export async function inviteAdminUser(input: {
   email: string;
   fullName: string;
@@ -230,6 +252,21 @@ export async function inviteAdminUser(input: {
   const email = input.email.trim();
   const fullName = input.fullName.trim();
   const role = input.role;
+
+  if (role === "super_admin") {
+    if (!input.actingAdminId) {
+      throw new SuperAdminProtectionError(
+        "Only the primary super admin can invite a super_admin user.",
+      );
+    }
+
+    const actingEmail = await fetchActingAdminEmail(admin, input.actingAdminId);
+    if (!canManageSuperAdminRole(actingEmail)) {
+      throw new SuperAdminProtectionError(
+        "Only the primary super admin can invite a super_admin user.",
+      );
+    }
+  }
 
   const existingAuthUser = await findAuthUserByEmail(admin, email);
 
@@ -281,16 +318,28 @@ export async function updateAdminUser(input: {
     throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured.");
   }
 
-  const { data: targetProfile, error: targetError } = await admin
-    .from("profiles")
-    .select("id, role, is_active")
-    .eq("id", input.targetUserId)
-    .maybeSingle();
+  const [{ data: targetProfile, error: targetError }, actingEmail] =
+    await Promise.all([
+      admin
+        .from("profiles")
+        .select("id, role, email, is_active")
+        .eq("id", input.targetUserId)
+        .maybeSingle(),
+      fetchActingAdminEmail(admin, input.actingAdminId),
+    ]);
 
   if (targetError) throw targetError;
   if (!targetProfile) {
     throw new Error("User not found.");
   }
+
+  assertSuperAdminRoleMutationAllowed({
+    actingEmail,
+    targetEmail: targetProfile.email,
+    currentRole: normalizeUserRole(targetProfile.role),
+    nextRole: input.role,
+    nextIsActive: input.isActive,
+  });
 
   if (
     input.role === "broker" &&
@@ -299,11 +348,14 @@ export async function updateAdminUser(input: {
     throw new Error("You cannot change your own role from admin to broker.");
   }
 
-  if (input.role === "broker" && targetProfile.role === "admin") {
+  if (
+    input.role === "broker" &&
+    (targetProfile.role === "admin" || targetProfile.role === "super_admin")
+  ) {
     const { count, error: countError } = await admin
       .from("profiles")
       .select("id", { count: "exact", head: true })
-      .eq("role", "admin")
+      .in("role", ["admin", "super_admin"])
       .eq("is_active", true);
 
     if (countError) throw countError;
@@ -491,11 +543,26 @@ async function assertCanRemoveAdminUser(
     throw new Error("User not found.");
   }
 
-  if (targetProfile.role === "admin") {
+  assertPrimarySuperAdminNotRemovable({
+    targetEmail: targetProfile.email,
+  });
+
+  if (
+    targetProfile.role === "super_admin" &&
+    !canManageSuperAdminRole(
+      await fetchActingAdminEmail(admin, actingAdminId),
+    )
+  ) {
+    throw new SuperAdminProtectionError(
+      "Only the primary super admin can remove a super_admin user.",
+    );
+  }
+
+  if (targetProfile.role === "admin" || targetProfile.role === "super_admin") {
     const { count, error: countError } = await admin
       .from("profiles")
       .select("id", { count: "exact", head: true })
-      .eq("role", "admin");
+      .in("role", ["admin", "super_admin"]);
 
     if (countError) throw countError;
     if ((count ?? 0) <= 1) {

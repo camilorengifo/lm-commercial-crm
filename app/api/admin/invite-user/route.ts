@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireAdminFromRequest } from "@/lib/adminAuthServer";
-import { inviteAdminUser } from "@/lib/adminUserManagement";
+import {
+  inviteAdminUser,
+  SuperAdminProtectionError,
+} from "@/lib/adminUserManagement";
 import { getInviteRedirectUrl } from "@/lib/appUrl";
 import { USER_ROLES, type UserRole } from "@/lib/userProfile";
 
@@ -64,6 +67,10 @@ export async function POST(request: Request) {
       redirectTo: getInviteRedirectUrl(),
     });
   } catch (error) {
+    if (error instanceof SuperAdminProtectionError) {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
+
     const message =
       error instanceof Error ? error.message : "Unable to invite user.";
 

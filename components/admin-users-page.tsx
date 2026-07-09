@@ -20,12 +20,16 @@ import {
 } from "@/components/admin-delete-user-modal";
 import { formatDate, formatDateTime } from "@/lib/crmFormat";
 import {
-  USER_ROLES,
   fetchUserProfile,
   isAdminProfile,
   type UserProfile,
   type UserRole,
 } from "@/lib/userProfile";
+import {
+  canManageSuperAdminRole,
+  getAssignableRolesForActor,
+  isPrimarySuperAdminEmail,
+} from "@/lib/primarySuperAdmin";
 import { supabase } from "@/lib/supabaseClient";
 import {
   fetchOffices,
@@ -67,6 +71,9 @@ export function AdminUsersPage() {
     message: string;
   } | null>(null);
   const [updateSuccess, setUpdateSuccess] = useState<string | null>(null);
+
+  const actingCanManageSuperAdmin = canManageSuperAdminRole(profile?.email);
+  const assignableRoles = getAssignableRolesForActor(profile?.email);
 
   const loadUsers = useCallback(async () => {
     setFetchError(null);
@@ -472,12 +479,17 @@ export function AdminUsersPage() {
               }
               className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
             >
-              {USER_ROLES.map((role) => (
+              {assignableRoles.map((role) => (
                 <option key={role} value={role}>
                   {role}
                 </option>
               ))}
             </select>
+            {!actingCanManageSuperAdmin && (
+              <p className="mt-1 text-xs text-zinc-500">
+                Only the primary super admin can invite a super_admin user.
+              </p>
+            )}
           </div>
 
           <div>
@@ -587,6 +599,22 @@ export function AdminUsersPage() {
                 const isSelf = row.id === user.id;
                 const isUpdating = updatingUserId === row.id;
                 const isDeleting = deletingUserId === row.id;
+                const isProtectedPrimary = isPrimarySuperAdminEmail(row.email);
+                const isTargetSuperAdmin = row.role === "super_admin";
+                const roleLocked =
+                  isProtectedPrimary ||
+                  (isSelf &&
+                    (row.role === "admin" || row.role === "super_admin")) ||
+                  (isTargetSuperAdmin && !actingCanManageSuperAdmin);
+                const roleOptions = Array.from(
+                  new Set<UserRole>([
+                    ...assignableRoles,
+                    ...(roleLocked ? [row.role] : []),
+                  ]),
+                );
+                const activeLocked = isSelf || isProtectedPrimary;
+                const deleteLocked =
+                  isSelf || isProtectedPrimary || isUpdating || isDeleting;
 
                 return (
                   <tr key={row.id}>
@@ -596,11 +624,16 @@ export function AdminUsersPage() {
                         {isSelf ? " (you)" : ""}
                       </div>
                       <div className="text-zinc-600">{row.email}</div>
+                      {isProtectedPrimary && (
+                        <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+                          Protected Super Admin
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-3 text-sm">
                       <select
                         value={row.role}
-                        disabled={isUpdating || (isSelf && row.role === "admin")}
+                        disabled={isUpdating || roleLocked}
                         onChange={(event) =>
                           handleRoleChange(
                             row.id,
@@ -609,12 +642,17 @@ export function AdminUsersPage() {
                         }
                         className="rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        {USER_ROLES.map((role) => (
+                        {roleOptions.map((role) => (
                           <option key={role} value={role}>
                             {role}
                           </option>
                         ))}
                       </select>
+                      {isProtectedPrimary && (
+                        <p className="mt-1 text-xs text-amber-800">
+                          Role locked as super_admin
+                        </p>
+                      )}
                     </td>
                     <td className="px-3 py-3 text-sm">
                       <select
@@ -636,7 +674,7 @@ export function AdminUsersPage() {
                     <td className="px-3 py-3 text-sm">
                       <select
                         value={row.isActive ? "active" : "inactive"}
-                        disabled={isUpdating || isSelf}
+                        disabled={isUpdating || activeLocked}
                         onChange={(event) =>
                           handleActiveChange(
                             row.id,
@@ -656,21 +694,30 @@ export function AdminUsersPage() {
                       {formatDateTime(row.lastSignInAt)}
                     </td>
                     <td className="px-3 py-3 text-sm">
-                      {row.ownsCrmRecords && (
-                        <p className="mb-2 max-w-xs text-xs text-amber-800">
-                          This user owns CRM records. You can reassign,
-                          deactivate, or proceed with deletion after
-                          confirmation.
+                      {isProtectedPrimary ? (
+                        <p className="max-w-xs text-xs text-amber-800">
+                          Protected Super Admin cannot be deleted or
+                          deactivated.
                         </p>
+                      ) : (
+                        <>
+                          {row.ownsCrmRecords && (
+                            <p className="mb-2 max-w-xs text-xs text-amber-800">
+                              This user owns CRM records. You can reassign,
+                              deactivate, or proceed with deletion after
+                              confirmation.
+                            </p>
+                          )}
+                          <button
+                            type="button"
+                            disabled={deleteLocked}
+                            onClick={() => handleDeleteClick(row)}
+                            className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {isDeleting ? "Removing..." : "Delete"}
+                          </button>
+                        </>
                       )}
-                      <button
-                        type="button"
-                        disabled={isSelf || isUpdating || isDeleting}
-                        onClick={() => handleDeleteClick(row)}
-                        className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {isDeleting ? "Removing..." : "Delete"}
-                      </button>
                     </td>
                   </tr>
                 );

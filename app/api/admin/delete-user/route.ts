@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  SuperAdminProtectionError,
   UserDeleteBlockedError,
   removeAdminUser,
   type AdminUserRemoveMode,
@@ -48,6 +49,10 @@ export async function DELETE(request: Request) {
 
     return NextResponse.json(result);
   } catch (error) {
+    if (error instanceof SuperAdminProtectionError) {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
+
     if (error instanceof UserDeleteBlockedError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }

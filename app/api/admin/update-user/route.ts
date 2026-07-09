@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireAdminFromRequest } from "@/lib/adminAuthServer";
-import { updateAdminUser } from "@/lib/adminUserManagement";
+import {
+  SuperAdminProtectionError,
+  updateAdminUser,
+} from "@/lib/adminUserManagement";
 import { USER_ROLES, type UserRole } from "@/lib/userProfile";
 
 interface UpdateUserBody {
@@ -48,6 +51,10 @@ export async function PATCH(request: Request) {
 
     return NextResponse.json(result);
   } catch (error) {
+    if (error instanceof SuperAdminProtectionError) {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
+
     const message =
       error instanceof Error ? error.message : "Unable to update user.";
 
