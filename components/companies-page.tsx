@@ -12,7 +12,6 @@ import { CompaniesBulkPauseModal } from "@/components/companies-bulk-pause-modal
 import {
   COMPANY_PRIORITIES,
   COUNTRY_OPTIONS,
-  DEFAULT_SALES_STAGE,
   SALES_STAGES,
   priorityBadgeClass,
   salesStageBadgeClass,
@@ -59,6 +58,15 @@ import {
   filterNonEmptyContacts,
   type CompanyCreateContactForm,
 } from "@/lib/companyCreateContacts";
+import {
+  clearAddCompanyDraft,
+  EMPTY_ADD_COMPANY_FORM,
+  formatDraftSavedTime,
+  isAddCompanyFormEmpty,
+  loadAddCompanyDraft,
+  saveAddCompanyDraft,
+  type AddCompanyFormState,
+} from "@/lib/addCompanyDraft";
 import { createCompany } from "@/lib/companyClient";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -66,16 +74,7 @@ interface Company extends CompanyRecord {
   sales_stage: SalesStage;
 }
 
-const EMPTY_FORM = {
-  name: "",
-  city: "",
-  state: "",
-  country: "United States",
-  priority: "Medium" as CompanyPriority,
-  sales_stage: DEFAULT_SALES_STAGE,
-  general_notes: "",
-  last_contact_at: "",
-};
+const ADD_COMPANY_AUTOSAVE_MS = 500;
 
 export function CompaniesPage() {
   const router = useRouter();
@@ -90,11 +89,13 @@ export function CompaniesPage() {
     useState<AccountStatusFilter>("working");
   const [sortBy, setSortBy] = useState<CompanySortOption>("name_asc");
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
+  const [form, setForm] = useState<AddCompanyFormState>(EMPTY_ADD_COMPANY_FORM);
   const [contactRows, setContactRows] = useState<CompanyCreateContactForm[]>([
     EMPTY_COMPANY_CREATE_CONTACT,
   ]);
   const [contactsSectionOpen, setContactsSectionOpen] = useState(false);
+  const [storedDraftAvailable, setStoredDraftAvailable] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -116,6 +117,12 @@ export function CompaniesPage() {
     CompanyOwnershipDebugRow[]
   >([]);
   const fetchGuardRef = useRef(createAuthFetchGuard());
+  const skipDraftAutosaveRef = useRef(false);
+
+  const formHasContent = useMemo(
+    () => !isAddCompanyFormEmpty(form, contactRows),
+    [form, contactRows],
+  );
 
   const fetchCompanies = useCallback(async (userId: string, email: string | null) => {
     const fetchGeneration = fetchGuardRef.current.next();
@@ -271,6 +278,45 @@ export function CompaniesPage() {
     return () => subscription.unsubscribe();
   }, [router, fetchCompanies]);
 
+  useEffect(() => {
+    if (!showForm || !user || skipDraftAutosaveRef.current) {
+      skipDraftAutosaveRef.current = false;
+      return;
+    }
+
+    if (!formHasContent) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const saved = saveAddCompanyDraft(user.id, {
+        form,
+        contactRows,
+        contactsSectionOpen,
+      });
+      if (saved) {
+        setDraftSavedAt(saved.savedAt);
+        setStoredDraftAvailable(false);
+      }
+    }, ADD_COMPANY_AUTOSAVE_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [showForm, user, form, contactRows, contactsSectionOpen, formHasContent]);
+
+  useEffect(() => {
+    if (!showForm || !formHasContent) {
+      return;
+    }
+
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [showForm, formHasContent]);
+
   const countryOptions = useMemo(() => {
     const values = new Set<string>();
     for (const company of companies) {
@@ -398,10 +444,93 @@ export function CompaniesPage() {
   }
 
   function resetCreateForm() {
-    setForm(EMPTY_FORM);
+    setForm(EMPTY_ADD_COMPANY_FORM);
     setContactRows([EMPTY_COMPANY_CREATE_CONTACT]);
     setContactsSectionOpen(false);
     setFormError(null);
+    setStoredDraftAvailable(false);
+    setDraftSavedAt(null);
+  }
+
+  function openCreateForm() {
+    setFormError(null);
+    setShowForm(true);
+
+    if (!user) {
+      return;
+    }
+
+    const stored = loadAddCompanyDraft(user.id);
+    if (stored && isAddCompanyFormEmpty(form, contactRows)) {
+      setStoredDraftAvailable(true);
+      setDraftSavedAt(stored.savedAt);
+    } else {
+      setStoredDraftAvailable(false);
+      if (!stored) {
+        setDraftSavedAt(null);
+      }
+    }
+  }
+
+  function handleRestoreDraft() {
+    if (!user) {
+      return;
+    }
+
+    const stored = loadAddCompanyDraft(user.id);
+    if (!stored) {
+      setStoredDraftAvailable(false);
+      return;
+    }
+
+    skipDraftAutosaveRef.current = true;
+    setForm(stored.data.form);
+    setContactRows(stored.data.contactRows);
+    setContactsSectionOpen(stored.data.contactsSectionOpen);
+    setStoredDraftAvailable(false);
+    setDraftSavedAt(stored.savedAt);
+    setFormError(null);
+  }
+
+  function handleDiscardStoredDraft() {
+    if (!user) {
+      return;
+    }
+
+    clearAddCompanyDraft(user.id);
+    resetCreateForm();
+  }
+
+  function requestCloseCreateForm() {
+    if (!formHasContent) {
+      setShowForm(false);
+      resetCreateForm();
+      return;
+    }
+
+    const discard = window.confirm(
+      "Discard this unsaved company draft?\n\nClick OK to discard the draft, or Cancel to keep it saved locally.",
+    );
+
+    if (discard) {
+      if (user) {
+        clearAddCompanyDraft(user.id);
+      }
+      setShowForm(false);
+      resetCreateForm();
+      return;
+    }
+
+    setShowForm(false);
+  }
+
+  function toggleCreateForm() {
+    if (showForm) {
+      requestCloseCreateForm();
+      return;
+    }
+
+    openCreateForm();
   }
 
   function addContactRow() {
@@ -474,6 +603,10 @@ export function CompaniesPage() {
       return;
     }
 
+    if (user) {
+      clearAddCompanyDraft(user.id);
+    }
+
     resetCreateForm();
     setShowForm(false);
     setSubmitting(false);
@@ -528,10 +661,7 @@ export function CompaniesPage() {
           actions={
             <button
               type="button"
-              onClick={() => {
-                setShowForm((prev) => !prev);
-                setFormError(null);
-              }}
+              onClick={toggleCreateForm}
               className="crm-btn-primary"
             >
               {showForm ? "Cancel" : "Add Company"}
@@ -710,6 +840,39 @@ export function CompaniesPage() {
         {showForm && (
           <CrmCard className="mb-8" padding>
             <SectionHeader title="New Company" className="mb-5" />
+
+            {storedDraftAvailable && (
+              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                <p className="font-medium">You have an unsaved company draft.</p>
+                {draftSavedAt && (
+                  <p className="mt-1 text-amber-800">
+                    Last saved at {formatDraftSavedTime(draftSavedAt)}.
+                  </p>
+                )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleRestoreDraft}
+                    className="crm-btn-primary crm-btn-sm"
+                  >
+                    Restore draft
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDiscardStoredDraft}
+                    className="crm-btn-secondary crm-btn-sm"
+                  >
+                    Discard draft
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!storedDraftAvailable && draftSavedAt && formHasContent && (
+              <p className="mb-4 text-xs text-slate-500">
+                Draft saved at {formatDraftSavedTime(draftSavedAt)}
+              </p>
+            )}
 
             <form onSubmit={handleSubmit} className="space-y-5">
               <SectionHeader
@@ -921,10 +1084,7 @@ export function CompaniesPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowForm(false);
-                    resetCreateForm();
-                  }}
+                  onClick={requestCloseCreateForm}
                   className="crm-btn-secondary"
                 >
                   Cancel
