@@ -18,8 +18,10 @@ import {
   ADMIN_COMPANY_PRIORITIES,
   attentionBadgeClass,
   attentionBadgeLabel,
+  computeAdminCompaniesSummary,
   fetchAdminCompaniesOversight,
   filterAdminCompanies,
+  formatAssignableOwnerLabel,
   getAssignableCompanyOwners,
   type AdminCompaniesBrokerOption,
   type AdminCompaniesOversightData,
@@ -145,12 +147,42 @@ export function AdminCompaniesPage() {
     );
   }, [oversight, selectedCompanyIds]);
 
+  const filteredSummary = useMemo(
+    () => computeAdminCompaniesSummary(filteredCompanies),
+    [filteredCompanies],
+  );
+
+  const ownerFilterOptions = useMemo(() => {
+    if (!oversight) {
+      return [];
+    }
+
+    const merged = new Map<string, AdminCompaniesBrokerOption>();
+    for (const owner of oversight.brokers) {
+      merged.set(owner.userId, owner);
+    }
+    for (const owner of assignableOwners) {
+      merged.set(owner.userId, owner);
+    }
+
+    return Array.from(merged.values()).sort((a, b) => {
+      const roleOrder = a.role === b.role ? 0 : a.role === "admin" ? -1 : 1;
+      if (roleOrder !== 0) {
+        return roleOrder;
+      }
+
+      return a.name.localeCompare(b.name);
+    });
+  }, [oversight, assignableOwners]);
+
   const activeBrokerOwnershipSummary = useMemo(() => {
     if (brokerFilter === "all" || !oversight) {
       return null;
     }
 
-    const broker = oversight.brokers.find((item) => item.userId === brokerFilter);
+    const broker =
+      ownerFilterOptions.find((item) => item.userId === brokerFilter) ??
+      oversight.brokers.find((item) => item.userId === brokerFilter);
     if (!broker) {
       return null;
     }
@@ -164,7 +196,7 @@ export function AdminCompaniesPage() {
       ownedCount,
       filteredCount: filteredCompanies.length,
     };
-  }, [brokerFilter, oversight, filteredCompanies.length]);
+  }, [brokerFilter, oversight, filteredCompanies.length, ownerFilterOptions]);
 
   const visibleCompanyIds = useMemo(
     () => filteredCompanies.map((company) => company.companyId),
@@ -254,7 +286,9 @@ export function AdminCompaniesPage() {
   if (loading) {
     return (
       <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50">
-        <p className="text-sm text-zinc-500">Loading...</p>
+        <p className="text-sm text-zinc-500">
+          Loading companies oversight…
+        </p>
       </div>
     );
   }
@@ -267,7 +301,17 @@ export function AdminCompaniesPage() {
     return null;
   }
 
-  const { summary } = oversight;
+  const { summary: unfilteredSummary } = oversight;
+  const summary = filteredSummary;
+  const hasActiveFilters =
+    searchQuery.trim() !== "" ||
+    brokerFilter !== "all" ||
+    officeFilter !== "all" ||
+    priorityFilter !== "all" ||
+    countryFilter !== "all" ||
+    attentionFilter !== "all" ||
+    lifecycleFilter !== "active" ||
+    accountStatusFilter !== "working";
 
   return (
     <AuthenticatedLayout maxWidthClass="max-w-[1400px]">
@@ -276,9 +320,9 @@ export function AdminCompaniesPage() {
           Companies oversight
         </h1>
         <p className="mt-2 text-sm text-zinc-600">
-          All companies across brokers. Broker visibility is driven by{" "}
-          <span className="font-medium">companies.user_id</span> — use this page
-          to verify owner email and reassign accounts to the correct broker.
+          Global company book across brokers and admins. Owner visibility is
+          driven by <span className="font-medium">companies.user_id</span> —
+          use this page to verify owner email and reassign accounts.
         </p>
       </div>
 
@@ -335,6 +379,13 @@ export function AdminCompaniesPage() {
         />
       </StatGrid>
 
+      {hasActiveFilters && (
+        <p className="mb-5 text-sm text-zinc-500">
+          Summary reflects current filters ({summary.totalCompanies} of{" "}
+          {unfilteredSummary.totalCompanies} total companies loaded).
+        </p>
+      )}
+
       <div className="mb-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <div className="xl:col-span-2">
           <label
@@ -358,7 +409,7 @@ export function AdminCompaniesPage() {
             htmlFor="broker-filter"
             className="mb-1.5 block text-sm font-medium text-zinc-700"
           >
-            Broker
+            Owner
           </label>
           <select
             id="broker-filter"
@@ -366,10 +417,10 @@ export function AdminCompaniesPage() {
             onChange={(event) => setBrokerFilter(event.target.value)}
             className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
           >
-            <option value="all">All brokers</option>
-            {oversight.brokers.map((broker) => (
-              <option key={broker.userId} value={broker.userId}>
-                {broker.name} ({broker.email})
+            <option value="all">All owners</option>
+            {ownerFilterOptions.map((owner) => (
+              <option key={owner.userId} value={owner.userId}>
+                {formatAssignableOwnerLabel(owner)}
               </option>
             ))}
           </select>
@@ -585,7 +636,7 @@ export function AdminCompaniesPage() {
                   Company
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-zinc-600">
-                  Owner broker
+                  Owner
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-zinc-600">
                   Owner user ID

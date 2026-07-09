@@ -1,8 +1,16 @@
 import { normalizeAccountStatus, type AccountStatus, type AccountStatusFilter } from "@/lib/accountStatus";
 import { COMPANY_PRIORITIES, isOpenOpportunityStage } from "@/lib/crmConstants";
-import { getOpportunityPipelineValue } from "@/lib/brokerProductivity";
+import {
+  getOpportunityPipelineValue,
+  isBrokerProductivityEligibleRole,
+} from "@/lib/brokerProductivity";
 import { getFollowUpBucket } from "@/lib/followUps";
-import { getProfileDisplayName, type UserProfile, type UserRole } from "@/lib/userProfile";
+import {
+  getProfileDisplayName,
+  normalizeUserRole,
+  type UserProfile,
+  type UserRole,
+} from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
 import { verifyAdminAccess } from "@/lib/admin";
 import {
@@ -11,6 +19,7 @@ import {
 } from "@/lib/offices";
 
 const INACTIVITY_DAYS = 30;
+export const OVERSIGHT_FETCH_PAGE_SIZE = 1000;
 
 export type AdminCompanyLifecycleStatus = "active" | "archived" | "all";
 
@@ -293,6 +302,164 @@ function matchesAdminAccountStatusFilter(
   return status === filter;
 }
 
+async function fetchAllPaginatedRows<T>(input: {
+  fetchPage: (
+    from: number,
+    to: number,
+  ) => Promise<{
+    data: T[] | null;
+    error: { message?: string } | null;
+  }>;
+}): Promise<{ data: T[]; error: { message?: string } | null }> {
+  const rows: T[] = [];
+  let offset = 0;
+
+  while (true) {
+    const { data, error } = await input.fetchPage(
+      offset,
+      offset + OVERSIGHT_FETCH_PAGE_SIZE - 1,
+    );
+
+    if (error) {
+      return { data: [], error };
+    }
+
+    const batch = data ?? [];
+    rows.push(...batch);
+
+    if (batch.length < OVERSIGHT_FETCH_PAGE_SIZE) {
+      break;
+    }
+
+    offset += OVERSIGHT_FETCH_PAGE_SIZE;
+  }
+
+  return { data: rows, error: null };
+}
+
+const COMPANY_OVERSIGHT_SELECT =
+  "id, user_id, name, country, priority, last_contact_at, next_follow_up_at, created_at, deleted_at, delete_reason, account_status, account_disposition";
+
+export async function fetchAllCompaniesForOversight(): Promise<{
+  data: Array<{
+    id: string;
+    user_id: string;
+    name: string;
+    country: string | null;
+    priority: string;
+    last_contact_at: string | null;
+    next_follow_up_at: string | null;
+    created_at: string;
+    deleted_at: string | null;
+    delete_reason: string | null;
+    account_status: string | null;
+    account_disposition: string | null;
+  }>;
+  error: { message?: string } | null;
+}> {
+  return fetchAllPaginatedRows({
+    fetchPage: async (from, to) => {
+      const { data, error } = await supabase
+        .from("companies")
+        .select(COMPANY_OVERSIGHT_SELECT)
+        .order("name", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to);
+
+      return {
+        data: data as Array<{
+          id: string;
+          user_id: string;
+          name: string;
+          country: string | null;
+          priority: string;
+          last_contact_at: string | null;
+          next_follow_up_at: string | null;
+          created_at: string;
+          deleted_at: string | null;
+          delete_reason: string | null;
+          account_status: string | null;
+          account_disposition: string | null;
+        }> | null,
+        error,
+      };
+    },
+  });
+}
+
+function profileToUserProfile(profile: {
+  id: string;
+  email: string | null;
+  full_name: string | null;
+  role: string;
+  is_active: boolean | null;
+  is_blocked: boolean | null;
+  blocked_at: string | null;
+  blocked_reason: string | null;
+}): UserProfile {
+  return {
+    id: profile.id,
+    email: profile.email,
+    full_name: profile.full_name,
+    role: normalizeUserRole(profile.role),
+    is_active: profile.is_active ?? true,
+    is_blocked: profile.is_blocked ?? false,
+    blocked_at: profile.blocked_at ?? null,
+    blocked_reason: profile.blocked_reason ?? null,
+  };
+}
+
+function buildOversightOwnerOptions(input: {
+  profiles: Array<{
+    id: string;
+    email: string | null;
+    full_name: string | null;
+    role: string;
+    is_active: boolean | null;
+    is_blocked: boolean | null;
+    blocked_at: string | null;
+    blocked_reason: string | null;
+  }>;
+  companyOwnerIds: Iterable<string>;
+}): AdminCompaniesBrokerOption[] {
+  const userProfiles = input.profiles.map((profile) =>
+    profileToUserProfile(profile),
+  );
+  const ownersById = new Map(
+    getAssignableCompanyOwners(userProfiles).map((owner) => [
+      owner.userId,
+      owner,
+    ]),
+  );
+
+  for (const userId of input.companyOwnerIds) {
+    if (ownersById.has(userId)) {
+      continue;
+    }
+
+    const profile = input.profiles.find((item) => item.id === userId);
+    if (!profile || !isBrokerProductivityEligibleRole(profile.role)) {
+      continue;
+    }
+
+    ownersById.set(userId, {
+      userId: profile.id,
+      name: getProfileDisplayName(profileToUserProfile(profile)),
+      email: profile.email ?? "—",
+      role: normalizeUserRole(profile.role),
+    });
+  }
+
+  return Array.from(ownersById.values()).sort((a, b) => {
+    const roleOrder = a.role === b.role ? 0 : a.role === "admin" ? -1 : 1;
+    if (roleOrder !== 0) {
+      return roleOrder;
+    }
+
+    return a.name.localeCompare(b.name);
+  });
+}
+
 export async function fetchAdminCompaniesOversight(): Promise<{
   data: AdminCompaniesOversightData | null;
   error: { message?: string } | null;
@@ -322,22 +489,59 @@ export async function fetchAdminCompaniesOversight(): Promise<{
       .select("id, name, city, is_active")
       .eq("is_active", true)
       .order("name"),
-    supabase
-      .from("companies")
-      .select(
-        "id, user_id, name, country, priority, last_contact_at, next_follow_up_at, created_at, deleted_at, delete_reason, account_status, account_disposition",
-      )
-      .order("name", { ascending: true }),
-    supabase.from("contacts").select("id, company_id"),
-    supabase.from("activities").select("company_id, activity_at"),
-    supabase
-      .from("follow_ups")
-      .select("company_id, due_at, status"),
-    supabase
-      .from("load_opportunities")
-      .select(
-        "company_id, status, estimated_revenue_usd, quoted_rate, target_rate",
-      ),
+    fetchAllCompaniesForOversight(),
+    fetchAllPaginatedRows<{ id: string; company_id: string }>({
+      fetchPage: async (from, to) => {
+        const { data, error } = await supabase
+          .from("contacts")
+          .select("id, company_id")
+          .order("id", { ascending: true })
+          .range(from, to);
+
+        return { data, error };
+      },
+    }),
+    fetchAllPaginatedRows<{ company_id: string; activity_at: string }>({
+      fetchPage: async (from, to) => {
+        const { data, error } = await supabase
+          .from("activities")
+          .select("company_id, activity_at")
+          .order("id", { ascending: true })
+          .range(from, to);
+
+        return { data, error };
+      },
+    }),
+    fetchAllPaginatedRows<{ company_id: string; due_at: string; status: string }>({
+      fetchPage: async (from, to) => {
+        const { data, error } = await supabase
+          .from("follow_ups")
+          .select("company_id, due_at, status")
+          .order("id", { ascending: true })
+          .range(from, to);
+
+        return { data, error };
+      },
+    }),
+    fetchAllPaginatedRows<{
+      company_id: string;
+      status: string;
+      estimated_revenue_usd: number | null;
+      quoted_rate: number | null;
+      target_rate: number | null;
+    }>({
+      fetchPage: async (from, to) => {
+        const { data, error } = await supabase
+          .from("load_opportunities")
+          .select(
+            "company_id, status, estimated_revenue_usd, quoted_rate, target_rate",
+          )
+          .order("id", { ascending: true })
+          .range(from, to);
+
+        return { data, error };
+      },
+    }),
   ]);
 
   const firstError =
@@ -361,11 +565,11 @@ export async function fetchAdminCompaniesOversight(): Promise<{
     isActive: office.is_active ?? true,
   }));
   const officeNameById = new Map(offices.map((office) => [office.id, office.name]));
-  const companies = companiesResult.data ?? [];
-  const contacts = contactsResult.data ?? [];
-  const activities = activitiesResult.data ?? [];
-  const followUps = followUpsResult.data ?? [];
-  const opportunities = opportunitiesResult.data ?? [];
+  const companies = companiesResult.data;
+  const contacts = contactsResult.data;
+  const activities = activitiesResult.data;
+  const followUps = followUpsResult.data;
+  const opportunities = opportunitiesResult.data;
 
   const profileById = new Map(
     profiles.map((profile) => [
@@ -459,7 +663,7 @@ export async function fetchAdminCompaniesOversight(): Promise<{
           blocked_at: profile.blocked_at,
           blocked_reason: profile.blocked_reason,
         })
-      : "Unknown broker";
+      : "Unknown owner";
     const brokerEmail = profile?.email ?? "—";
     const brokerOfficeId = profile?.office_id ?? null;
     const brokerOfficeName = brokerOfficeId
@@ -529,35 +733,10 @@ export async function fetchAdminCompaniesOversight(): Promise<{
     };
   });
 
-  const brokers: AdminCompaniesBrokerOption[] = Array.from(brokerIds)
-    .map((userId) => {
-      const profile = profileById.get(userId);
-      if (!profile) {
-        return {
-          userId,
-          name: "Unknown broker",
-          email: "—",
-          role: "broker" as const,
-        };
-      }
-
-      return {
-        userId,
-        name: getProfileDisplayName({
-          id: profile.id,
-          email: profile.email,
-          full_name: profile.full_name,
-          role: profile.role as "admin" | "broker",
-          is_active: profile.is_active,
-          is_blocked: profile.is_blocked,
-          blocked_at: profile.blocked_at,
-          blocked_reason: profile.blocked_reason,
-        }),
-        email: profile.email,
-        role: profile.role as UserRole,
-      };
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const brokers = buildOversightOwnerOptions({
+    profiles,
+    companyOwnerIds: brokerIds,
+  });
 
   const countries = Array.from(countrySet).sort((a, b) => a.localeCompare(b));
 
