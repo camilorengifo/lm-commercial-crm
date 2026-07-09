@@ -13,11 +13,15 @@ import {
   isPasswordRecoveryPending,
   setPasswordRecoveryPending,
 } from "@/lib/passwordRecovery";
-import { supabase } from "@/lib/supabaseClient";
 import {
-  fetchUserProfile,
-  isActiveProfile,
-} from "@/lib/userProfile";
+  confirmAuthSession,
+  logLoginError,
+  navigateAfterLogin,
+  resolvePostLoginRoute,
+  SESSION_CHECK_TIMEOUT_MS,
+  validateProfileForLogin,
+} from "@/lib/postLoginNavigation";
+import { supabase } from "@/lib/supabaseClient";
 
 function formatSignInError(error: AuthError): string {
   const message = error.message ?? "";
@@ -68,51 +72,88 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
-    const search = window.location.search;
-    const hash = window.location.hash;
-    const authCallbackPath = redirectPathForAuthCallback(search, hash);
+    let cancelled = false;
 
-    if (authCallbackPath && authCallbackPath !== "/login") {
-      router.replace(buildAuthCallbackRedirect(authCallbackPath, search, hash));
-      return;
-    }
+    const checkingTimeout = window.setTimeout(() => {
+      if (!cancelled) {
+        setCheckingSession(false);
+        setError(
+          (current) =>
+            current ?? "Session check timed out. You can sign in below.",
+        );
+      }
+    }, SESSION_CHECK_TIMEOUT_MS);
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
+      // Password-recovery only. Manual sign-in redirects explicitly in handleSubmit.
       if (event === "PASSWORD_RECOVERY" && session) {
         setPasswordRecoveryPending();
         router.replace("/reset-password");
+        router.refresh();
       }
     });
 
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!session) {
-        setCheckingSession(false);
-        return;
+    async function checkExistingSession() {
+      try {
+        const search = window.location.search;
+        const hash = window.location.hash;
+        const authCallbackPath = redirectPathForAuthCallback(search, hash);
+
+        if (authCallbackPath && authCallbackPath !== "/login") {
+          router.replace(buildAuthCallbackRedirect(authCallbackPath, search, hash));
+          return;
+        }
+
+        if (isPasswordRecoveryPending()) {
+          router.replace("/reset-password");
+          return;
+        }
+
+        const session = await confirmAuthSession();
+        if (cancelled || !session) {
+          return;
+        }
+
+        if (sessionNeedsPasswordSetup(session)) {
+          const route = "/set-password";
+          router.replace(route);
+          router.refresh();
+          return;
+        }
+
+        const profileResult = await validateProfileForLogin(session);
+        if (!profileResult.ok && !cancelled) {
+          if (profileResult.inactive) {
+            setInactiveNotice(true);
+          }
+          setError(profileResult.message);
+          return;
+        }
+
+        const route = resolvePostLoginRoute(session);
+        await navigateAfterLogin(router, route);
+      } catch (sessionError) {
+        logLoginError("existing session check failed", sessionError);
+        if (!cancelled) {
+          setError("Unable to verify your session. Please sign in.");
+        }
+      } finally {
+        if (!cancelled) {
+          window.clearTimeout(checkingTimeout);
+          setCheckingSession(false);
+        }
       }
+    }
 
-      if (isPasswordRecoveryPending()) {
-        router.replace("/reset-password");
-        return;
-      }
+    void checkExistingSession();
 
-      const { data: profile } = await fetchUserProfile(session.user.id);
-      if (profile && !isActiveProfile(profile)) {
-        await supabase.auth.signOut();
-        setCheckingSession(false);
-        return;
-      }
-
-      if (sessionNeedsPasswordSetup(session)) {
-        router.replace("/set-password");
-        return;
-      }
-
-      router.replace("/");
-    });
-
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(checkingTimeout);
+      subscription.unsubscribe();
+    };
   }, [router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -120,44 +161,60 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
 
+    const submitTimeout = window.setTimeout(() => {
+      setLoading(false);
+      setError(
+        (current) =>
+          current ??
+          "Sign-in is taking longer than expected. Please try again.",
+      );
+    }, SESSION_CHECK_TIMEOUT_MS);
+
     try {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      if (process.env.NODE_ENV === "development") {
+        console.info("[login] sign-in started");
+      }
+
+      const { data, error: signInError } = await supabase.auth.signInWithPassword(
+        {
+          email,
+          password,
+        },
+      );
 
       if (signInError) {
-        console.error("Supabase sign-in error (full):", signInError);
+        logLoginError("sign-in failed", signInError);
         setError(formatSignInError(signInError));
-        setLoading(false);
         return;
       }
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (session) {
-        const { data: profile } = await fetchUserProfile(session.user.id);
-        if (profile && !isActiveProfile(profile)) {
-          await supabase.auth.signOut();
-          setError(
-            "Your CRM access is inactive. Please contact an administrator.",
-          );
-          setLoading(false);
-          return;
-        }
-
-        if (sessionNeedsPasswordSetup(session)) {
-          router.replace("/set-password");
-          return;
-        }
+      if (process.env.NODE_ENV === "development") {
+        console.info("[login] sign-in succeeded");
       }
 
-      router.replace("/");
+      const session = await confirmAuthSession(data.session);
+      if (!session) {
+        setError("Signed in, but no session was available. Please try again.");
+        return;
+      }
+
+      const profileResult = await validateProfileForLogin(session);
+      if (!profileResult.ok) {
+        if (profileResult.inactive) {
+          setInactiveNotice(true);
+        }
+        setError(profileResult.message);
+        return;
+      }
+
+      // Explicit navigation after signInWithPassword — never wait for onAuthStateChange.
+      const route = resolvePostLoginRoute(session);
+      await navigateAfterLogin(router, route);
     } catch (signInException) {
-      console.error("Unexpected sign-in error:", signInException);
+      logLoginError("unexpected sign-in error", signInException);
       setError(formatUnexpectedSignInError(signInException));
+    } finally {
+      window.clearTimeout(submitTimeout);
       setLoading(false);
     }
   }
