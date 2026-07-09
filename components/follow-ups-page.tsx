@@ -647,19 +647,21 @@ export function FollowUpsPage() {
         const { data: allProfiles } = await fetchAllProfiles();
         setBrokers(
           (allProfiles ?? []).filter(
-            (item) => item.role === "broker" && item.is_active,
+            (item) =>
+              item.is_active !== false &&
+              (item.role === "broker" || item.role === "admin"),
           ),
         );
       }
 
-      await loadFollowUps(session.user.id, false);
+      await loadFollowUps(session.user.id, admin);
       setLoading(false);
     });
   }, [router, loadFollowUps]);
 
   useEffect(() => {
     if (statusFilter !== "cancelled" || !user) return;
-    loadCancelled(user.id, false);
+    loadCancelled(user.id, isAdmin);
   }, [statusFilter, user, isAdmin, loadCancelled]);
 
   const buckets = useMemo(
@@ -764,9 +766,9 @@ export function FollowUpsPage() {
 
   async function refreshData() {
     if (!user) return;
-    await loadFollowUps(user.id, false);
+    await loadFollowUps(user.id, isAdmin);
     if (statusFilter === "cancelled") {
-      await loadCancelled(user.id, false);
+      await loadCancelled(user.id, isAdmin);
     }
   }
 

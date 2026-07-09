@@ -11,6 +11,57 @@ import {
 import { enforceBrokerOwnedRows, fetchOwnedCompanyIdsForViewer } from "@/lib/brokerDataAccess";
 import { supabase } from "@/lib/supabaseClient";
 
+const IN_FILTER_CHUNK_SIZE = 80;
+
+function logFollowUpsQueryError(
+  context: string,
+  error: { message?: string; code?: string; details?: string } | null,
+): void {
+  if (process.env.NODE_ENV !== "development" || !error) {
+    return;
+  }
+
+  console.error("[follow-ups]", context, {
+    message: error.message,
+    code: error.code,
+    details: error.details,
+  });
+}
+
+async function fetchCompanyRowsByIds(
+  companyIds: string[],
+  select: string,
+  options?: { userId?: string; personalOnly?: boolean },
+): Promise<{
+  data: Record<string, unknown>[];
+  error: { message?: string; code?: string; details?: string } | null;
+}> {
+  if (companyIds.length === 0) {
+    return { data: [], error: null };
+  }
+
+  const rows: Record<string, unknown>[] = [];
+
+  for (let index = 0; index < companyIds.length; index += IN_FILTER_CHUNK_SIZE) {
+    const chunk = companyIds.slice(index, index + IN_FILTER_CHUNK_SIZE);
+    let query = supabase.from("companies").select(select).in("id", chunk);
+
+    if (options?.personalOnly && options.userId) {
+      query = query.eq("user_id", options.userId).is("deleted_at", null);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      logFollowUpsQueryError("fetchCompanyRowsByIds", error);
+      return { data: [], error };
+    }
+
+    rows.push(...((data ?? []) as unknown as Record<string, unknown>[]));
+  }
+
+  return { data: rows, error: null };
+}
+
 export const FOLLOW_UP_PENDING_LIMIT = 200;
 export const FOLLOW_UP_COMPLETED_LIMIT = 100;
 
@@ -211,7 +262,7 @@ async function resolvePersonalFollowUpCompanyScope(
   asAdmin: boolean,
 ): Promise<{
   ownedCompanyIds: Set<string> | null;
-  error: { message?: string } | null;
+  error: { message?: string; code?: string; details?: string } | null;
 }> {
   if (asAdmin) {
     return { ownedCompanyIds: null, error: null };
@@ -220,6 +271,7 @@ async function resolvePersonalFollowUpCompanyScope(
   const { data, error } = await fetchOwnedCompanyIdsForViewer(userId);
 
   if (error) {
+    logFollowUpsQueryError("resolvePersonalFollowUpCompanyScope", error);
     return { ownedCompanyIds: null, error };
   }
 
@@ -242,23 +294,22 @@ async function fetchCompaniesForFollowUps(
     return { data: [], error: null };
   }
 
-  let query = supabase
-    .from("companies")
-    .select("id, name, priority, user_id, account_status")
-    .in("id", companyIds);
+  const { data, error } = await fetchCompanyRowsByIds(
+    companyIds,
+    "id, name, priority, user_id, account_status",
+    asAdmin ? undefined : { userId, personalOnly: true },
+  );
 
-  if (!asAdmin) {
-    query = query.eq("user_id", userId).is("deleted_at", null);
+  if (error) {
+    return { data: [], error };
   }
 
-  const { data, error } = await query;
-
   return {
-    data: enforceBrokerOwnedRows((data as CompanyJoinRow[]) ?? [], userId, {
+    data: enforceBrokerOwnedRows(data as unknown as CompanyJoinRow[], userId, {
       page: "fetchCompaniesForFollowUps",
       brokerFacingRoute: !asAdmin,
     }),
-    error,
+    error: null,
   };
 }
 
@@ -449,18 +500,28 @@ export async function fetchPendingFollowUpsWithCompanies(
 
   const companyIds = [...new Set(rows.map((row) => row.company_id))];
 
-  const { data: companies, error: companyError } = await supabase
-    .from("companies")
-    .select("id, name")
-    .eq("user_id", userId)
-    .in("id", companyIds);
+  if (companyIds.length === 0) {
+    return {
+      data: rows.map((row) => ({
+        ...row,
+        companyName: "Unknown company",
+      })),
+      error: null,
+    };
+  }
+
+  const { data: companies, error: companyError } = await fetchCompanyRowsByIds(
+    companyIds,
+    "id, name",
+    { userId, personalOnly: true },
+  );
 
   if (companyError) {
     return { data: [], error: companyError };
   }
 
   const companyNameById = new Map(
-    (companies ?? []).map((company) => [company.id, company.name as string]),
+    companies.map((company) => [company.id as string, company.name as string]),
   );
 
   return {
@@ -505,10 +566,6 @@ export async function fetchFollowUpWorkcenterData(
     .order("due_at", { ascending: true })
     .limit(FOLLOW_UP_PENDING_LIMIT);
 
-  if (ownedCompanyIds) {
-    pendingQuery = pendingQuery.in("company_id", [...ownedCompanyIds]);
-  }
-
   let completedQuery = supabase
     .from("follow_ups")
     .select(FOLLOW_UP_SELECT_FIELDS)
@@ -517,16 +574,13 @@ export async function fetchFollowUpWorkcenterData(
     .order("completed_at", { ascending: false })
     .limit(FOLLOW_UP_COMPLETED_LIMIT);
 
-  if (ownedCompanyIds) {
-    completedQuery = completedQuery.in("company_id", [...ownedCompanyIds]);
-  }
-
   const [pendingResult, completedResult] = await Promise.all([
     pendingQuery,
     completedQuery,
   ]);
 
   if (pendingResult.error) {
+    logFollowUpsQueryError("fetchFollowUpWorkcenterData:pending", pendingResult.error);
     return {
       data: { pending: [], completed: [] },
       error: pendingResult.error,
@@ -534,6 +588,7 @@ export async function fetchFollowUpWorkcenterData(
   }
 
   if (completedResult.error) {
+    logFollowUpsQueryError("fetchFollowUpWorkcenterData:completed", completedResult.error);
     return {
       data: { pending: [], completed: [] },
       error: completedResult.error,
@@ -613,20 +668,15 @@ export async function fetchCancelledFollowUps(
     return { data: [], error: null };
   }
 
-  let query = supabase
+  const { data, error } = await supabase
     .from("follow_ups")
     .select(FOLLOW_UP_SELECT_FIELDS)
     .eq("status", "cancelled")
     .order("updated_at", { ascending: false })
     .limit(FOLLOW_UP_COMPLETED_LIMIT);
 
-  if (ownedCompanyIds) {
-    query = query.in("company_id", [...ownedCompanyIds]);
-  }
-
-  const { data, error } = await query;
-
   if (error) {
+    logFollowUpsQueryError("fetchCancelledFollowUps", error);
     return { data: [], error };
   }
 
