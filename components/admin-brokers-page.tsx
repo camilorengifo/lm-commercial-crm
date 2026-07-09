@@ -1,19 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import type { User } from "@supabase/supabase-js";
 import {
-  AdminAccessDenied,
   AdminSubNav,
   AdminSummaryCard,
   ProductivityScoreHint,
   ProductivityCompanyCountHint,
 } from "@/components/admin-shared";
+import { useAdminAuth } from "@/components/admin-auth-context";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { StatGrid } from "@/components/crm-ui";
-import { verifyAdminAccess } from "@/lib/admin";
 import {
   fetchAdminOverview,
   type BrokerProductivityRow,
@@ -31,7 +28,6 @@ import {
 } from "@/lib/brokerProductivity";
 import { formatDate, formatSupabaseError } from "@/lib/crmFormat";
 import { ALL_OFFICES_LABEL, UNASSIGNED_OFFICE_LABEL, type Office } from "@/lib/offices";
-import type { UserProfile } from "@/lib/userProfile";
 
 type OfficeFilterValue = "all" | "grouped" | "unassigned" | string;
 
@@ -199,10 +195,7 @@ function OfficeSummaryCards({ summary }: { summary: OfficeProductivitySummary })
 }
 
 export function AdminBrokersPage() {
-  const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [accessDenied, setAccessDenied] = useState(false);
+  useAdminAuth();
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [brokers, setBrokers] = useState<BrokerProductivityRow[]>([]);
@@ -219,7 +212,17 @@ export function AdminBrokersPage() {
 
   const loadData = useCallback(async () => {
     setFetchError(null);
+    if (process.env.NODE_ENV === "development") {
+      console.time("admin brokers load");
+    }
     const { data, error } = await fetchAdminOverview();
+    if (process.env.NODE_ENV === "development") {
+      console.timeEnd("admin brokers load");
+      console.info("[admin brokers]", {
+        brokers: data?.brokerProductivity.length ?? 0,
+        offices: data?.offices.length ?? 0,
+      });
+    }
     if (error) {
       setFetchError(formatSupabaseError(error));
       return;
@@ -230,22 +233,8 @@ export function AdminBrokersPage() {
   }, []);
 
   useEffect(() => {
-    verifyAdminAccess().then((result) => {
-      if (!result.allowed) {
-        if (result.reason === "unauthenticated") {
-          router.replace("/login");
-          return;
-        }
-        setAccessDenied(true);
-        setLoading(false);
-        return;
-      }
-
-      setUser(result.user);
-      setProfile(result.profile);
-      loadData().finally(() => setLoading(false));
-    });
-  }, [router, loadData]);
+    loadData().finally(() => setLoading(false));
+  }, [loadData]);
 
   const filteredBrokers = useMemo(() => {
     const normalized = searchQuery.trim().toLowerCase();
@@ -318,17 +307,9 @@ export function AdminBrokersPage() {
   if (loading) {
     return (
       <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50">
-        <p className="text-sm text-zinc-500">Loading...</p>
+        <p className="text-sm text-zinc-500">Loading broker productivity...</p>
       </div>
     );
-  }
-
-  if (accessDenied) {
-    return <AdminAccessDenied />;
-  }
-
-  if (!user || !profile) {
-    return null;
   }
 
   return (

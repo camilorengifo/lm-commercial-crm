@@ -15,10 +15,12 @@ import {
 } from "@/lib/userProfile";
 import {
   buildOwnedCompanyCountByUserId,
+  COMPANIES_FETCH_PAGE_SIZE,
   fetchAllCompaniesForProductivityMetrics,
   getOwnedCompanyCount,
   type ProductivityCompanyRow,
 } from "@/lib/brokerDataAccess";
+import { withAdminDashboardFetch } from "@/lib/adminDashboardCache";
 import { supabase } from "@/lib/supabaseClient";
 import { verifyAdminAccess } from "@/lib/admin";
 import {
@@ -288,6 +290,41 @@ export interface RawCrmData {
   }>;
 }
 
+async function fetchAllRowsPaginated<T>(input: {
+  fetchPage: (
+    from: number,
+    to: number,
+  ) => Promise<{
+    data: T[] | null;
+    error: { message?: string } | null;
+  }>;
+}): Promise<{ data: T[]; error: { message?: string } | null }> {
+  const rows: T[] = [];
+  let offset = 0;
+
+  while (true) {
+    const { data, error } = await input.fetchPage(
+      offset,
+      offset + COMPANIES_FETCH_PAGE_SIZE - 1,
+    );
+
+    if (error) {
+      return { data: [], error };
+    }
+
+    const batch = data ?? [];
+    rows.push(...batch);
+
+    if (batch.length < COMPANIES_FETCH_PAGE_SIZE) {
+      break;
+    }
+
+    offset += COMPANIES_FETCH_PAGE_SIZE;
+  }
+
+  return { data: rows, error: null };
+}
+
 async function fetchRawCrmData(): Promise<{
   data: RawCrmData | null;
   error: { message?: string } | null;
@@ -312,17 +349,59 @@ async function fetchRawCrmData(): Promise<{
       .eq("is_active", true)
       .order("name"),
     fetchAllCompaniesForProductivityMetrics(),
-    supabase.from("contacts").select("id, user_id, created_at"),
-    supabase
-      .from("follow_ups")
-      .select(
-        "id, user_id, company_id, title, due_at, status, completed_at, created_at",
-      ),
-    supabase
-      .from("load_opportunities")
-      .select(
-        "id, user_id, company_id, name, status, estimated_revenue_usd, quoted_rate, target_rate, created_at",
-      ),
+    fetchAllRowsPaginated<{ id: string; user_id: string; created_at: string }>({
+      fetchPage: async (from, to) => {
+        const { data, error } = await supabase
+          .from("contacts")
+          .select("id, user_id, created_at")
+          .order("id", { ascending: true })
+          .range(from, to);
+        return { data, error };
+      },
+    }),
+    fetchAllRowsPaginated<{
+      id: string;
+      user_id: string;
+      company_id: string;
+      title: string;
+      due_at: string;
+      status: string;
+      completed_at: string | null;
+      created_at: string;
+    }>({
+      fetchPage: async (from, to) => {
+        const { data, error } = await supabase
+          .from("follow_ups")
+          .select(
+            "id, user_id, company_id, title, due_at, status, completed_at, created_at",
+          )
+          .order("id", { ascending: true })
+          .range(from, to);
+        return { data, error };
+      },
+    }),
+    fetchAllRowsPaginated<{
+      id: string;
+      user_id: string;
+      company_id: string;
+      name: string;
+      status: string;
+      estimated_revenue_usd: number | null;
+      quoted_rate: number | null;
+      target_rate: number | null;
+      created_at: string;
+    }>({
+      fetchPage: async (from, to) => {
+        const { data, error } = await supabase
+          .from("load_opportunities")
+          .select(
+            "id, user_id, company_id, name, status, estimated_revenue_usd, quoted_rate, target_rate, created_at",
+          )
+          .order("id", { ascending: true })
+          .range(from, to);
+        return { data, error };
+      },
+    }),
     supabase
       .from("activities")
       .select(
@@ -350,9 +429,9 @@ async function fetchRawCrmData(): Promise<{
       profiles: profilesResult.data ?? [],
       offices: officesResult.data ?? [],
       companies: companiesResult.data ?? [],
-      contacts: contactsResult.data ?? [],
-      followUps: followUpsResult.data ?? [],
-      opportunities: opportunitiesResult.data ?? [],
+      contacts: contactsResult.data,
+      followUps: followUpsResult.data,
+      opportunities: opportunitiesResult.data,
       activities: activitiesResult.data ?? [],
     },
     error: null,
@@ -956,7 +1035,7 @@ export async function fetchAdminDashboardSource(): Promise<{
     };
   }
 
-  return fetchRawCrmData();
+  return withAdminDashboardFetch(fetchRawCrmData);
 }
 
 export async function fetchAdminOverview(
@@ -1005,26 +1084,135 @@ export async function fetchBrokerAdminDetail(
     };
   }
 
-  const { data: raw, error } = await fetchRawCrmData();
-  if (error || !raw) {
-    return { data: null, error };
+  const [
+    profileResult,
+    companiesResult,
+    contactsResult,
+    followUpsResult,
+    opportunitiesResult,
+    activitiesResult,
+  ] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select(
+        "id, email, full_name, role, is_active, is_blocked, blocked_at, blocked_reason, office_id",
+      )
+      .eq("id", brokerId)
+      .maybeSingle(),
+    fetchAllRowsPaginated<ProductivityCompanyRow>({
+      fetchPage: async (from, to) => {
+        const { data, error } = await supabase
+          .from("companies")
+          .select(
+            "id, user_id, name, priority, sales_stage, last_contact_at, next_follow_up_at, created_at",
+          )
+          .eq("user_id", brokerId)
+          .is("deleted_at", null)
+          .order("name", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to);
+        return { data, error };
+      },
+    }),
+    fetchAllRowsPaginated<{ id: string; user_id: string; created_at: string }>({
+      fetchPage: async (from, to) => {
+        const { data, error } = await supabase
+          .from("contacts")
+          .select("id, user_id, created_at")
+          .eq("user_id", brokerId)
+          .order("id", { ascending: true })
+          .range(from, to);
+        return { data, error };
+      },
+    }),
+    fetchAllRowsPaginated<{
+      id: string;
+      user_id: string;
+      company_id: string;
+      title: string;
+      due_at: string;
+      status: string;
+      completed_at: string | null;
+      created_at: string;
+    }>({
+      fetchPage: async (from, to) => {
+        const { data, error } = await supabase
+          .from("follow_ups")
+          .select(
+            "id, user_id, company_id, title, due_at, status, completed_at, created_at",
+          )
+          .eq("user_id", brokerId)
+          .order("id", { ascending: true })
+          .range(from, to);
+        return { data, error };
+      },
+    }),
+    fetchAllRowsPaginated<{
+      id: string;
+      user_id: string;
+      company_id: string;
+      name: string;
+      status: string;
+      estimated_revenue_usd: number | null;
+      quoted_rate: number | null;
+      target_rate: number | null;
+      created_at: string;
+    }>({
+      fetchPage: async (from, to) => {
+        const { data, error } = await supabase
+          .from("load_opportunities")
+          .select(
+            "id, user_id, company_id, name, status, estimated_revenue_usd, quoted_rate, target_rate, created_at",
+          )
+          .eq("user_id", brokerId)
+          .order("id", { ascending: true })
+          .range(from, to);
+        return { data, error };
+      },
+    }),
+    supabase
+      .from("activities")
+      .select(
+        "id, user_id, company_id, activity_type, subject, notes, activity_at",
+      )
+      .eq("user_id", brokerId)
+      .order("activity_at", { ascending: false })
+      .limit(50),
+  ]);
+
+  const firstError =
+    profileResult.error ??
+    companiesResult.error ??
+    contactsResult.error ??
+    followUpsResult.error ??
+    opportunitiesResult.error ??
+    activitiesResult.error;
+
+  if (firstError) {
+    return { data: null, error: firstError };
   }
 
-  const profile = raw.profiles.find((item) => item.id === brokerId);
+  const profile = profileResult.data;
   if (!profile || !isBrokerProductivityEligibleRole(profile.role)) {
     return { data: null, error: { message: "User not found." } };
   }
 
-  const brokerRows = buildBrokerProductivityRows(raw);
-  const metrics =
-    brokerRows.find((row) => row.userId === brokerId) ?? null;
+  const scopedRaw: RawCrmData = {
+    profiles: [profile],
+    offices: [],
+    companies: companiesResult.data,
+    contacts: contactsResult.data,
+    followUps: followUpsResult.data,
+    opportunities: opportunitiesResult.data,
+    activities: activitiesResult.data ?? [],
+  };
 
+  const metrics = buildBrokerProductivityRows(scopedRaw)[0] ?? null;
   if (!metrics) {
     return { data: null, error: { message: "User not found." } };
   }
 
-  const companies = raw.companies
-    .filter((company) => company.user_id === brokerId)
+  const companies = companiesResult.data
     .map((company) => ({
       id: company.id,
       name: company.name,
@@ -1036,11 +1224,8 @@ export async function fetchBrokerAdminDetail(
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const companyById = new Map(companies.map((company) => [company.id, company]));
-  const pendingFollowUps = raw.followUps
-    .filter(
-      (followUp) =>
-        followUp.user_id === brokerId && followUp.status === "pending",
-    )
+  const pendingFollowUps = followUpsResult.data
+    .filter((followUp) => followUp.status === "pending")
     .sort(
       (a, b) => new Date(a.due_at).getTime() - new Date(b.due_at).getTime(),
     );
@@ -1055,18 +1240,14 @@ export async function fetchBrokerAdminDetail(
   }
 
   const { start: weekStart } = getWeekBounds();
-  const completedThisWeek = raw.followUps.filter((followUp) => {
-    if (followUp.user_id !== brokerId || followUp.status !== "completed") {
+  const completedThisWeek = followUpsResult.data.filter((followUp) => {
+    if (followUp.status !== "completed" || !followUp.completed_at) {
       return false;
     }
-    if (!followUp.completed_at) return false;
     return new Date(followUp.completed_at) >= weekStart;
   }).length;
 
-  const brokerOpportunities = raw.opportunities.filter(
-    (opportunity) => opportunity.user_id === brokerId,
-  );
-
+  const brokerOpportunities = opportunitiesResult.data;
   const statusCounts = new Map<string, number>();
   for (const opportunity of brokerOpportunities) {
     statusCounts.set(
@@ -1075,10 +1256,8 @@ export async function fetchBrokerAdminDetail(
     );
   }
 
-  const recentActivities = raw.activities
-    .filter((activity) => activity.user_id === brokerId)
-    .slice(0, 15)
-    .map((activity) => ({
+  const recentActivities = (activitiesResult.data ?? []).slice(0, 15).map(
+    (activity) => ({
       id: activity.id,
       companyId: activity.company_id,
       companyName:
@@ -1087,7 +1266,8 @@ export async function fetchBrokerAdminDetail(
       activityType: activity.activity_type,
       activityAt: activity.activity_at,
       preview: buildActivityPreview(activity.subject, activity.notes),
-    }));
+    }),
+  );
 
   const needsAttention: AdminBrokerDetailData["needsAttention"] = [];
 
@@ -1164,7 +1344,7 @@ export async function fetchBrokerAdminDetail(
           status,
           count,
         })),
-        recent: brokerOpportunities
+        recent: [...brokerOpportunities]
           .sort(
             (a, b) =>
               new Date(b.created_at).getTime() -

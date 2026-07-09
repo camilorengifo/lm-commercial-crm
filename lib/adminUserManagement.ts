@@ -4,7 +4,10 @@ import {
   normalizeUserRole,
   type UserRole,
 } from "@/lib/userProfile";
-import { isOpenOpportunityStage } from "@/lib/crmConstants";
+import {
+  isOpenOpportunityStage,
+  OPEN_OPPORTUNITY_STATUSES,
+} from "@/lib/crmConstants";
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin";
 import { assertSafeInviteRedirect } from "@/lib/appUrl";
 import { sendInvitationEmail } from "@/lib/invitationEmail";
@@ -99,6 +102,140 @@ async function findAuthUserByEmail(
   return null;
 }
 
+async function fetchDistinctUserIds(
+  admin: SupabaseClient,
+  table: string,
+): Promise<string[]> {
+  const ids: string[] = [];
+  let offset = 0;
+  const pageSize = 1000;
+
+  while (true) {
+    const { data, error } = await admin
+      .from(table)
+      .select("user_id")
+      .order("user_id", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+
+    if (error) throw error;
+
+    const batch = data ?? [];
+    for (const row of batch) {
+      if (typeof row.user_id === "string") {
+        ids.push(row.user_id);
+      }
+    }
+
+    if (batch.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  return ids;
+}
+
+async function fetchCompanyOwnershipByUser(
+  admin: SupabaseClient,
+): Promise<{
+  companyCountByUser: Map<string, number>;
+  companyOwnerIds: string[];
+}> {
+  const companyCountByUser = new Map<string, number>();
+  const ownerIdSet = new Set<string>();
+  let offset = 0;
+  const pageSize = 1000;
+
+  while (true) {
+    const { data, error } = await admin
+      .from("companies")
+      .select("user_id, deleted_at")
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+
+    if (error) throw error;
+
+    const batch = data ?? [];
+    for (const row of batch) {
+      if (typeof row.user_id !== "string") continue;
+      ownerIdSet.add(row.user_id);
+      if (row.deleted_at == null) {
+        companyCountByUser.set(
+          row.user_id,
+          (companyCountByUser.get(row.user_id) ?? 0) + 1,
+        );
+      }
+    }
+
+    if (batch.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  return {
+    companyCountByUser,
+    companyOwnerIds: [...ownerIdSet],
+  };
+}
+
+async function fetchAllPendingFollowUpRows(
+  admin: SupabaseClient,
+): Promise<Array<{ user_id: string; due_at: string; status: string }>> {
+  const rows: Array<{ user_id: string; due_at: string; status: string }> = [];
+  let offset = 0;
+  const pageSize = 1000;
+
+  while (true) {
+    const { data, error } = await admin
+      .from("follow_ups")
+      .select("user_id, due_at, status")
+      .eq("status", "pending")
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+
+    if (error) throw error;
+
+    const batch = data ?? [];
+    rows.push(...batch);
+
+    if (batch.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  return rows;
+}
+
+async function fetchOpenOpportunityUserIds(
+  admin: SupabaseClient,
+): Promise<Map<string, number>> {
+  const openOpportunitiesByUser = new Map<string, number>();
+  let offset = 0;
+  const pageSize = 1000;
+
+  while (true) {
+    const { data, error } = await admin
+      .from("load_opportunities")
+      .select("user_id, status")
+      .in("status", [...OPEN_OPPORTUNITY_STATUSES])
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+
+    if (error) throw error;
+
+    const batch = data ?? [];
+    for (const opportunity of batch) {
+      if (isOpenOpportunityStatus(opportunity.status)) {
+        openOpportunitiesByUser.set(
+          opportunity.user_id,
+          (openOpportunitiesByUser.get(opportunity.user_id) ?? 0) + 1,
+        );
+      }
+    }
+
+    if (batch.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  return openOpportunitiesByUser;
+}
+
 export async function listAdminUsers(): Promise<AdminUserListItem[]> {
   const admin = createSupabaseAdminClient();
   if (!admin) {
@@ -108,25 +245,24 @@ export async function listAdminUsers(): Promise<AdminUserListItem[]> {
   const [
     profilesResult,
     officesResult,
-    companiesResult,
-    followUpsResult,
-    opportunitiesResult,
+    companyOwnership,
+    pendingFollowUps,
+    opportunityOwnerIds,
+    openOpportunitiesByUser,
   ] = await Promise.all([
     admin
       .from("profiles")
       .select("id, email, full_name, role, is_active, created_at, office_id")
       .order("email"),
     admin.from("offices").select("id, name").eq("is_active", true),
-    admin.from("companies").select("user_id"),
-    admin.from("follow_ups").select("user_id, due_at, status").eq("status", "pending"),
-    admin.from("load_opportunities").select("user_id, status"),
+    fetchCompanyOwnershipByUser(admin),
+    fetchAllPendingFollowUpRows(admin),
+    fetchDistinctUserIds(admin, "load_opportunities"),
+    fetchOpenOpportunityUserIds(admin),
   ]);
 
   if (profilesResult.error) throw profilesResult.error;
   if (officesResult.error) throw officesResult.error;
-  if (companiesResult.error) throw companiesResult.error;
-  if (followUpsResult.error) throw followUpsResult.error;
-  if (opportunitiesResult.error) throw opportunitiesResult.error;
 
   const authUsersById = new Map<string, string | null>();
   let page = 1;
@@ -147,16 +283,10 @@ export async function listAdminUsers(): Promise<AdminUserListItem[]> {
     page += 1;
   }
 
-  const companyCountByUser = new Map<string, number>();
-  for (const company of companiesResult.data ?? []) {
-    companyCountByUser.set(
-      company.user_id,
-      (companyCountByUser.get(company.user_id) ?? 0) + 1,
-    );
-  }
+  const { companyCountByUser, companyOwnerIds } = companyOwnership;
 
   const followUpsDueTodayByUser = new Map<string, number>();
-  for (const followUp of followUpsResult.data ?? []) {
+  for (const followUp of pendingFollowUps) {
     if (getFollowUpBucket(followUp.due_at) === "today") {
       followUpsDueTodayByUser.set(
         followUp.user_id,
@@ -165,17 +295,13 @@ export async function listAdminUsers(): Promise<AdminUserListItem[]> {
     }
   }
 
-  const openOpportunitiesByUser = new Map<string, number>();
-  for (const opportunity of opportunitiesResult.data ?? []) {
-    if (isOpenOpportunityStatus(opportunity.status)) {
-      openOpportunitiesByUser.set(
-        opportunity.user_id,
-        (openOpportunitiesByUser.get(opportunity.user_id) ?? 0) + 1,
-      );
-    }
-  }
+  // ownsCrmRecords: companies + follow_ups + opportunities already loaded; skip 6-table rescan.
+  const usersWithCrmRecords = new Set<string>([
+    ...companyOwnerIds,
+    ...pendingFollowUps.map((row) => row.user_id),
+    ...opportunityOwnerIds,
+  ]);
 
-  const usersWithCrmRecords = await getUserIdsWithCrmRecords(admin);
   const officeNameById = new Map(
     (officesResult.data ?? []).map((office) => [office.id, office.name]),
   );
@@ -197,28 +323,6 @@ export async function listAdminUsers(): Promise<AdminUserListItem[]> {
     openOpportunities: openOpportunitiesByUser.get(profile.id) ?? 0,
     ownsCrmRecords: usersWithCrmRecords.has(profile.id),
   }));
-}
-
-async function getUserIdsWithCrmRecords(
-  admin: SupabaseClient,
-): Promise<Set<string>> {
-  const userIds = new Set<string>();
-
-  await Promise.all(
-    CRM_OWNERSHIP_TABLES.map(async (table) => {
-      const { data, error } = await admin.from(table).select("user_id");
-
-      if (error) throw error;
-
-      for (const row of data ?? []) {
-        if (typeof row.user_id === "string") {
-          userIds.add(row.user_id);
-        }
-      }
-    }),
-  );
-
-  return userIds;
 }
 
 async function fetchActingAdminEmail(

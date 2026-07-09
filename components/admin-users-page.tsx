@@ -2,10 +2,9 @@
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
-import { AdminAccessDenied, AdminSubNav } from "@/components/admin-shared";
+import { AdminSubNav } from "@/components/admin-shared";
+import { useAdminAuth } from "@/components/admin-auth-context";
 import {
   deleteAdminUser,
   fetchAdminUsers,
@@ -19,18 +18,12 @@ import {
   type AdminDeleteUserAssignee,
 } from "@/components/admin-delete-user-modal";
 import { formatDate, formatDateTime } from "@/lib/crmFormat";
-import {
-  fetchUserProfile,
-  isAdminProfile,
-  type UserProfile,
-  type UserRole,
-} from "@/lib/userProfile";
+import { type UserRole } from "@/lib/userProfile";
 import {
   canManageSuperAdminRole,
   getAssignableRolesForActor,
   isPrimarySuperAdminEmail,
 } from "@/lib/primarySuperAdmin";
-import { supabase } from "@/lib/supabaseClient";
 import {
   fetchOffices,
   UNASSIGNED_OFFICE_LABEL,
@@ -45,11 +38,8 @@ const EMPTY_INVITE_FORM = {
 };
 
 export function AdminUsersPage() {
-  const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const { user, profile } = useAdminAuth();
   const [loading, setLoading] = useState(true);
-  const [accessDenied, setAccessDenied] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [users, setUsers] = useState<AdminUserListItem[]>([]);
   const [offices, setOffices] = useState<Office[]>([]);
@@ -72,8 +62,8 @@ export function AdminUsersPage() {
   } | null>(null);
   const [updateSuccess, setUpdateSuccess] = useState<string | null>(null);
 
-  const actingCanManageSuperAdmin = canManageSuperAdminRole(profile?.email);
-  const assignableRoles = getAssignableRolesForActor(profile?.email);
+  const actingCanManageSuperAdmin = canManageSuperAdminRole(profile.email);
+  const assignableRoles = getAssignableRolesForActor(profile.email);
 
   const loadUsers = useCallback(async () => {
     setFetchError(null);
@@ -89,30 +79,11 @@ export function AdminUsersPage() {
   }, []);
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!session) {
-        router.replace("/login");
-        return;
-      }
-
-      setUser(session.user);
-
-      const { data: userProfile } = await fetchUserProfile(session.user.id);
-      if (!isAdminProfile(userProfile)) {
-        setAccessDenied(true);
-        setLoading(false);
-        return;
-      }
-
-      setProfile(userProfile);
-      const [{ data: officesData }] = await Promise.all([
-        fetchOffices(),
-        loadUsers(),
-      ]);
+    Promise.all([fetchOffices(), loadUsers()]).then(([{ data: officesData }]) => {
       setOffices(officesData ?? []);
       setLoading(false);
     });
-  }, [router, loadUsers]);
+  }, [loadUsers]);
 
   async function handleInvite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -368,17 +339,9 @@ export function AdminUsersPage() {
   if (loading) {
     return (
       <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50">
-        <p className="text-sm text-zinc-500">Loading...</p>
+        <p className="text-sm text-zinc-500">Loading users...</p>
       </div>
     );
-  }
-
-  if (accessDenied) {
-    return <AdminAccessDenied />;
-  }
-
-  if (!user || !profile) {
-    return null;
   }
 
   return (

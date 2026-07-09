@@ -17,7 +17,13 @@ export type AdminAccessResult =
       reason: "unauthenticated" | "forbidden";
     };
 
-export async function verifyAdminAccess(): Promise<AdminAccessResult> {
+const ACCESS_CACHE_TTL_MS = 60_000;
+
+let cachedAccess: AdminAccessResult | null = null;
+let cachedAccessAt = 0;
+let accessInFlight: Promise<AdminAccessResult> | null = null;
+
+async function resolveAdminAccess(): Promise<AdminAccessResult> {
   const {
     data: { user },
     error: authError,
@@ -38,6 +44,35 @@ export async function verifyAdminAccess(): Promise<AdminAccessResult> {
     user,
     profile,
   };
+}
+
+/** Clears the short-lived admin access cache (e.g. after role changes). */
+export function clearAdminAccessCache(): void {
+  cachedAccess = null;
+  cachedAccessAt = 0;
+  accessInFlight = null;
+}
+
+export async function verifyAdminAccess(): Promise<AdminAccessResult> {
+  if (cachedAccess && Date.now() - cachedAccessAt < ACCESS_CACHE_TTL_MS) {
+    return cachedAccess;
+  }
+
+  if (accessInFlight) {
+    return accessInFlight;
+  }
+
+  accessInFlight = resolveAdminAccess()
+    .then((result) => {
+      cachedAccess = result;
+      cachedAccessAt = Date.now();
+      return result;
+    })
+    .finally(() => {
+      accessInFlight = null;
+    });
+
+  return accessInFlight;
 }
 
 export function isAdminRoute(pathname: string): boolean {

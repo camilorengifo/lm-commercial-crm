@@ -1,20 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { User } from "@supabase/supabase-js";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AdminAccessDenied,
   AdminSubNav,
   AdminSummaryCard,
 } from "@/components/admin-shared";
+import { useAdminAuth } from "@/components/admin-auth-context";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { StatGrid } from "@/components/crm-ui";
 import { AdminReassignCompaniesModal } from "@/components/admin-reassign-companies-modal";
 import { AdminSuperAdminBulkDeleteModal } from "@/components/admin-super-admin-bulk-delete-modal";
 import { reassignAdminCompanies } from "@/lib/adminClient";
-import { verifyAdminAccess } from "@/lib/admin";
 import {
   ADMIN_COMPANY_PRIORITIES,
   attentionBadgeClass,
@@ -23,7 +20,6 @@ import {
   fetchAdminCompaniesOversightPage,
   fetchOversightCompanyIdsForFilters,
   formatAssignableOwnerLabel,
-  getAssignableCompanyOwners,
   OVERSIGHT_SEARCH_DEBOUNCE_MS,
   OVERSIGHT_TABLE_DEFAULT_PAGE_SIZE,
   OVERSIGHT_TABLE_PAGE_SIZES,
@@ -50,7 +46,6 @@ import {
 import { formatDate, formatSupabaseError } from "@/lib/crmFormat";
 import { ALL_OFFICES_LABEL, UNASSIGNED_OFFICE_LABEL } from "@/lib/offices";
 import type { SuperAdminDeleteScope } from "@/lib/adminSuperAdminClient";
-import { fetchAllProfiles, isSuperAdminProfile, type UserProfile } from "@/lib/userProfile";
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -64,14 +59,12 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 }
 
 export function AdminCompaniesPage() {
-  const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [accessDenied, setAccessDenied] = useState(false);
+  const { isSuperAdmin } = useAdminAuth();
   const [metaLoading, setMetaLoading] = useState(true);
   const [tableLoading, setTableLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [meta, setMeta] = useState<AdminCompaniesOversightMeta | null>(null);
+  const summaryFiltersKeyRef = useRef<string>("");
 
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearch = useDebouncedValue(
@@ -111,9 +104,6 @@ export function AdminCompaniesPage() {
   const [selectedCompanySnapshots, setSelectedCompanySnapshots] = useState<
     Map<string, AdminCompanyOversightRow>
   >(new Map());
-  const [assignableOwners, setAssignableOwners] = useState<
-    AdminCompaniesBrokerOption[]
-  >([]);
   const [reassignModalOpen, setReassignModalOpen] = useState(false);
   const [targetBrokerId, setTargetBrokerId] = useState("");
   const [reassigning, setReassigning] = useState(false);
@@ -125,8 +115,6 @@ export function AdminCompaniesPage() {
   const [deleteTargetCount, setDeleteTargetCount] = useState(0);
   const [resolvingFilteredDelete, setResolvingFilteredDelete] = useState(false);
   const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
-
-  const isSuperAdmin = isSuperAdminProfile(profile);
 
   const filters = useMemo<AdminCompaniesOversightFilters>(
     () => ({
@@ -161,17 +149,53 @@ export function AdminCompaniesPage() {
       return;
     }
     setMeta(data);
+    if (data) {
+      setFilteredSummary(data.unfilteredSummary);
+    }
   }, []);
 
   const loadPage = useCallback(async () => {
+    if (!meta) return;
+
+    const filtersKey = JSON.stringify(filters);
+    const filtersChanged = summaryFiltersKeyRef.current !== filtersKey;
+
+    // Reset to page 1 first; the follow-up effect fetch includes the summary.
+    if (filtersChanged && page !== 1) {
+      setPage(1);
+      return;
+    }
+
     setTableLoading(true);
     setFetchError(null);
+
+    if (filtersChanged) {
+      summaryFiltersKeyRef.current = filtersKey;
+    }
+
+    if (process.env.NODE_ENV === "development") {
+      console.time("admin companies load");
+    }
 
     const { data, error } = await fetchAdminCompaniesOversightPage({
       filters,
       page,
       pageSize,
+      includeSummary: filtersChanged,
+      cachedProfiles: meta.profiles,
+      cachedOffices: meta.offices,
     });
+
+    if (process.env.NODE_ENV === "development") {
+      console.timeEnd("admin companies load");
+      console.info("[admin companies]", {
+        page,
+        pageSize,
+        includeSummary: filtersChanged,
+        rows: data?.companies.length ?? 0,
+        totalCount: data?.totalCount ?? 0,
+      });
+    }
 
     setTableLoading(false);
 
@@ -186,44 +210,30 @@ export function AdminCompaniesPage() {
 
     setTableCompanies(data.companies);
     setTableTotalCount(data.totalCount);
-    setFilteredSummary(data.summary);
+    if (filtersChanged) {
+      setFilteredSummary(data.summary);
+    } else {
+      setFilteredSummary((current) => ({
+        ...current,
+        totalCompanies: data.totalCount,
+      }));
+    }
     setOwnerTotalCount(data.ownerTotalCount);
-  }, [filters, page, pageSize]);
+  }, [filters, page, pageSize, meta]);
 
   useEffect(() => {
-    verifyAdminAccess().then((result) => {
-      if (!result.allowed) {
-        if (result.reason === "unauthenticated") {
-          router.replace("/login");
-          return;
-        }
-        setAccessDenied(true);
-        setMetaLoading(false);
-        setTableLoading(false);
-        return;
-      }
-
-      setUser(result.user);
-      setProfile(result.profile);
-
-      void fetchAllProfiles().then(({ data }) => {
-        setAssignableOwners(getAssignableCompanyOwners(data));
-      });
-
-      loadMeta().finally(() => setMetaLoading(false));
-    });
-  }, [router, loadMeta]);
+    loadMeta().finally(() => setMetaLoading(false));
+  }, [loadMeta]);
 
   useEffect(() => {
-    if (metaLoading || accessDenied) {
+    if (metaLoading || !meta) {
       return;
     }
 
     void loadPage();
-  }, [loadPage, metaLoading, accessDenied]);
+  }, [loadPage, metaLoading, meta]);
 
   useEffect(() => {
-    setPage(1);
     setSelectedCompanyIds(new Set());
     setSelectedCompanySnapshots(new Map());
   }, [
@@ -239,20 +249,16 @@ export function AdminCompaniesPage() {
     pageSize,
   ]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [pageSize]);
+
   const ownerFilterOptions = useMemo(() => {
     if (!meta) {
-      return assignableOwners;
+      return [] as AdminCompaniesBrokerOption[];
     }
 
-    const merged = new Map<string, AdminCompaniesBrokerOption>();
-    for (const owner of meta.brokers) {
-      merged.set(owner.userId, owner);
-    }
-    for (const owner of assignableOwners) {
-      merged.set(owner.userId, owner);
-    }
-
-    return Array.from(merged.values()).sort((a, b) => {
+    return [...meta.brokers].sort((a, b) => {
       const roleOrder = a.role === b.role ? 0 : a.role === "admin" ? -1 : 1;
       if (roleOrder !== 0) {
         return roleOrder;
@@ -260,7 +266,7 @@ export function AdminCompaniesPage() {
 
       return a.name.localeCompare(b.name);
     });
-  }, [meta, assignableOwners]);
+  }, [meta]);
 
   const activeBrokerOwnershipSummary = useMemo(() => {
     if (brokerFilter === "all" || !meta) {
@@ -474,20 +480,12 @@ export function AdminCompaniesPage() {
     await Promise.all([loadMeta(), loadPage()]);
   }
 
-  if (metaLoading) {
+  if (metaLoading || !meta) {
     return (
       <div className="flex min-h-full flex-1 items-center justify-center bg-zinc-50">
         <p className="text-sm text-zinc-500">Loading companies oversight…</p>
       </div>
     );
-  }
-
-  if (accessDenied) {
-    return <AdminAccessDenied />;
-  }
-
-  if (!user || !profile || !meta) {
-    return null;
   }
 
   const summary = filteredSummary;
@@ -1098,7 +1096,7 @@ export function AdminCompaniesPage() {
       <AdminReassignCompaniesModal
         open={reassignModalOpen}
         selectedCompanies={selectedCompanies}
-        assignableOwners={assignableOwners}
+        assignableOwners={ownerFilterOptions}
         targetBrokerId={targetBrokerId}
         submitting={reassigning}
         error={reassignError}

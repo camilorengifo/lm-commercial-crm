@@ -92,11 +92,11 @@ export async function fetchAllCompaniesForProductivityMetrics(): Promise<{
 }> {
   return fetchAllPaginatedRows<ProductivityCompanyRow>({
     fetchPage: async (from, to) => {
+      // Stable id order only — name sort is applied client-side where needed.
       const { data, error } = await supabase
         .from("companies")
         .select(PRODUCTIVITY_COMPANY_SELECT)
         .is("deleted_at", null)
-        .order("name", { ascending: true })
         .order("id", { ascending: true })
         .range(from, to);
 

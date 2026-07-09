@@ -1,18 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import type { User } from "@supabase/supabase-js";
+import { useAdminAuth } from "@/components/admin-auth-context";
 import {
-  AdminAccessDenied,
   AdminSubNav,
   AdminSummaryCard,
   ProductivityCompanyCountHint,
 } from "@/components/admin-shared";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { StatGrid } from "@/components/crm-ui";
-import { verifyAdminAccess } from "@/lib/admin";
 import {
   fetchBrokerAdminDetail,
   type AdminBrokerDetailData,
@@ -24,16 +22,12 @@ import {
   PRODUCTIVITY_SCORE_EXPLANATION,
 } from "@/lib/brokerProductivity";
 import { formatDate, formatDateTime, formatSupabaseError } from "@/lib/crmFormat";
-import type { UserProfile } from "@/lib/userProfile";
 
 export function AdminBrokerDetailPage() {
-  const router = useRouter();
+  useAdminAuth();
   const params = useParams();
   const brokerId = typeof params.id === "string" ? params.id : "";
 
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [accessDenied, setAccessDenied] = useState(false);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [detail, setDetail] = useState<AdminBrokerDetailData | null>(null);
@@ -62,22 +56,8 @@ export function AdminBrokerDetailPage() {
   }, [brokerId]);
 
   useEffect(() => {
-    verifyAdminAccess().then((result) => {
-      if (!result.allowed) {
-        if (result.reason === "unauthenticated") {
-          router.replace("/login");
-          return;
-        }
-        setAccessDenied(true);
-        setLoading(false);
-        return;
-      }
-
-      setUser(result.user);
-      setProfile(result.profile);
-      loadDetail().finally(() => setLoading(false));
-    });
-  }, [router, loadDetail]);
+    loadDetail().finally(() => setLoading(false));
+  }, [loadDetail]);
 
   if (loading) {
     return (
@@ -85,14 +65,6 @@ export function AdminBrokerDetailPage() {
         <p className="text-sm text-zinc-500">Loading...</p>
       </div>
     );
-  }
-
-  if (accessDenied) {
-    return <AdminAccessDenied />;
-  }
-
-  if (!user || !profile) {
-    return null;
   }
 
   if (notFound || !detail) {

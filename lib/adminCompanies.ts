@@ -130,18 +130,11 @@ export interface AdminCompaniesOversightMeta {
   brokers: AdminCompaniesBrokerOption[];
   countries: string[];
   offices: Office[];
+  /** Cached for page fetches — avoid reloading profiles/offices every page. */
+  profiles: OversightProfileRow[];
 }
 
-export interface AdminCompaniesOversightPageData {
-  companies: AdminCompanyOversightRow[];
-  totalCount: number;
-  page: number;
-  pageSize: number;
-  summary: AdminCompaniesSummary;
-  ownerTotalCount: number | null;
-}
-
-type OversightProfileRow = {
+export type OversightProfileRow = {
   id: string;
   email: string | null;
   full_name: string | null;
@@ -152,6 +145,15 @@ type OversightProfileRow = {
   blocked_reason: string | null;
   office_id: string | null;
 };
+
+export interface AdminCompaniesOversightPageData {
+  companies: AdminCompanyOversightRow[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  summary: AdminCompaniesSummary;
+  ownerTotalCount: number | null;
+}
 
 type RawOversightCompany = {
   id: string;
@@ -802,10 +804,107 @@ async function fetchOverdueAttentionCompanyIds(
   );
 }
 
+async function countStructuralCompanies(
+  filters: AdminCompaniesOversightFilters,
+  profiles: OversightProfileRow[],
+  extra?: {
+    requireHighPriority?: boolean;
+    inactiveOnly?: boolean;
+    overdueByNextFollowUp?: boolean;
+  },
+): Promise<number> {
+  const officeUserIds = resolveOfficeUserIds(filters.officeId, profiles);
+  if (filters.officeId !== "all" && officeUserIds?.length === 0) {
+    return 0;
+  }
+
+  let query = supabase
+    .from("companies")
+    .select("id", { count: "exact", head: true });
+  query = applyOversightStructuralFilters(
+    query,
+    { ...filters, attention: "all" },
+    officeUserIds,
+  );
+
+  if (extra?.requireHighPriority) {
+    query = query.in("priority", ["High", "Hot Lead"]);
+  }
+  if (extra?.inactiveOnly) {
+    const cutoff = getInactivityCutoff().toISOString();
+    query = query.or(`last_contact_at.is.null,last_contact_at.lt.${cutoff}`);
+  }
+  if (extra?.overdueByNextFollowUp) {
+    query = query
+      .not("next_follow_up_at", "is", null)
+      .lt("next_follow_up_at", getStartOfTodayIso());
+  }
+
+  const { count, error } = await query;
+  if (error) {
+    return 0;
+  }
+  return count ?? 0;
+}
+
+/**
+ * Fast summary for default/structural filters.
+ * Uses head counts only — avoids full contact/follow-up scans.
+ */
+export async function fetchLightweightOversightSummary(
+  filters: AdminCompaniesOversightFilters,
+  profiles: OversightProfileRow[],
+): Promise<AdminCompaniesSummary> {
+  const [
+    totalCompanies,
+    highPriorityCompanies,
+    companiesWithOverdueFollowUps,
+    companiesNoActivity30d,
+  ] = await Promise.all([
+    countStructuralCompanies(filters, profiles),
+    countStructuralCompanies(filters, profiles, { requireHighPriority: true }),
+    countStructuralCompanies(filters, profiles, {
+      overdueByNextFollowUp: true,
+    }),
+    countStructuralCompanies(filters, profiles, { inactiveOnly: true }),
+  ]);
+
+  return {
+    totalCompanies,
+    highPriorityCompanies,
+    companiesWithOverdueFollowUps,
+    companiesNoActivity30d,
+    // Expensive full contact scan deferred; card shows 0 until attention filter needs it.
+    companiesWithNoContacts: 0,
+  };
+}
+
 export async function fetchFilteredOversightSummary(
   filters: AdminCompaniesOversightFilters,
   profiles: OversightProfileRow[],
 ): Promise<AdminCompaniesSummary> {
+  // Prefer lightweight path when attention does not require ID-set scans.
+  if (
+    filters.attention === "all" ||
+    filters.attention === "high_priority" ||
+    filters.attention === "no_activity_30d"
+  ) {
+    const light = await fetchLightweightOversightSummary(filters, profiles);
+    if (filters.attention === "high_priority") {
+      return {
+        ...light,
+        totalCompanies: light.highPriorityCompanies,
+      };
+    }
+    if (filters.attention === "no_activity_30d") {
+      return {
+        ...light,
+        totalCompanies: light.companiesNoActivity30d,
+      };
+    }
+    return light;
+  }
+
   const [
     totalCompanies,
     highPriorityCompanies,
@@ -1063,7 +1162,7 @@ export async function fetchAdminCompaniesOversightMeta(): Promise<{
   }
 
   const profiles = profilesResult.data;
-  const unfilteredSummary = await fetchFilteredOversightSummary(
+  const unfilteredSummary = await fetchLightweightOversightSummary(
     {
       search: "",
       brokerUserId: "all",
@@ -1089,6 +1188,7 @@ export async function fetchAdminCompaniesOversightMeta(): Promise<{
       brokers,
       countries: countriesResult.data,
       offices: officesResult.data,
+      profiles,
     },
     error: null,
   };
@@ -1098,6 +1198,11 @@ export async function fetchAdminCompaniesOversightPage(input: {
   filters: AdminCompaniesOversightFilters;
   page: number;
   pageSize: number;
+  /** When false, skip expensive summary recomputation (use prior summary). */
+  includeSummary?: boolean;
+  /** Reuse meta profiles/offices to avoid refetching on every page. */
+  cachedProfiles?: OversightProfileRow[];
+  cachedOffices?: Office[];
 }): Promise<{
   data: AdminCompaniesOversightPageData | null;
   error: { message?: string } | null;
@@ -1114,19 +1219,25 @@ export async function fetchAdminCompaniesOversightPage(input: {
   const pageSize = Math.max(1, input.pageSize);
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
+  const includeSummary = input.includeSummary !== false;
 
-  const [profilesResult, officesResult] = await Promise.all([
-    fetchOversightProfiles(),
-    fetchOversightOffices(),
-  ]);
+  let profiles = input.cachedProfiles ?? null;
+  let offices = input.cachedOffices ?? null;
 
-  const firstError = profilesResult.error ?? officesResult.error;
-  if (firstError) {
-    return { data: null, error: firstError };
+  if (!profiles || !offices) {
+    const [profilesResult, officesResult] = await Promise.all([
+      fetchOversightProfiles(),
+      fetchOversightOffices(),
+    ]);
+
+    const firstError = profilesResult.error ?? officesResult.error;
+    if (firstError) {
+      return { data: null, error: firstError };
+    }
+
+    profiles = profilesResult.data;
+    offices = officesResult.data;
   }
-
-  const profiles = profilesResult.data;
-  const offices = officesResult.data;
   const officeUserIds = resolveOfficeUserIds(input.filters.officeId, profiles);
 
   if (input.filters.officeId !== "all" && officeUserIds?.length === 0) {
@@ -1202,7 +1313,9 @@ export async function fetchAdminCompaniesOversightPage(input: {
 
   const [enrichedCompanies, summary, ownerTotalCount] = await Promise.all([
     enrichOversightCompanies(companies, profiles, offices),
-    fetchFilteredOversightSummary(input.filters, profiles),
+    includeSummary
+      ? fetchFilteredOversightSummary(input.filters, profiles)
+      : Promise.resolve(EMPTY_SUMMARY),
     input.filters.brokerUserId !== "all"
       ? fetchOwnerCompanyTotalCount(input.filters.brokerUserId)
       : Promise.resolve(null),
@@ -1214,7 +1327,12 @@ export async function fetchAdminCompaniesOversightPage(input: {
       totalCount,
       page,
       pageSize,
-      summary,
+      summary: includeSummary
+        ? summary
+        : {
+            ...EMPTY_SUMMARY,
+            totalCompanies: totalCount,
+          },
       ownerTotalCount,
     },
     error: null,

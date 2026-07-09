@@ -1,18 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { User } from "@supabase/supabase-js";
 import {
-  AdminAccessDenied,
   AdminSubNav,
   AdminSummaryCard,
   ProductivityScoreHint,
 } from "@/components/admin-shared";
+import { useAdminAuth } from "@/components/admin-auth-context";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { CrmAlert, CrmCard, PageHeader, SectionHeader, StatGrid } from "@/components/crm-ui";
-import { verifyAdminAccess } from "@/lib/admin";
 import {
   buildAdminOverview,
   fetchAdminDashboardSource,
@@ -29,7 +26,6 @@ import {
 } from "@/lib/brokerProductivity";
 import { formatDate, formatDateTime, formatSupabaseError } from "@/lib/crmFormat";
 import { ALL_OFFICES_LABEL, UNASSIGNED_OFFICE_LABEL } from "@/lib/offices";
-import type { UserProfile } from "@/lib/userProfile";
 
 function OfficeOverviewSummaryCards({
   summary,
@@ -57,10 +53,7 @@ function OfficeOverviewSummaryCards({
 }
 
 export function AdminPage() {
-  const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [accessDenied, setAccessDenied] = useState(false);
+  useAdminAuth();
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [dashboardRaw, setDashboardRaw] = useState<RawCrmData | null>(null);
@@ -68,7 +61,23 @@ export function AdminPage() {
 
   const loadData = useCallback(async () => {
     setFetchError(null);
+    if (process.env.NODE_ENV === "development") {
+      console.time("admin overview load");
+    }
     const { data, error } = await fetchAdminDashboardSource();
+    if (process.env.NODE_ENV === "development") {
+      console.timeEnd("admin overview load");
+      if (data) {
+        console.info("[admin overview]", {
+          profiles: data.profiles.length,
+          companies: data.companies.length,
+          contacts: data.contacts.length,
+          followUps: data.followUps.length,
+          opportunities: data.opportunities.length,
+          activities: data.activities.length,
+        });
+      }
+    }
     if (error) {
       setFetchError(formatSupabaseError(error));
       setDashboardRaw(null);
@@ -102,37 +111,30 @@ export function AdminPage() {
   }, [overview, officeFilter]);
 
   useEffect(() => {
-    verifyAdminAccess().then((result) => {
-      if (!result.allowed) {
-        if (result.reason === "unauthenticated") {
-          router.replace("/login");
-          return;
-        }
-        setAccessDenied(true);
-        setLoading(false);
-        return;
-      }
-
-      setUser(result.user);
-      setProfile(result.profile);
-      loadData().finally(() => setLoading(false));
-    });
-  }, [router, loadData]);
+    loadData().finally(() => setLoading(false));
+  }, [loadData]);
 
   if (loading) {
     return (
       <div className="crm-loading-screen">
-        <p className="text-sm text-slate-500">Loading...</p>
+        <p className="text-sm text-slate-500">Loading overview…</p>
       </div>
     );
   }
 
-  if (accessDenied) {
-    return <AdminAccessDenied />;
-  }
-
-  if (!user || !profile || !overview) {
-    return null;
+  if (!overview) {
+    return (
+      <AuthenticatedLayout maxWidthClass="max-w-[1400px]">
+        <PageHeader
+          title="Admin overview"
+          description="Global commercial activity, broker productivity, and pipeline health across all accounts."
+        />
+        <AdminSubNav />
+        <CrmAlert variant="error">
+          {fetchError ?? "Unable to load admin overview."}
+        </CrmAlert>
+      </AuthenticatedLayout>
+    );
   }
 
   const { kpis, brokerProductivity, needsAttention, commercialPulse } =
