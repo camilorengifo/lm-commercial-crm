@@ -9,6 +9,7 @@ import {
   AdminSubNav,
   AdminSummaryCard,
   ProductivityScoreHint,
+  ProductivityCompanyCountHint,
 } from "@/components/admin-shared";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { StatGrid } from "@/components/crm-ui";
@@ -82,7 +83,10 @@ function BrokerProductivityTable({
             <th className="px-4 py-3 text-right font-medium text-zinc-600">
               Score
             </th>
-            <th className="px-4 py-3 text-right font-medium text-zinc-600">
+            <th
+              className="px-4 py-3 text-right font-medium text-zinc-600"
+              title="Non-deleted companies where companies.user_id equals the owner"
+            >
               Companies
             </th>
             <th className="px-4 py-3 text-right font-medium text-zinc-600">
@@ -338,6 +342,7 @@ export function AdminBrokersPage() {
           results by office / agency.
         </p>
         <ProductivityScoreHint />
+        <ProductivityCompanyCountHint />
       </div>
 
       <AdminSubNav />

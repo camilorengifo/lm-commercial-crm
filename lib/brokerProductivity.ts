@@ -13,6 +13,10 @@ export function productivityRoleLabel(role: UserRole): string {
 export const PRODUCTIVITY_SCORE_EXPLANATION =
   "Score is based on recent follow-ups, notes, new accounts, contacts, opportunities, wins, and overdue items.";
 
+/** Matches personal /companies with Account status = All (non-deleted book). */
+export const PRODUCTIVITY_COMPANY_COUNT_RULE =
+  "Companies counts non-deleted records where companies.user_id equals the owner (deleted_at is null). Includes archived account status. Matches personal /companies when Account status is All.";
+
 export type BrokerActivityLevel =
   | "all"
   | "high"

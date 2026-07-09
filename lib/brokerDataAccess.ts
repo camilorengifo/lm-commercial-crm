@@ -14,6 +14,97 @@ import {
 export const COMPANY_OWNER_USER_ID_COLUMN = "user_id";
 export const COMPANIES_FETCH_PAGE_SIZE = 1000;
 
+export const PRODUCTIVITY_COMPANY_SELECT =
+  "id, user_id, name, priority, sales_stage, last_contact_at, next_follow_up_at, created_at";
+
+export type ProductivityCompanyRow = {
+  id: string;
+  user_id: string;
+  name: string;
+  priority: string;
+  sales_stage: string;
+  last_contact_at: string | null;
+  next_follow_up_at: string | null;
+  created_at: string;
+};
+
+export function buildOwnedCompanyCountByUserId(
+  companies: Array<Pick<ProductivityCompanyRow, "user_id">>,
+): Map<string, number> {
+  const counts = new Map<string, number>();
+
+  for (const company of companies) {
+    counts.set(
+      company.user_id,
+      (counts.get(company.user_id) ?? 0) + 1,
+    );
+  }
+
+  return counts;
+}
+
+export function getOwnedCompanyCount(
+  counts: Map<string, number>,
+  ownerUserId: string,
+): number {
+  return counts.get(ownerUserId) ?? 0;
+}
+
+async function fetchAllPaginatedRows<T>(input: {
+  fetchPage: (
+    from: number,
+    to: number,
+  ) => Promise<{
+    data: T[] | null;
+    error: { message?: string } | null;
+  }>;
+}): Promise<{ data: T[]; error: { message?: string } | null }> {
+  const rows: T[] = [];
+  let offset = 0;
+
+  while (true) {
+    const { data, error } = await input.fetchPage(
+      offset,
+      offset + COMPANIES_FETCH_PAGE_SIZE - 1,
+    );
+
+    if (error) {
+      return { data: [], error };
+    }
+
+    const batch = data ?? [];
+    rows.push(...batch);
+
+    if (batch.length < COMPANIES_FETCH_PAGE_SIZE) {
+      break;
+    }
+
+    offset += COMPANIES_FETCH_PAGE_SIZE;
+  }
+
+  return { data: rows, error: null };
+}
+
+/** Full non-deleted company book for admin productivity metrics (companies.user_id ownership). */
+export async function fetchAllCompaniesForProductivityMetrics(): Promise<{
+  data: ProductivityCompanyRow[];
+  error: { message?: string } | null;
+}> {
+  return fetchAllPaginatedRows<ProductivityCompanyRow>({
+    fetchPage: async (from, to) => {
+      const { data, error } = await supabase
+        .from("companies")
+        .select(PRODUCTIVITY_COMPANY_SELECT)
+        .is("deleted_at", null)
+        .order("name", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to);
+
+      return { data, error };
+    },
+  });
+}
+
 /** Canonical personal-book owner: always the authenticated viewer on broker-facing routes. */
 export function resolvePersonalCompanyOwnerUserId(viewerUserId: string): string {
   return viewerUserId;

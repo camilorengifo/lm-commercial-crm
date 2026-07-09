@@ -13,6 +13,12 @@ import {
   type UserProfile,
   type UserRole,
 } from "@/lib/userProfile";
+import {
+  buildOwnedCompanyCountByUserId,
+  fetchAllCompaniesForProductivityMetrics,
+  getOwnedCompanyCount,
+  type ProductivityCompanyRow,
+} from "@/lib/brokerDataAccess";
 import { supabase } from "@/lib/supabaseClient";
 import { verifyAdminAccess } from "@/lib/admin";
 import {
@@ -248,16 +254,7 @@ export interface RawCrmData {
     city: string | null;
     is_active: boolean | null;
   }>;
-  companies: Array<{
-    id: string;
-    user_id: string;
-    name: string;
-    priority: string;
-    sales_stage: string;
-    last_contact_at: string | null;
-    next_follow_up_at: string | null;
-    created_at: string;
-  }>;
+  companies: ProductivityCompanyRow[];
   contacts: Array<{ id: string; user_id: string; created_at: string }>;
   activities: Array<{
     id: string;
@@ -314,9 +311,7 @@ async function fetchRawCrmData(): Promise<{
       .select("id, name, city, is_active")
       .eq("is_active", true)
       .order("name"),
-    supabase.from("companies").select(
-      "id, user_id, name, priority, sales_stage, last_contact_at, next_follow_up_at, created_at",
-    ),
+    fetchAllCompaniesForProductivityMetrics(),
     supabase.from("contacts").select("id, user_id, created_at"),
     supabase
       .from("follow_ups")
@@ -479,6 +474,8 @@ function buildBrokerProductivityRows(
     }
   }
 
+  const companyCountByUserId = buildOwnedCompanyCountByUserId(raw.companies);
+
   return brokerProfiles.map((profile) => {
     const userId = profile.id;
     const pendingFollowUps = raw.followUps.filter(
@@ -554,8 +551,7 @@ function buildBrokerProductivityRows(
       officeName: profile.office_id
         ? officeNameById.get(profile.office_id) ?? UNASSIGNED_OFFICE_LABEL
         : UNASSIGNED_OFFICE_LABEL,
-      companies: raw.companies.filter((company) => company.user_id === userId)
-        .length,
+      companies: getOwnedCompanyCount(companyCountByUserId, userId),
       contacts: raw.contacts.filter((contact) => contact.user_id === userId)
         .length,
       activities7d,

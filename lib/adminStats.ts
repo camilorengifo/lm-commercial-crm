@@ -1,6 +1,11 @@
 import { getFollowUpBucket } from "@/lib/followUps";
 import { isOpenOpportunityStage } from "@/lib/crmConstants";
 import { isBrokerProductivityEligibleRole } from "@/lib/brokerProductivity";
+import {
+  buildOwnedCompanyCountByUserId,
+  fetchAllCompaniesForProductivityMetrics,
+  getOwnedCompanyCount,
+} from "@/lib/brokerDataAccess";
 import { supabase } from "@/lib/supabaseClient";
 import { verifyAdminAccess } from "@/lib/admin";
 import {
@@ -82,7 +87,7 @@ export async function fetchAdminDashboardStats(): Promise<{
     activitiesResult,
   ] = await Promise.all([
     supabase.from("profiles").select("id, email, full_name, role"),
-    supabase.from("companies").select("id, user_id, last_contact_at, priority"),
+    fetchAllCompaniesForProductivityMetrics(),
     supabase.from("contacts").select("id, user_id"),
     supabase
       .from("follow_ups")
@@ -170,6 +175,8 @@ export async function fetchAdminDashboardStats(): Promise<{
     }
   }
 
+  const companyCountByUserId = buildOwnedCompanyCountByUserId(companies);
+
   const brokerRows: BrokerPerformanceRow[] = brokerProfiles.map((profile) => {
     const userId = profile.id;
     const pendingForUser = followUps.filter(
@@ -189,7 +196,7 @@ export async function fetchAdminDashboardStats(): Promise<{
       userId,
       name: getProfileDisplayName(profile),
       email: profile.email ?? "—",
-      companies: companies.filter((company) => company.user_id === userId).length,
+      companies: getOwnedCompanyCount(companyCountByUserId, userId),
       contacts: contacts.filter((contact) => contact.user_id === userId).length,
       followUpsDueToday: dueToday,
       overdueFollowUps: overdue,

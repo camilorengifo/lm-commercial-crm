@@ -8,6 +8,7 @@ import {
   AdminAccessDenied,
   AdminSubNav,
   AdminSummaryCard,
+  ProductivityCompanyCountHint,
 } from "@/components/admin-shared";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { StatGrid } from "@/components/crm-ui";
@@ -145,7 +146,11 @@ export function AdminBrokerDetailPage() {
       )}
 
       <StatGrid columns={6}>
-        <AdminSummaryCard label="Companies" value={metrics.companies} />
+        <AdminSummaryCard
+          label="Companies"
+          value={metrics.companies}
+          subtext="Non-deleted, companies.user_id"
+        />
         <AdminSummaryCard label="Contacts" value={metrics.contacts} />
         <AdminSummaryCard
           label="Follow-ups due today"
@@ -164,6 +169,8 @@ export function AdminBrokerDetailPage() {
           value={formatPipelineValue(metrics.openPipelineValue)}
         />
       </StatGrid>
+
+      <ProductivityCompanyCountHint />
 
       <div className="mb-5 grid gap-4 xl:grid-cols-2">
         <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">

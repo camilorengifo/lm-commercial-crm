@@ -67,12 +67,20 @@ export function AdminSummaryCard({
   return <StatCard label={label} value={value} subtext={subtext} />;
 }
 
-import { PRODUCTIVITY_SCORE_EXPLANATION } from "@/lib/brokerProductivity";
+import { PRODUCTIVITY_SCORE_EXPLANATION, PRODUCTIVITY_COMPANY_COUNT_RULE } from "@/lib/brokerProductivity";
 
 export function ProductivityScoreHint() {
   return (
     <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">
       {PRODUCTIVITY_SCORE_EXPLANATION}
+    </p>
+  );
+}
+
+export function ProductivityCompanyCountHint() {
+  return (
+    <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">
+      {PRODUCTIVITY_COMPANY_COUNT_RULE}
     </p>
   );
 }
