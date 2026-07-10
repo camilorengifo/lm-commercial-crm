@@ -1,3 +1,10 @@
+import {
+  formatRegionFilterLabel,
+  getRegionSearchTokens,
+  normalizeLocationValue,
+  serviceAreaStateMatchesFilter,
+} from "@/lib/locationData";
+import { serviceAreaMatchesLocationFilters } from "@/lib/locationFilters";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   formatCarrierCountryDisplay,
@@ -167,9 +174,11 @@ export function carrierMatchesSearch(carrier: CarrierListItem, search: string): 
     carrier.email,
     ...(carrier.serviceAreas ?? []).flatMap((area) => [
       area.city,
+      area.city ? normalizeLocationValue(area.city) : null,
       area.state,
       area.country,
       formatCarrierCountryDisplay(area.country),
+      ...getRegionSearchTokens(area.country, area.state),
     ]),
   ]
     .filter(Boolean)
@@ -217,16 +226,38 @@ export function carrierMatchesFilters(
   }
 
   if (filters.state !== "all") {
-    const hasState = carrier.serviceAreas.some(
-      (area) =>
-        area.state?.toLowerCase() === filters.state.toLowerCase(),
-    );
+    const filterCountry =
+      filters.country !== "all"
+        ? normalizeCarrierCountry(filters.country)
+        : null;
+    const hasState = carrier.serviceAreas.some((area) => {
+      if (
+        filterCountry &&
+        normalizeCarrierCountry(area.country) !== filterCountry
+      ) {
+        return false;
+      }
+
+      return serviceAreaStateMatchesFilter(
+        area.state,
+        area.country,
+        filters.state,
+        filters.country !== "all" ? filters.country : (area.country ?? ""),
+      );
+    });
     if (!hasState) return false;
   }
 
   if (filters.city !== "all") {
-    const hasCity = carrier.serviceAreas.some(
-      (area) => area.city?.toLowerCase() === filters.city.toLowerCase(),
+    const hasCity = carrier.serviceAreas.some((area) =>
+      serviceAreaMatchesLocationFilters({
+        areaCountry: area.country,
+        areaState: area.state,
+        areaCity: area.city,
+        filterCountry: filters.country,
+        filterState: filters.state,
+        filterCity: filters.city,
+      }),
     );
     if (!hasCity) return false;
   }
@@ -273,7 +304,10 @@ export function getActiveFilterChips(
     });
   }
   if (filters.state !== "all") {
-    chips.push({ key: "state", label: `State: ${filters.state}` });
+    chips.push({
+      key: "state",
+      label: `State: ${formatRegionFilterLabel(filters.country, filters.state)}`,
+    });
   }
   if (filters.city !== "all") {
     chips.push({ key: "city", label: `City: ${filters.city}` });
@@ -508,24 +542,4 @@ export async function findDuplicateCarrier(
   }
 
   return null;
-}
-
-export function collectFilterOptions(carriers: CarrierListItem[]): {
-  states: string[];
-  cities: string[];
-} {
-  const states = new Set<string>();
-  const cities = new Set<string>();
-
-  for (const carrier of carriers) {
-    for (const area of carrier.serviceAreas) {
-      if (area.state) states.add(area.state);
-      if (area.city) cities.add(area.city);
-    }
-  }
-
-  return {
-    states: [...states].sort((a, b) => a.localeCompare(b)),
-    cities: [...cities].sort((a, b) => a.localeCompare(b)),
-  };
 }

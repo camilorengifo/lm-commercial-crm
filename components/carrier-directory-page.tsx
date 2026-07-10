@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { CarrierAddFormModal } from "@/components/carrier-add-form-modal";
+import { CityFilterCombobox } from "@/components/city-filter-combobox";
 import { CarrierTableRow, SharedCarrierReadOnlyNotice } from "@/components/carrier-directory-shared";
 import { CrmAlert, EmptyState, PageHeader } from "@/components/crm-ui";
 import {
@@ -28,7 +29,6 @@ import {
 } from "@/lib/carrierConstants";
 import {
   carrierMatchesFilters,
-  collectFilterOptions,
   EMPTY_CARRIER_DIRECTORY_FILTERS,
   fetchCarrierNetwork,
   fetchMyCarriers,
@@ -39,6 +39,15 @@ import {
 import type { CarrierFormInput } from "@/lib/carrierValidation";
 import { formatSupabaseError } from "@/lib/crmFormat";
 import { carrierDetailHref } from "@/lib/carrierEditContext";
+import {
+  formatRegionOptionLabel,
+  getStateFilterOptionsForCountry,
+} from "@/lib/locationData";
+import {
+  carrierMatchesCountryStateFilters,
+  getAvailableCities,
+  isCityFilterValueValid,
+} from "@/lib/locationFilters";
 import { fetchUserProfile, isAdminProfile } from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -131,22 +140,58 @@ export function CarrierDirectoryPage() {
 
   const sourceCarriers = tab === "my" ? myCarriers : networkCarriers;
 
+  const stateFilterOptions = useMemo(
+    () => getStateFilterOptionsForCountry(filters.country),
+    [filters.country],
+  );
+
+  const locationFilteredCarriers = useMemo(
+    () =>
+      filters.country === "all"
+        ? []
+        : sourceCarriers.filter((carrier) =>
+            carrierMatchesCountryStateFilters(
+              carrier,
+              filters.country,
+              filters.state,
+            ),
+          ),
+    [sourceCarriers, filters.country, filters.state],
+  );
+
+  const cityFilterOptions = useMemo(
+    () =>
+      getAvailableCities(
+        locationFilteredCarriers,
+        filters.country,
+        filters.state,
+      ),
+    [locationFilteredCarriers, filters.country, filters.state],
+  );
+
+  const activeFilters = useMemo(() => {
+    if (
+      filters.city !== "all" &&
+      (filters.country === "all" ||
+        !isCityFilterValueValid(filters.city, cityFilterOptions))
+    ) {
+      return { ...filters, city: "all" };
+    }
+
+    return filters;
+  }, [filters, cityFilterOptions]);
+
   const filteredCarriers = useMemo(
     () =>
       sourceCarriers.filter((carrier) =>
-        carrierMatchesFilters(carrier, filters),
+        carrierMatchesFilters(carrier, activeFilters),
       ),
-    [sourceCarriers, filters],
-  );
-
-  const filterOptions = useMemo(
-    () => collectFilterOptions(networkCarriers),
-    [networkCarriers],
+    [sourceCarriers, activeFilters],
   );
 
   const activeChips = useMemo(
-    () => getActiveFilterChips(filters, tab),
-    [filters, tab],
+    () => getActiveFilterChips(activeFilters, tab),
+    [activeFilters, tab],
   );
 
   function clearFilters() {
@@ -389,7 +434,12 @@ export function CarrierDirectoryPage() {
             className="crm-select w-full"
             value={filters.country}
             onChange={(event) =>
-              setFilters((current) => ({ ...current, country: event.target.value }))
+              setFilters((current) => ({
+                ...current,
+                country: event.target.value,
+                state: "all",
+                city: "all",
+              }))
             }
           >
             {CARRIER_COUNTRY_FILTER_OPTIONS.map((option) => (
@@ -405,15 +455,20 @@ export function CarrierDirectoryPage() {
           </span>
           <select
             className="crm-select w-full"
-            value={filters.state}
+            value={filters.country === "all" ? "all" : filters.state}
+            disabled={filters.country === "all"}
             onChange={(event) =>
-              setFilters((current) => ({ ...current, state: event.target.value }))
+              setFilters((current) => ({
+                ...current,
+                state: event.target.value,
+                city: "all",
+              }))
             }
           >
             <option value="all">All</option>
-            {filterOptions.states.map((state) => (
-              <option key={state} value={state}>
-                {state}
+            {stateFilterOptions.map((region) => (
+              <option key={region.abbreviation} value={region.abbreviation}>
+                {formatRegionOptionLabel(region)}
               </option>
             ))}
           </select>
@@ -422,20 +477,17 @@ export function CarrierDirectoryPage() {
           <span className="mb-1 block text-sm font-medium text-slate-700">
             City
           </span>
-          <select
-            className="crm-select w-full"
-            value={filters.city}
-            onChange={(event) =>
-              setFilters((current) => ({ ...current, city: event.target.value }))
+          <CityFilterCombobox
+            value={filters.country === "all" ? "all" : activeFilters.city}
+            options={cityFilterOptions}
+            disabled={filters.country === "all"}
+            disabledMessage="Select a country first"
+            emptyMessage="No cities available for this location"
+            noMatchMessage="No cities found"
+            onChange={(city) =>
+              setFilters((current) => ({ ...current, city }))
             }
-          >
-            <option value="all">All</option>
-            {filterOptions.cities.map((city) => (
-              <option key={city} value={city}>
-                {city}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         <label>
           <span className="mb-1 block text-sm font-medium text-slate-700">
