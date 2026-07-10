@@ -22,6 +22,7 @@ const NAV_ITEMS = [
   { href: "/pipeline", label: "Pipeline", short: "Pipeline" },
   { href: "/follow-ups", label: "Follow-ups", short: "Follow-ups" },
   { href: "/import", label: "Import", short: "Import" },
+  { href: "/carrier-directory", label: "Carrier Directory", short: "Carriers" },
 ] as const;
 
 function isNavActive(href: string, pathname: string): boolean {
@@ -84,6 +85,16 @@ function NavIcon({ href, active }: { href: string; active: boolean }) {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    ),
+    "/carrier-directory": (
+      <>
+        <path
+          d="M5 7h14M5 12h10M5 17h6"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+        />
+        <rect x="3" y="4" width="18" height="16" rx="2" strokeWidth="1.75" />
+      </>
     ),
     "/admin": (
       <>
