@@ -123,6 +123,103 @@ export async function bulkUpdateCompanyAccountStatus(input: {
   });
 }
 
+export const BULK_UPDATE_COMPANY_CHUNK_SIZE = 100;
+
+export async function bulkUpdateCompanyFields(input: {
+  companyIds: string[];
+  priority?: string | null;
+  salesStage?: string | null;
+  accountStatus?: string | null;
+}) {
+  return companyRequest<{
+    message: string;
+    updated: number;
+    failed: number;
+    errors?: string[];
+  }>("/api/companies/bulk-update", {
+    companyIds: input.companyIds,
+    priority: input.priority ?? null,
+    salesStage: input.salesStage ?? null,
+    accountStatus: input.accountStatus ?? null,
+  });
+}
+
+/** Sends company IDs in chunks to the bulk-update API. */
+export async function bulkUpdateCompanyFieldsInBatches(input: {
+  companyIds: string[];
+  priority?: string | null;
+  salesStage?: string | null;
+  accountStatus?: string | null;
+  chunkSize?: number;
+}): Promise<{
+  data: {
+    message: string;
+    updated: number;
+    failed: number;
+    errors?: string[];
+  } | null;
+  error: string | null;
+}> {
+  const chunkSize = input.chunkSize ?? BULK_UPDATE_COMPANY_CHUNK_SIZE;
+  const ids = [...new Set(input.companyIds.filter(Boolean))];
+
+  if (ids.length === 0) {
+    return { data: null, error: "Select at least one company." };
+  }
+
+  if (!input.priority && !input.salesStage && !input.accountStatus) {
+    return { data: null, error: "Select at least one field to update." };
+  }
+
+  let updated = 0;
+  let failed = 0;
+  const errors: string[] = [];
+
+  for (let index = 0; index < ids.length; index += chunkSize) {
+    const chunk = ids.slice(index, index + chunkSize);
+    const { data, error } = await bulkUpdateCompanyFields({
+      companyIds: chunk,
+      priority: input.priority,
+      salesStage: input.salesStage,
+      accountStatus: input.accountStatus,
+    });
+
+    if (error || !data) {
+      failed += chunk.length;
+      errors.push(error ?? `Batch starting at index ${index} failed.`);
+      continue;
+    }
+
+    updated += data.updated;
+    failed += data.failed;
+    if (data.errors?.length) {
+      errors.push(...data.errors);
+    }
+  }
+
+  if (updated === 0) {
+    return {
+      data: null,
+      error: errors[0] ?? "Unable to update companies.",
+    };
+  }
+
+  const message =
+    failed === 0
+      ? `${updated} compan${updated === 1 ? "y" : "ies"} updated successfully.`
+      : `${updated} compan${updated === 1 ? "y" : "ies"} updated successfully. ${failed} could not be updated.`;
+
+  return {
+    data: {
+      message,
+      updated,
+      failed,
+      errors: errors.length > 0 ? errors : undefined,
+    },
+    error: null,
+  };
+}
+
 export interface CreateCompanyInput {
   name: string;
   city: string | null;

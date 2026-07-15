@@ -8,6 +8,7 @@ import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { CrmAlert, CrmCard, EmptyState, PageHeader, SectionHeader } from "@/components/crm-ui";
 import { CompaniesBulkActiveModal } from "@/components/companies-bulk-active-modal";
 import { CompaniesBulkArchiveModal } from "@/components/companies-bulk-archive-modal";
+import { CompaniesBulkEditConfirmModal } from "@/components/companies-bulk-edit-confirm-modal";
 import { CompaniesBulkPauseModal } from "@/components/companies-bulk-pause-modal";
 import {
   COMPANY_PRIORITIES,
@@ -27,6 +28,7 @@ import {
   type CompanySortOption,
 } from "@/lib/companies";
 import {
+  ACCOUNT_STATUSES,
   ACCOUNT_STATUS_FILTER_OPTIONS,
   ACCOUNT_STATUS_LABELS,
   accountDispositionBadgeClass,
@@ -35,6 +37,7 @@ import {
   isWorkingCompanyRecord,
   matchesAccountStatusFilter,
   normalizeAccountStatus,
+  type AccountStatus,
   type AccountStatusFilter,
 } from "@/lib/accountStatus";
 import { CompanyCreateContactsSection } from "@/components/company-create-contacts-section";
@@ -67,7 +70,10 @@ import {
   saveAddCompanyDraft,
   type AddCompanyFormState,
 } from "@/lib/addCompanyDraft";
-import { createCompany } from "@/lib/companyClient";
+import {
+  bulkUpdateCompanyFieldsInBatches,
+  createCompany,
+} from "@/lib/companyClient";
 import { supabase } from "@/lib/supabaseClient";
 
 interface Company extends CompanyRecord {
@@ -75,6 +81,10 @@ interface Company extends CompanyRecord {
 }
 
 const ADD_COMPANY_AUTOSAVE_MS = 500;
+const COMPANIES_PAGE_SIZE = 50;
+const BULK_NO_CHANGE = "no_change";
+
+type BulkFieldValue = typeof BULK_NO_CHANGE | string;
 
 export function CompaniesPage() {
   const router = useRouter();
@@ -102,10 +112,22 @@ export function CompaniesPage() {
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<Set<string>>(
     new Set(),
   );
+  const [selectionIncludesAllFiltered, setSelectionIncludesAllFiltered] =
+    useState(false);
+  const [page, setPage] = useState(1);
+  const [bulkPriority, setBulkPriority] =
+    useState<BulkFieldValue>(BULK_NO_CHANGE);
+  const [bulkAccountStatus, setBulkAccountStatus] =
+    useState<BulkFieldValue>(BULK_NO_CHANGE);
+  const [bulkSalesStage, setBulkSalesStage] =
+    useState<BulkFieldValue>(BULK_NO_CHANGE);
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+  const [bulkEditError, setBulkEditError] = useState<string | null>(null);
   const [bulkArchiveOpen, setBulkArchiveOpen] = useState(false);
   const [bulkPauseOpen, setBulkPauseOpen] = useState(false);
   const [bulkActiveOpen, setBulkActiveOpen] = useState(false);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const masterCheckboxRef = useRef<HTMLInputElement>(null);
   const [viewerProfile, setViewerProfile] = useState<UserProfile | null>(null);
   const [profileIdMatchesAuth, setProfileIdMatchesAuth] = useState(true);
   const [authEmailMatchesProfile, setAuthEmailMatchesProfile] = useState(true);
@@ -350,26 +372,96 @@ export function CompaniesPage() {
     return sortCompanies(rows, sortBy);
   }, [companies, search, countryFilter, priorityFilter, accountStatusFilter, sortBy]);
 
-  const visibleCompanyIds = useMemo(
+  const filteredCompanyIds = useMemo(
     () => filteredCompanies.map((company) => company.id),
     [filteredCompanies],
   );
 
-  const selectedVisibleCount = useMemo(
-    () => visibleCompanyIds.filter((id) => selectedCompanyIds.has(id)).length,
-    [visibleCompanyIds, selectedCompanyIds],
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredCompanies.length / COMPANIES_PAGE_SIZE),
   );
 
-  const allVisibleSelected =
-    visibleCompanyIds.length > 0 &&
-    visibleCompanyIds.every((companyId) => selectedCompanyIds.has(companyId));
+  const currentPage = Math.min(page, totalPages);
 
-  const selectedCompanyIdList = useMemo(
-    () => Array.from(selectedCompanyIds),
-    [selectedCompanyIds],
+  const pageCompanies = useMemo(() => {
+    const start = (currentPage - 1) * COMPANIES_PAGE_SIZE;
+    return filteredCompanies.slice(start, start + COMPANIES_PAGE_SIZE);
+  }, [filteredCompanies, currentPage]);
+
+  const pageCompanyIds = useMemo(
+    () => pageCompanies.map((company) => company.id),
+    [pageCompanies],
   );
+
+  const selectedOnPageCount = useMemo(
+    () => pageCompanyIds.filter((id) => selectedCompanyIds.has(id)).length,
+    [pageCompanyIds, selectedCompanyIds],
+  );
+
+  const allPageSelected =
+    pageCompanyIds.length > 0 &&
+    pageCompanyIds.every((companyId) => selectedCompanyIds.has(companyId));
+
+  const somePageSelected =
+    selectedOnPageCount > 0 && selectedOnPageCount < pageCompanyIds.length;
+
+  const allFilteredSelected =
+    filteredCompanyIds.length > 0 &&
+    filteredCompanyIds.every((companyId) => selectedCompanyIds.has(companyId));
+
+  const selectedCompanyIdList = useMemo(() => {
+    const allowed = new Set(filteredCompanyIds);
+    return Array.from(selectedCompanyIds).filter((id) => allowed.has(id));
+  }, [selectedCompanyIds, filteredCompanyIds]);
+
+  const selectedCount = selectedCompanyIdList.length;
+
+  const bulkFieldChanges = useMemo(() => {
+    const changes: Array<{ label: string; value: string }> = [];
+    if (bulkPriority !== BULK_NO_CHANGE) {
+      changes.push({ label: "Priority", value: bulkPriority });
+    }
+    if (bulkAccountStatus !== BULK_NO_CHANGE) {
+      changes.push({
+        label: "Account Status",
+        value:
+          ACCOUNT_STATUS_LABELS[bulkAccountStatus as AccountStatus] ??
+          bulkAccountStatus,
+      });
+    }
+    if (bulkSalesStage !== BULK_NO_CHANGE) {
+      changes.push({ label: "Sales Stage", value: bulkSalesStage });
+    }
+    return changes;
+  }, [bulkPriority, bulkAccountStatus, bulkSalesStage]);
+
+  const canApplyBulkEdit =
+    selectedCount > 0 && bulkFieldChanges.length > 0 && !bulkSubmitting;
+
+  useEffect(() => {
+    setPage(1);
+    setSelectedCompanyIds(new Set());
+    setSelectionIncludesAllFiltered(false);
+    setBulkPriority(BULK_NO_CHANGE);
+    setBulkAccountStatus(BULK_NO_CHANGE);
+    setBulkSalesStage(BULK_NO_CHANGE);
+  }, [search, countryFilter, priorityFilter, accountStatusFilter, sortBy]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
+  useEffect(() => {
+    if (masterCheckboxRef.current) {
+      masterCheckboxRef.current.indeterminate = somePageSelected;
+    }
+  }, [somePageSelected]);
 
   function toggleCompanySelection(companyId: string) {
+    setSelectionIncludesAllFiltered(false);
     setSelectedCompanyIds((current) => {
       const next = new Set(current);
       if (next.has(companyId)) {
@@ -381,15 +473,16 @@ export function CompaniesPage() {
     });
   }
 
-  function toggleSelectAllVisible() {
+  function toggleSelectAllOnPage() {
+    setSelectionIncludesAllFiltered(false);
     setSelectedCompanyIds((current) => {
       const next = new Set(current);
-      if (allVisibleSelected) {
-        for (const companyId of visibleCompanyIds) {
+      if (allPageSelected) {
+        for (const companyId of pageCompanyIds) {
           next.delete(companyId);
         }
       } else {
-        for (const companyId of visibleCompanyIds) {
+        for (const companyId of pageCompanyIds) {
           next.add(companyId);
         }
       }
@@ -397,8 +490,60 @@ export function CompaniesPage() {
     });
   }
 
+  function selectAllFilteredCompanies() {
+    setSelectedCompanyIds(new Set(filteredCompanyIds));
+    setSelectionIncludesAllFiltered(true);
+  }
+
   function clearSelection() {
     setSelectedCompanyIds(new Set());
+    setSelectionIncludesAllFiltered(false);
+    setBulkPriority(BULK_NO_CHANGE);
+    setBulkAccountStatus(BULK_NO_CHANGE);
+    setBulkSalesStage(BULK_NO_CHANGE);
+    setBulkEditError(null);
+  }
+
+  function openBulkEditConfirm() {
+    setBulkEditError(null);
+    if (selectedCount === 0) {
+      setBulkEditError("Select at least one company.");
+      return;
+    }
+    if (bulkFieldChanges.length === 0) {
+      setBulkEditError('Choose at least one field different from "No change".');
+      return;
+    }
+    setBulkConfirmOpen(true);
+  }
+
+  async function applyBulkEdit() {
+    if (!user || !canApplyBulkEdit) return;
+
+    setBulkSubmitting(true);
+    setBulkEditError(null);
+
+    const { data, error } = await bulkUpdateCompanyFieldsInBatches({
+      companyIds: selectedCompanyIdList,
+      priority:
+        bulkPriority === BULK_NO_CHANGE ? null : bulkPriority,
+      accountStatus:
+        bulkAccountStatus === BULK_NO_CHANGE ? null : bulkAccountStatus,
+      salesStage:
+        bulkSalesStage === BULK_NO_CHANGE ? null : bulkSalesStage,
+    });
+
+    setBulkSubmitting(false);
+
+    if (error || !data) {
+      setBulkEditError(error ?? "Unable to update companies.");
+      return;
+    }
+
+    setBulkConfirmOpen(false);
+    clearSelection();
+    setSuccessMessage(data.message);
+    await fetchCompanies(user.id, user.email ?? null);
   }
 
   function archiveSuccessMessage(updated: number): string {
@@ -441,6 +586,7 @@ export function CompaniesPage() {
     setPriorityFilter("all");
     setAccountStatusFilter("working");
     setSortBy("name_asc");
+    setPage(1);
   }
 
   function resetCreateForm() {
@@ -781,55 +927,160 @@ export function CompaniesPage() {
           </CrmAlert>
         )}
 
-        {selectedCompanyIds.size > 0 && (
-          <CrmCard className="mb-4" padding>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm font-medium text-slate-700">
-              {selectedCompanyIds.size} account
-              {selectedCompanyIds.size === 1 ? "" : "s"} selected
-              {selectedVisibleCount !== selectedCompanyIds.size && (
-                <span className="ml-1 font-normal text-slate-500">
-                  ({selectedVisibleCount} visible)
-                </span>
+        <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm font-medium text-slate-700">
+                {selectedCount} compan
+                {selectedCount === 1 ? "y" : "ies"} selected
+                {selectedCount > 0 &&
+                  (selectionIncludesAllFiltered || allFilteredSelected ? (
+                    <span className="ml-1 font-normal text-slate-500">
+                      (all matching filters)
+                    </span>
+                  ) : (
+                    <span className="ml-1 font-normal text-slate-500">
+                      ({selectedOnPageCount} on this page)
+                    </span>
+                  ))}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBulkArchiveOpen(true)}
+                  disabled={selectedCount === 0 || bulkSubmitting}
+                  className="crm-btn-secondary crm-btn-sm disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Archive selected
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkPauseOpen(true)}
+                  disabled={selectedCount === 0 || bulkSubmitting}
+                  className="crm-btn-secondary crm-btn-sm disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Pause selected
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkActiveOpen(true)}
+                  disabled={selectedCount === 0 || bulkSubmitting}
+                  className="crm-btn-secondary crm-btn-sm disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Mark as Active
+                </button>
+              </div>
+            </div>
+
+            {selectedCount > 0 &&
+              allPageSelected &&
+              !allFilteredSelected &&
+              filteredCompanies.length > pageCompanies.length && (
+                <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+                  All {pageCompanies.length} companies on this page are
+                  selected.{" "}
+                  <button
+                    type="button"
+                    onClick={selectAllFilteredCompanies}
+                    className="font-semibold underline underline-offset-2"
+                  >
+                    Select all {filteredCompanies.length} matching companies
+                  </button>
+                  .
+                </p>
               )}
-            </p>
-            <div className="flex flex-wrap gap-2">
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 lg:items-end">
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-slate-600">
+                  Priority
+                </span>
+                <select
+                  className="crm-select w-full disabled:cursor-not-allowed disabled:opacity-60"
+                  value={bulkPriority}
+                  onChange={(event) => setBulkPriority(event.target.value)}
+                  aria-label="Bulk edit priority"
+                  disabled={selectedCount === 0 || bulkSubmitting}
+                >
+                  <option value={BULK_NO_CHANGE}>No change</option>
+                  {COMPANY_PRIORITIES.map((priority) => (
+                    <option key={priority} value={priority}>
+                      {priority}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-slate-600">
+                  Account Status
+                </span>
+                <select
+                  className="crm-select w-full disabled:cursor-not-allowed disabled:opacity-60"
+                  value={bulkAccountStatus}
+                  onChange={(event) =>
+                    setBulkAccountStatus(event.target.value)
+                  }
+                  aria-label="Bulk edit account status"
+                  disabled={selectedCount === 0 || bulkSubmitting}
+                >
+                  <option value={BULK_NO_CHANGE}>No change</option>
+                  {ACCOUNT_STATUSES.map((status) => (
+                    <option key={status} value={status}>
+                      {ACCOUNT_STATUS_LABELS[status]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-slate-600">
+                  Sales Stage
+                </span>
+                <select
+                  className="crm-select w-full disabled:cursor-not-allowed disabled:opacity-60"
+                  value={bulkSalesStage}
+                  onChange={(event) => setBulkSalesStage(event.target.value)}
+                  aria-label="Bulk edit sales stage"
+                  disabled={selectedCount === 0 || bulkSubmitting}
+                >
+                  <option value={BULK_NO_CHANGE}>No change</option>
+                  {SALES_STAGES.map((stage) => (
+                    <option key={stage} value={stage}>
+                      {stage}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
               <button
                 type="button"
-                onClick={() => setBulkArchiveOpen(true)}
-                disabled={bulkSubmitting}
+                onClick={openBulkEditConfirm}
+                disabled={!canApplyBulkEdit}
                 className="crm-btn-primary crm-btn-sm disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Archive selected
+                {bulkSubmitting
+                  ? "Updating…"
+                  : `Apply to ${selectedCount} compan${selectedCount === 1 ? "y" : "ies"}`}
               </button>
-              <button
-                type="button"
-                onClick={() => setBulkPauseOpen(true)}
-                disabled={bulkSubmitting}
-                className="crm-btn-secondary crm-btn-sm disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Pause selected
-              </button>
-              <button
-                type="button"
-                onClick={() => setBulkActiveOpen(true)}
-                disabled={bulkSubmitting}
-                className="crm-btn-secondary crm-btn-sm disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Mark as Active
-              </button>
+
               <button
                 type="button"
                 onClick={clearSelection}
-                disabled={bulkSubmitting}
+                disabled={selectedCount === 0 || bulkSubmitting}
                 className="crm-btn-secondary crm-btn-sm disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Clear selection
               </button>
             </div>
-            </div>
-          </CrmCard>
-        )}
+
+            {bulkEditError && !bulkConfirmOpen && (
+              <p className="text-sm text-red-600" role="alert">
+                {bulkEditError}
+              </p>
+            )}
+          </div>
+        </div>
 
         {fetchError && (
           <CrmAlert variant="error" className="mb-4">
@@ -1122,26 +1373,39 @@ export function CompaniesPage() {
               <div className="crm-divider-toolbar">
                 <button
                   type="button"
-                  onClick={toggleSelectAllVisible}
+                  onClick={toggleSelectAllOnPage}
                   className="text-sm font-medium text-slate-600 transition hover:text-slate-900"
                 >
-                  {allVisibleSelected ? "Deselect all visible" : "Select all visible"}
+                  {allPageSelected
+                    ? "Deselect all on this page"
+                    : "Select all on this page"}
                 </button>
-                {selectedVisibleCount > 0 && (
-                  <span className="text-sm text-slate-500">
-                    {selectedVisibleCount} selected
-                  </span>
-                )}
+                <span className="text-sm text-slate-500">
+                  Showing{" "}
+                  {filteredCompanies.length === 0
+                    ? 0
+                    : (currentPage - 1) * COMPANIES_PAGE_SIZE + 1}
+                  –
+                  {Math.min(
+                    currentPage * COMPANIES_PAGE_SIZE,
+                    filteredCompanies.length,
+                  )}{" "}
+                  of {filteredCompanies.length}
+                  {selectedOnPageCount > 0 && (
+                    <> · {selectedOnPageCount} on this page selected</>
+                  )}
+                </span>
               </div>
               <table className="crm-table">
                 <thead>
                   <tr>
                     <th className="px-4 py-3">
                       <input
+                        ref={masterCheckboxRef}
                         type="checkbox"
-                        checked={allVisibleSelected}
-                        onChange={toggleSelectAllVisible}
-                        aria-label="Select all visible companies"
+                        checked={allPageSelected}
+                        onChange={toggleSelectAllOnPage}
+                        aria-label="Select all companies on this page"
                         className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500"
                       />
                     </th>
@@ -1176,7 +1440,7 @@ export function CompaniesPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100">
-                  {filteredCompanies.map((company) => {
+                  {pageCompanies.map((company) => {
                     const status = normalizeAccountStatus(company.account_status);
                     const dispositionLabel = getAccountDispositionLabel(
                       company.account_disposition,
@@ -1184,11 +1448,15 @@ export function CompaniesPage() {
 
                     return (
                     <tr key={company.id}>
-                      <td className="px-4 py-3">
+                      <td
+                        className="px-4 py-3"
+                        onClick={(event) => event.stopPropagation()}
+                      >
                         <input
                           type="checkbox"
                           checked={selectedCompanyIds.has(company.id)}
                           onChange={() => toggleCompanySelection(company.id)}
+                          onClick={(event) => event.stopPropagation()}
                           aria-label={`Select ${company.name}`}
                           className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500"
                         />
@@ -1254,27 +1522,69 @@ export function CompaniesPage() {
                   })}
                 </tbody>
               </table>
+
+              {filteredCompanies.length > COMPANIES_PAGE_SIZE && (
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 px-4 py-3">
+                  <p className="text-sm text-slate-500">
+                    Page {currentPage} of {totalPages}
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      className="crm-btn-secondary crm-btn-sm disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={currentPage <= 1}
+                      onClick={() => setPage((current) => Math.max(1, current - 1))}
+                    >
+                      Previous
+                    </button>
+                    <button
+                      type="button"
+                      className="crm-btn-secondary crm-btn-sm disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={currentPage >= totalPages}
+                      onClick={() =>
+                        setPage((current) => Math.min(totalPages, current + 1))
+                      }
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
 
+        <CompaniesBulkEditConfirmModal
+          open={bulkConfirmOpen}
+          selectedCount={selectedCount}
+          changes={bulkFieldChanges}
+          submitting={bulkSubmitting}
+          error={bulkEditError}
+          onCancel={() => {
+            if (!bulkSubmitting) {
+              setBulkConfirmOpen(false);
+              setBulkEditError(null);
+            }
+          }}
+          onConfirm={() => void applyBulkEdit()}
+        />
         <CompaniesBulkArchiveModal
           open={bulkArchiveOpen}
-          selectedCount={selectedCompanyIds.size}
+          selectedCount={selectedCount}
           companyIds={selectedCompanyIdList}
           onClose={() => setBulkArchiveOpen(false)}
           onCompleted={(result) => void handleBulkCompleted("archive", result)}
         />
         <CompaniesBulkPauseModal
           open={bulkPauseOpen}
-          selectedCount={selectedCompanyIds.size}
+          selectedCount={selectedCount}
           companyIds={selectedCompanyIdList}
           onClose={() => setBulkPauseOpen(false)}
           onCompleted={(result) => void handleBulkCompleted("pause", result)}
         />
         <CompaniesBulkActiveModal
           open={bulkActiveOpen}
-          selectedCount={selectedCompanyIds.size}
+          selectedCount={selectedCount}
           companyIds={selectedCompanyIdList}
           onClose={() => setBulkActiveOpen(false)}
           onCompleted={(result) => void handleBulkCompleted("active", result)}
