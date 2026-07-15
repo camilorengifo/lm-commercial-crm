@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -231,6 +232,16 @@ export default function LoginPage() {
     <div className="crm-login-shell">
       <div className="crm-login-card">
         <div className="mb-8 text-center">
+          <div className="mb-6 flex justify-center">
+            <Image
+              src="/logistics-masters-logo.png"
+              alt="Logistics Masters"
+              width={220}
+              height={72}
+              className="h-auto w-full max-w-[200px] object-contain"
+              priority
+            />
+          </div>
           <p className="crm-eyebrow">Logistics Masters</p>
           <h1 className="crm-page-title mt-2">Sign in</h1>
           <p className="crm-page-subtitle mx-auto">

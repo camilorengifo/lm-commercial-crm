@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
@@ -176,7 +177,16 @@ export function AppNav() {
       <aside className="crm-sidebar">
         <div className="crm-sidebar-brand">
           <div className="flex items-center gap-3">
-            <div className="crm-sidebar-brand-mark">LM</div>
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white p-1 shadow-sm ring-1 ring-black/5">
+              <Image
+                src="/logistics-masters-mark.png"
+                alt="Logistics Masters"
+                width={80}
+                height={98}
+                className="h-8 w-8 object-contain"
+                priority
+              />
+            </div>
             <div className="min-w-0">
               <p className="crm-sidebar-brand-title">Logistics Masters</p>
               <p className="crm-sidebar-brand-sub">Commercial CRM</p>
@@ -237,9 +247,16 @@ export function AppNav() {
 
       <header className="crm-mobile-header">
         <div className="flex items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-2.5">
-            <div className="crm-sidebar-brand-mark !h-8 !w-8 !text-[11px]">LM</div>
-            <div>
+          <div className="flex min-w-0 items-center gap-2.5">
+            <Image
+              src="/logistics-masters-logo.png"
+              alt="Logistics Masters"
+              width={108}
+              height={32}
+              className="h-8 w-auto shrink-0 object-contain"
+              priority
+            />
+            <div className="min-w-0">
               <p className="text-sm font-semibold text-slate-900">
                 Logistics Masters
               </p>
