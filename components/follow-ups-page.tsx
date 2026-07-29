@@ -491,8 +491,27 @@ function FollowUpCard({
             </p>
           )}
 
+          {variant === "completed" && followUp.completionOutcome && (
+            <p className="text-sm text-zinc-700">
+              <span className="font-medium text-zinc-600">Outcome:</span>{" "}
+              <span
+                className={
+                  followUp.completionOutcome === "no_response"
+                    ? "text-orange-700"
+                    : "text-emerald-700"
+                }
+              >
+                {followUp.completionOutcome === "no_response"
+                  ? "No response"
+                  : "Successful contact"}
+              </span>
+            </p>
+          )}
+
           <p className="text-sm text-zinc-800">
-            <span className="font-medium text-zinc-600">Due:</span>{" "}
+            <span className="font-medium text-zinc-600">
+              {variant === "completed" ? "Original due:" : "Due:"}
+            </span>{" "}
             {formatDateTime(followUp.due_at)}
             {daysOverdue > 0 && (
               <span className="ml-2 text-red-700">
@@ -508,10 +527,26 @@ function FollowUpCard({
             </p>
           )}
 
-          <p className="text-sm text-zinc-700">
-            <span className="font-medium text-zinc-600">Next step:</span>{" "}
-            {followUpNote}
-          </p>
+          {variant === "completed" && followUp.nextFollowUpDueAt && (
+            <p className="text-sm text-zinc-700">
+              <span className="font-medium text-zinc-600">Next follow-up:</span>{" "}
+              {formatDateTime(followUp.nextFollowUpDueAt)}
+            </p>
+          )}
+
+          {variant !== "completed" && (
+            <p className="text-sm text-zinc-700">
+              <span className="font-medium text-zinc-600">Next step:</span>{" "}
+              {followUpNote}
+            </p>
+          )}
+
+          {variant === "completed" && followUpNote && (
+            <p className="text-sm text-zinc-700">
+              <span className="font-medium text-zinc-600">Notes:</span>{" "}
+              {followUpNote}
+            </p>
+          )}
 
           <p className="text-xs text-zinc-500">
             Created {formatDate(followUp.created_at)}
@@ -709,38 +744,42 @@ export function FollowUpsPage() {
     [pendingFollowUps],
   );
 
-  const metrics = useMemo(() => {
-    const completedThisWeek = completedFollowUps.filter((followUp) =>
-      isCompletedThisWeek(followUp.completed_at),
-    ).length;
+  const completedThisWeekFollowUps = useMemo(
+    () =>
+      completedFollowUps.filter((followUp) =>
+        isCompletedThisWeek(followUp.completed_at),
+      ),
+    [completedFollowUps],
+  );
 
+  const metrics = useMemo(() => {
     return {
       dueToday: buckets.today.length,
       overdue: buckets.overdue.length,
       upcoming: buckets.upcoming.length,
-      completedThisWeek,
+      completedThisWeek: completedThisWeekFollowUps.length,
       totalOpen: pendingFollowUps.length,
     };
-  }, [buckets, completedFollowUps, pendingFollowUps.length]);
+  }, [buckets, completedThisWeekFollowUps.length, pendingFollowUps.length]);
+
+  const viewingCompleted =
+    activeTab === "completed" || statusFilter === "completed";
 
   const baseList = useMemo(() => {
-    if (statusFilter === "completed") {
-      return completedFollowUps;
-    }
-
     if (statusFilter === "cancelled") {
       return cancelledFollowUps;
     }
 
-    if (activeTab === "completed") {
-      return completedFollowUps;
+    if (viewingCompleted) {
+      return completedThisWeekFollowUps;
     }
 
     return buckets[activeTab];
   }, [
     statusFilter,
+    viewingCompleted,
     activeTab,
-    completedFollowUps,
+    completedThisWeekFollowUps,
     cancelledFollowUps,
     buckets,
   ]);
@@ -758,25 +797,25 @@ export function FollowUpsPage() {
         return false;
       }
 
-      if (statusFilter === "open" && followUp.status !== "pending") {
-        return false;
-      }
+      // Completed / cancelled views must not be constrained by Status=Open.
+      if (!viewingCompleted && statusFilter !== "cancelled") {
+        if (statusFilter === "open" && followUp.status !== "pending") {
+          return false;
+        }
 
-      if (
-        statusFilter !== "open" &&
-        statusFilter !== "completed" &&
-        statusFilter !== "cancelled" &&
-        followUp.status !== statusFilter
-      ) {
-        return false;
+        if (
+          statusFilter !== "open" &&
+          followUp.status !== statusFilter
+        ) {
+          return false;
+        }
       }
 
       if (
         dueDateFilter !== "all" &&
         followUp.status === "pending" &&
-        statusFilter !== "completed" &&
-        statusFilter !== "cancelled" &&
-        activeTab !== "completed"
+        !viewingCompleted &&
+        statusFilter !== "cancelled"
       ) {
         const bucket = getFollowUpBucket(followUp.due_at);
         if (dueDateFilter === "today" && bucket !== "today") return false;
@@ -794,9 +833,20 @@ export function FollowUpsPage() {
     priorityFilter,
     statusFilter,
     dueDateFilter,
-    activeTab,
+    viewingCompleted,
     searchQuery,
   ]);
+
+  function selectWorkcenterTab(tab: WorkcenterTab) {
+    setActiveTab(tab);
+    if (tab === "completed") {
+      setStatusFilter("completed");
+      return;
+    }
+    if (statusFilter === "completed" || statusFilter === "cancelled") {
+      setStatusFilter("open");
+    }
+  }
 
   const activeTabConfig =
     TAB_CONFIG.find((tab) => tab.id === activeTab) ?? TAB_CONFIG[0];
@@ -936,24 +986,24 @@ export function FollowUpsPage() {
         <SummaryCard
           label="Due Today"
           value={metrics.dueToday}
-          onClick={() => setActiveTab("today")}
+          onClick={() => selectWorkcenterTab("today")}
           highlight="warning"
         />
         <SummaryCard
           label="Overdue"
           value={metrics.overdue}
-          onClick={() => setActiveTab("overdue")}
+          onClick={() => selectWorkcenterTab("overdue")}
           highlight="danger"
         />
         <SummaryCard
           label="Upcoming"
           value={metrics.upcoming}
-          onClick={() => setActiveTab("upcoming")}
+          onClick={() => selectWorkcenterTab("upcoming")}
         />
         <SummaryCard
           label="Completed This Week"
           value={metrics.completedThisWeek}
-          onClick={() => setActiveTab("completed")}
+          onClick={() => selectWorkcenterTab("completed")}
         />
         <SummaryCard
           label="Total Open Follow-ups"
@@ -990,9 +1040,15 @@ export function FollowUpsPage() {
             <select
               id="status-filter"
               value={statusFilter}
-              onChange={(event) =>
-                setStatusFilter(event.target.value as StatusFilter)
-              }
+              onChange={(event) => {
+                const next = event.target.value as StatusFilter;
+                setStatusFilter(next);
+                if (next === "completed") {
+                  setActiveTab("completed");
+                } else if (activeTab === "completed") {
+                  setActiveTab("today");
+                }
+              }}
               className="crm-select"
             >
               <option value="open">Open</option>
@@ -1081,7 +1137,7 @@ export function FollowUpsPage() {
         {TAB_CONFIG.map((tab) => {
           const count =
             tab.id === "completed"
-              ? completedFollowUps.length
+              ? metrics.completedThisWeek
               : buckets[tab.id].length;
 
           const isActive = activeTab === tab.id;
@@ -1090,7 +1146,7 @@ export function FollowUpsPage() {
             <button
               key={tab.id}
               type="button"
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => selectWorkcenterTab(tab.id)}
               className={
                 isActive
                   ? "crm-tab-pill crm-tab-pill-active"

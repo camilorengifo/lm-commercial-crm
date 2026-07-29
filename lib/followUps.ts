@@ -99,6 +99,10 @@ export interface FollowUpEnriched extends FollowUpWithCompany {
   companyOwnerUserId: string | null;
   brokerName: string | null;
   brokerEmail: string | null;
+  /** Present for completed follow-ups when an outcome activity exists. */
+  completionOutcome?: "successful_contact" | "no_response" | null;
+  /** Due date of the successor follow-up created after completion, if any. */
+  nextFollowUpDueAt?: string | null;
 }
 
 export interface FollowUpWorkcenterData {
@@ -464,6 +468,113 @@ async function enrichFollowUpRecords(
   };
 }
 
+async function fetchCompletedOutcomeMeta(
+  followUpIds: string[],
+): Promise<{
+  outcomeByFollowUpId: Map<string, "successful_contact" | "no_response">;
+  nextDueBySourceId: Map<string, string>;
+  error: { message?: string } | null;
+}> {
+  const outcomeByFollowUpId = new Map<
+    string,
+    "successful_contact" | "no_response"
+  >();
+  const nextDueBySourceId = new Map<string, string>();
+
+  if (followUpIds.length === 0) {
+    return { outcomeByFollowUpId, nextDueBySourceId, error: null };
+  }
+
+  for (
+    let index = 0;
+    index < followUpIds.length;
+    index += IN_FILTER_CHUNK_SIZE
+  ) {
+    const chunk = followUpIds.slice(index, index + IN_FILTER_CHUNK_SIZE);
+
+    const [activitiesResult, successorsResult] = await Promise.all([
+      supabase
+        .from("activities")
+        .select("follow_up_id, activity_type, activity_at")
+        .in("follow_up_id", chunk)
+        .in("activity_type", [
+          "follow_up_no_response",
+          "follow_up_rescheduled_contact",
+        ])
+        .order("activity_at", { ascending: false }),
+      supabase
+        .from("follow_ups")
+        .select("source_follow_up_id, due_at")
+        .in("source_follow_up_id", chunk),
+    ]);
+
+    if (activitiesResult.error) {
+      return {
+        outcomeByFollowUpId,
+        nextDueBySourceId,
+        error: activitiesResult.error,
+      };
+    }
+
+    if (successorsResult.error) {
+      return {
+        outcomeByFollowUpId,
+        nextDueBySourceId,
+        error: successorsResult.error,
+      };
+    }
+
+    for (const row of activitiesResult.data ?? []) {
+      const followUpId = row.follow_up_id as string | null;
+      if (!followUpId || outcomeByFollowUpId.has(followUpId)) continue;
+
+      if (row.activity_type === "follow_up_no_response") {
+        outcomeByFollowUpId.set(followUpId, "no_response");
+      } else if (row.activity_type === "follow_up_rescheduled_contact") {
+        outcomeByFollowUpId.set(followUpId, "successful_contact");
+      }
+    }
+
+    for (const row of successorsResult.data ?? []) {
+      const sourceId = row.source_follow_up_id as string | null;
+      const dueAt = row.due_at as string | null;
+      if (!sourceId || !dueAt || nextDueBySourceId.has(sourceId)) continue;
+      nextDueBySourceId.set(sourceId, dueAt);
+    }
+  }
+
+  return { outcomeByFollowUpId, nextDueBySourceId, error: null };
+}
+
+async function enrichCompletedFollowUpRecords(
+  rows: FollowUpRecord[],
+  userId: string,
+  asAdmin: boolean,
+): Promise<{ data: FollowUpEnriched[]; error: { message?: string } | null }> {
+  const base = await enrichFollowUpRecords(rows, userId, asAdmin);
+  if (base.error) {
+    return base;
+  }
+
+  const { outcomeByFollowUpId, nextDueBySourceId, error } =
+    await fetchCompletedOutcomeMeta(base.data.map((row) => row.id));
+
+  if (error) {
+    // Soft-fail: still show completed items; omit outcome / next-follow-up meta.
+    logFollowUpsQueryError("enrichCompletedFollowUpRecords:meta", error);
+    return { data: base.data, error: null };
+  }
+
+  return {
+    data: base.data.map((row) => ({
+      ...row,
+      completionOutcome: outcomeByFollowUpId.get(row.id) ?? null,
+      nextFollowUpDueAt: nextDueBySourceId.get(row.id) ?? null,
+    })),
+    error: null,
+  };
+}
+
 export interface CreateFollowUpInput {
   userId: string;
   companyId: string;
@@ -573,7 +684,7 @@ export async function fetchFollowUpWorkcenterData(
   data: FollowUpWorkcenterData;
   error: { message?: string } | null;
 }> {
-  const { start: weekStart } = getWeekBounds();
+  const { start: weekStart, end: weekEnd } = getWeekBounds();
 
   const { ownedCompanyIds, error: scopeError } =
     await resolvePersonalFollowUpCompanyScope(userId, asAdmin);
@@ -604,6 +715,7 @@ export async function fetchFollowUpWorkcenterData(
     .select(FOLLOW_UP_SELECT_FIELDS)
     .eq("status", "completed")
     .gte("completed_at", weekStart.toISOString())
+    .lte("completed_at", weekEnd.toISOString())
     .order("completed_at", { ascending: false })
     .limit(FOLLOW_UP_COMPLETED_LIMIT);
 
@@ -657,7 +769,7 @@ export async function fetchFollowUpWorkcenterData(
 
   const [pendingEnriched, completedEnriched] = await Promise.all([
     enrichFollowUpRecords(pendingRows, userId, asAdmin),
-    enrichFollowUpRecords(completedRows, userId, asAdmin),
+    enrichCompletedFollowUpRecords(completedRows, userId, asAdmin),
   ]);
 
   if (pendingEnriched.error) {

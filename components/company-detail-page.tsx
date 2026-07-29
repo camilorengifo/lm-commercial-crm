@@ -17,6 +17,7 @@ import { CompanyFollowUpsSection } from "@/components/company-follow-ups-section
 import { CompanyLoadOpportunitiesSection } from "@/components/company-load-opportunities-section";
 import {
   DEFAULT_SALES_STAGE,
+  COMPANY_PRIORITIES,
   SALES_STAGES,
   isSalesStage,
   priorityBadgeClass,
@@ -101,6 +102,8 @@ export function CompanyDetailPage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [updatingStage, setUpdatingStage] = useState(false);
   const [stageError, setStageError] = useState<string | null>(null);
+  const [updatingPriority, setUpdatingPriority] = useState(false);
+  const [priorityError, setPriorityError] = useState<string | null>(null);
   const [chronologyRefreshKey, setChronologyRefreshKey] = useState(0);
   const [followUpsRefreshKey, setFollowUpsRefreshKey] = useState(0);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -200,6 +203,39 @@ export function CompanyDetailPage() {
     },
     [],
   );
+
+  async function handlePriorityChange(nextPriority: CompanyPriority) {
+    if (!user || !company || company.priority === nextPriority) return;
+
+    setPriorityError(null);
+    setActionError(null);
+    setActionMessage(null);
+    setUpdatingPriority(true);
+
+    let updateQuery = supabase
+      .from("companies")
+      .update({ priority: nextPriority })
+      .eq("id", company.id);
+
+    if (!isAdmin) {
+      updateQuery = updateQuery.eq("user_id", user.id);
+    }
+
+    const { error } = await updateQuery;
+
+    if (error) {
+      setPriorityError(formatSupabaseError(error));
+      setActionError(formatSupabaseError(error));
+      setUpdatingPriority(false);
+      return;
+    }
+
+    setCompany((prev) =>
+      prev ? { ...prev, priority: nextPriority } : prev,
+    );
+    setActionMessage("Priority updated successfully.");
+    setUpdatingPriority(false);
+  }
 
   async function handleSalesStageChange(nextStage: SalesStage) {
     if (!user || !company || company.sales_stage === nextStage) return;
@@ -529,11 +565,42 @@ export function CompanyDetailPage() {
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <span
-                    className={`crm-badge ${priorityBadgeClass(company.priority)}`}
-                  >
-                    {company.priority}
-                  </span>
+                  {canManageCompany ? (
+                    <select
+                      id="company-priority-header"
+                      value={company.priority}
+                      disabled={updatingPriority}
+                      onChange={(event) =>
+                        handlePriorityChange(
+                          event.target.value as CompanyPriority,
+                        )
+                      }
+                      aria-label="Company priority"
+                      title={
+                        updatingPriority ? "Saving priority..." : "Priority"
+                      }
+                      className={`crm-badge cursor-pointer appearance-none border-0 py-1 pl-2.5 pr-7 outline-none transition focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60 ${priorityBadgeClass(company.priority)}`}
+                      style={{
+                        backgroundImage:
+                          "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%2371717a' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E\")",
+                        backgroundPosition: "right 0.35rem center",
+                        backgroundRepeat: "no-repeat",
+                        backgroundSize: "1rem 1rem",
+                      }}
+                    >
+                      {COMPANY_PRIORITIES.map((priority) => (
+                        <option key={priority} value={priority}>
+                          {priority}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span
+                      className={`crm-badge ${priorityBadgeClass(company.priority)}`}
+                    >
+                      {company.priority}
+                    </span>
+                  )}
                   <span
                     className={`crm-badge ${accountStatusBadgeClass(accountStatus)}`}
                   >
@@ -639,7 +706,40 @@ export function CompanyDetailPage() {
                 <DetailField label="Country">
                   {company.country || "—"}
                 </DetailField>
-                <DetailField label="Priority">{company.priority}</DetailField>
+                <DetailField label="Priority">
+                  <div className="space-y-2">
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${priorityBadgeClass(company.priority)}`}
+                    >
+                      {company.priority}
+                    </span>
+                    {canManageCompany ? (
+                      <select
+                        id="company-priority-detail"
+                        value={company.priority}
+                        disabled={updatingPriority}
+                        onChange={(event) =>
+                          handlePriorityChange(
+                            event.target.value as CompanyPriority,
+                          )
+                        }
+                        className="mt-1 block w-full max-w-xs rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {COMPANY_PRIORITIES.map((priority) => (
+                          <option key={priority} value={priority}>
+                            {priority}
+                          </option>
+                        ))}
+                      </select>
+                    ) : null}
+                    {updatingPriority && (
+                      <p className="text-sm text-zinc-500">Saving priority...</p>
+                    )}
+                    {priorityError && (
+                      <p className="text-sm text-red-600">{priorityError}</p>
+                    )}
+                  </div>
+                </DetailField>
                 <DetailField label="Sales stage">
                   <div className="space-y-2">
                     <span
