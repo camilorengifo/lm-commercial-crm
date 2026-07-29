@@ -8,6 +8,8 @@ import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { formatSupabaseError } from "@/lib/crmFormat";
 import {
   IMPORT_FIELD_DEFINITIONS,
+  RECOMMENDED_IMPORT_COLUMNS,
+  downloadSampleImportSpreadsheet,
   type ColumnMapping,
   type ImportFieldKey,
   type ImportPreview,
@@ -27,6 +29,96 @@ import { supabase } from "@/lib/supabaseClient";
 const ACCEPTED_FILE_TYPES = ".xlsx,.csv";
 
 type ImportStep = "upload" | "mapping" | "preview" | "complete";
+
+function RecommendedSpreadsheetFormatSection() {
+  const [open, setOpen] = useState(true);
+
+  return (
+    <section className="mb-6 rounded-xl border border-zinc-200 bg-white shadow-sm">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-center justify-between gap-3 px-6 py-4 text-left"
+        aria-expanded={open}
+      >
+        <div>
+          <h2 className="text-lg font-medium text-zinc-900">
+            Recommended Spreadsheet Format
+          </h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Use these column names for the smoothest import
+          </p>
+        </div>
+        <span className="text-sm font-medium text-zinc-500">
+          {open ? "Hide" : "Show"}
+        </span>
+      </button>
+
+      {open && (
+        <div className="space-y-4 border-t border-zinc-200 px-6 py-5">
+          <div className="overflow-x-auto rounded-lg border border-zinc-200">
+            <table className="min-w-full divide-y divide-zinc-200 text-left">
+              <thead className="bg-zinc-50">
+                <tr>
+                  <th
+                    scope="col"
+                    className="px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-zinc-500"
+                  >
+                    #
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-zinc-500"
+                  >
+                    Column name
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-zinc-500"
+                  >
+                    Required
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100 bg-white">
+                {RECOMMENDED_IMPORT_COLUMNS.map((column, index) => (
+                  <tr key={column.name}>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-sm text-zinc-500">
+                      {index + 1}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-sm font-medium text-zinc-900">
+                      {column.name}
+                      {column.required ? (
+                        <span className="ml-1 text-red-600">*</span>
+                      ) : null}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-sm text-zinc-600">
+                      {column.required ? "Yes" : "Optional"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="text-sm text-zinc-600">
+            The importer can map different column names automatically, but using
+            these recommended column names will provide the best import
+            experience.
+          </p>
+
+          <button
+            type="button"
+            onClick={() => downloadSampleImportSpreadsheet()}
+            className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
+          >
+            Download Sample Excel
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
 
 function SummaryStat({
   label,
@@ -292,6 +384,8 @@ export function ImportPage() {
           {parseError}
         </p>
       )}
+
+      <RecommendedSpreadsheetFormatSection />
 
       <section className="mb-6 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-medium text-zinc-900">1. Upload file</h2>

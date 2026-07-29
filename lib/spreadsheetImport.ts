@@ -34,6 +34,52 @@ export const IMPORT_FIELD_DEFINITIONS = [
 
 export type ImportFieldKey = (typeof IMPORT_FIELD_DEFINITIONS)[number]["key"];
 
+/** Recommended column headers for the best first-time import experience. */
+export const RECOMMENDED_IMPORT_COLUMNS = [
+  { name: "Company Name", required: true },
+  { name: "Contact Name", required: false },
+  { name: "Email", required: false },
+  { name: "Phone", required: false },
+  { name: "City", required: false },
+  { name: "State", required: false },
+  { name: "Country", required: false },
+  { name: "Industry", required: false },
+  { name: "Sales Stage", required: false },
+  { name: "Priority", required: false },
+  { name: "Notes", required: false },
+] as const;
+
+const SAMPLE_IMPORT_HEADERS = RECOMMENDED_IMPORT_COLUMNS.map(
+  (column) => column.name,
+);
+
+const SAMPLE_IMPORT_ROW = [
+  "ABC Logistics",
+  "John Smith",
+  "john@abclogistics.com",
+  "+1 305-555-1234",
+  "Miami",
+  "Florida",
+  "United States",
+  "Food & Beverage",
+  "New Lead",
+  "Medium",
+  "Example company",
+];
+
+export const SAMPLE_IMPORT_FILENAME =
+  "logistics-masters-import-sample.xlsx";
+
+export function downloadSampleImportSpreadsheet(): void {
+  const worksheet = XLSX.utils.aoa_to_sheet([
+    SAMPLE_IMPORT_HEADERS,
+    SAMPLE_IMPORT_ROW,
+  ]);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Companies");
+  XLSX.writeFile(workbook, SAMPLE_IMPORT_FILENAME);
+}
+
 export type ColumnMapping = Record<ImportFieldKey, string | null>;
 
 const COLUMN_ALIASES: Record<ImportFieldKey, string[]> = {
