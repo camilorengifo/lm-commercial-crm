@@ -148,9 +148,15 @@ export function aiClientErrorResponse(
   return NextResponse.json({ success: false, error }, { status });
 }
 
-export function aiGenerationErrorResponse(): NextResponse {
+export function aiGenerationErrorResponse(errorMessage?: string | null): NextResponse {
   return NextResponse.json(
-    { success: false, error: AI_CLIENT_ERROR_MESSAGE },
+    {
+      success: false,
+      error:
+        errorMessage && errorMessage.startsWith("AI generation failed.")
+          ? errorMessage
+          : AI_CLIENT_ERROR_MESSAGE,
+    },
     { status: 500 },
   );
 }

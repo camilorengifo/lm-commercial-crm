@@ -79,8 +79,8 @@ export async function POST(request: Request) {
     });
 
     if (error || !data) {
-      logAiFailed(logContext, new Error("openai_generation_failed"));
-      return aiGenerationErrorResponse();
+      logAiFailed(logContext, new Error(error ?? "openai_generation_failed"));
+      return aiGenerationErrorResponse(error);
     }
 
     const normalizedSummary = normalizeAccountSummary(data);

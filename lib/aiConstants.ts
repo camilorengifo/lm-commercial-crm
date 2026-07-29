@@ -1,6 +1,16 @@
 export const AI_CLIENT_ERROR_MESSAGE =
   "AI generation failed. Please try again. If the issue continues, contact an administrator.";
 
+export function createAiErrorRef(): string {
+  const time = Date.now().toString(36).toUpperCase();
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `AI-${time}-${rand}`;
+}
+
+export function formatAiClientError(ref: string): string {
+  return `AI generation failed. Please try again. (Ref: ${ref})`;
+}
+
 export function sanitizeClientAiError(
   error: string | null | undefined,
   status = 500,
@@ -17,6 +27,11 @@ export function sanitizeClientAiError(
     error === "Invalid request body." ||
     error.startsWith("A valid ")
   ) {
+    return error;
+  }
+
+  // Allow our own user-facing generation errors (including Ref codes) through.
+  if (error.startsWith("AI generation failed.")) {
     return error;
   }
 
