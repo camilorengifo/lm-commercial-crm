@@ -703,14 +703,14 @@ export async function fetchFollowUpWorkcenterData(
     };
   }
 
-  let pendingQuery = supabase
+  const pendingQuery = supabase
     .from("follow_ups")
     .select(FOLLOW_UP_SELECT_FIELDS)
     .eq("status", "pending")
     .order("due_at", { ascending: true })
     .limit(FOLLOW_UP_PENDING_LIMIT);
 
-  let completedQuery = supabase
+  const completedQuery = supabase
     .from("follow_ups")
     .select(FOLLOW_UP_SELECT_FIELDS)
     .eq("status", "completed")
@@ -1002,6 +1002,8 @@ export async function rescheduleFollowUp(
 export interface CreateActivityNoteInput {
   userId: string;
   companyId: string;
+  /** Company owner used for commercial date sync. Defaults to userId. */
+  ownerUserId?: string;
   notes: string;
   subject?: string | null;
   activityType?: ActivityType;
@@ -1028,18 +1030,21 @@ export async function createActivityNote(
     return { error };
   }
 
-  return syncCompanyCommercialDates(input.companyId, input.userId);
+  return syncCompanyCommercialDates(
+    input.companyId,
+    input.ownerUserId ?? input.userId,
+  );
 }
 
 export async function syncCompanyCommercialDates(
   companyId: string,
-  userId: string,
+  ownerUserId: string,
 ): Promise<{ error: { message?: string } | null }> {
+  // Activities may be logged by brokers or admins acting on the account.
   const { data: latestActivities, error: activityError } = await supabase
     .from("activities")
     .select("activity_at, activity_type")
     .eq("company_id", companyId)
-    .eq("user_id", userId)
     .order("activity_at", { ascending: false })
     .limit(25);
 
@@ -1055,7 +1060,6 @@ export async function syncCompanyCommercialDates(
     .from("follow_ups")
     .select("due_at")
     .eq("company_id", companyId)
-    .eq("user_id", userId)
     .eq("status", "pending")
     .order("due_at", { ascending: true })
     .limit(1)
@@ -1072,7 +1076,7 @@ export async function syncCompanyCommercialDates(
       next_follow_up_at: nextFollowUp?.due_at ?? null,
     })
     .eq("id", companyId)
-    .eq("user_id", userId);
+    .eq("user_id", ownerUserId);
 
   return { error };
 }

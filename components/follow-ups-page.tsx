@@ -853,7 +853,9 @@ export function FollowUpsPage() {
 
   function canManageFollowUp(followUp: FollowUpEnriched): boolean {
     if (!user) return false;
-    if (isAdmin) return false;
+    // Admins and super admins can act on any visible follow-up.
+    // Brokers can only act on follow-ups for companies they own.
+    if (isAdmin) return true;
     return followUp.companyOwnerUserId === user.id;
   }
 
@@ -884,6 +886,7 @@ export function FollowUpsPage() {
     newDueAt: string;
   }) {
     if (!scheduleTarget || !user) return;
+    if (!canManageFollowUp(scheduleTarget.followUp)) return;
 
     const followUp = scheduleTarget.followUp;
     const outcome = scheduleTarget.outcome;
@@ -925,9 +928,13 @@ export function FollowUpsPage() {
     setActionFollowUpId(activityTarget.id);
     setActivityError(null);
 
+    const ownerUserId =
+      activityTarget.companyOwnerUserId ?? activityTarget.user_id;
+
     const { error } = await createActivityNote({
-      userId: activityTarget.user_id,
+      userId: user.id,
       companyId: activityTarget.company_id,
+      ownerUserId,
       notes: input.notes,
       subject: input.subject,
       activityType: input.activityType,
@@ -969,7 +976,7 @@ export function FollowUpsPage() {
         title="Follow-ups Work Center"
         description={
           isAdmin
-            ? "Daily work center across all brokers — view who needs contact today and what is overdue."
+            ? "Daily work center across all brokers — complete and schedule follow-ups for any visible account."
             : "Your daily work center — see who to contact today, what is overdue, and log outcomes quickly."
         }
       />
@@ -1205,8 +1212,9 @@ export function FollowUpsPage() {
 
         {isAdmin && (
           <p className="mt-4 text-xs text-zinc-500">
-            Admin view is read-only for broker-owned follow-ups. Brokers complete
-            their own items and schedule the next follow-up.
+            Admin view: you can complete and schedule follow-ups for any broker.
+            Ownership stays with the assigned broker; your user is recorded as
+            the actor on outcome activities.
           </p>
         )}
       </CrmCard>
