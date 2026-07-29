@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  ACTIVITY_TYPES,
+  MANUAL_ACTIVITY_TYPES,
   type ActivityType,
 } from "@/lib/crmConstants";
 import { FollowUpTypeFormFields } from "@/components/follow-up-type-form-fields";
@@ -24,7 +24,7 @@ export interface CommercialActivityFormValues {
   followUpTypeFields: FollowUpTypeFormValues;
 }
 
-export const BROKER_ACTIVITY_TYPES = ACTIVITY_TYPES.filter(
+export const BROKER_ACTIVITY_TYPES = MANUAL_ACTIVITY_TYPES.filter(
   (option) => option.value !== "other",
 );
 

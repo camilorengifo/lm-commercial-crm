@@ -40,6 +40,7 @@ export interface BrokerProductivityRow {
   companies: number;
   contacts: number;
   activities7d: number;
+  successfulContacts7d: number;
   followUpsCompleted7d: number;
   followUpsDueToday: number;
   overdueFollowUps: number;
@@ -528,9 +529,14 @@ function buildBrokerProductivityRows(
 
   const lastActivityByUser = new Map<string, string>();
   const activities7dByUser = new Map<string, number>();
+  const successfulContacts7dByUser = new Map<string, number>();
 
   for (const activity of raw.activities) {
-    if (!lastActivityByUser.has(activity.user_id)) {
+    const isNoResponse = activity.activity_type === "follow_up_no_response";
+    const isSuccessfulReschedule =
+      activity.activity_type === "follow_up_rescheduled_contact";
+
+    if (!isNoResponse && !lastActivityByUser.has(activity.user_id)) {
       lastActivityByUser.set(activity.user_id, activity.activity_at);
     }
 
@@ -539,6 +545,13 @@ function buildBrokerProductivityRows(
         activity.user_id,
         (activities7dByUser.get(activity.user_id) ?? 0) + 1,
       );
+
+      if (isSuccessfulReschedule) {
+        successfulContacts7dByUser.set(
+          activity.user_id,
+          (successfulContacts7dByUser.get(activity.user_id) ?? 0) + 1,
+        );
+      }
     }
   }
 
@@ -609,10 +622,13 @@ function buildBrokerProductivityRows(
     );
 
     const activities7d = activities7dByUser.get(userId) ?? 0;
+    const successfulContacts7d =
+      successfulContacts7dByUser.get(userId) ?? 0;
 
     const productivityScore = computeProductivityScore({
       followUpsCompleted7d,
       activities7d,
+      successfulContacts7d,
       companiesCreated30d,
       contactsCreated30d,
       opportunitiesCreated30d,
@@ -634,6 +650,7 @@ function buildBrokerProductivityRows(
       contacts: raw.contacts.filter((contact) => contact.user_id === userId)
         .length,
       activities7d,
+      successfulContacts7d,
       followUpsCompleted7d,
       followUpsDueToday,
       overdueFollowUps,

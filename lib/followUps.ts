@@ -92,6 +92,7 @@ export interface FollowUpWithCompany extends FollowUpRecord {
 
 export interface FollowUpEnriched extends FollowUpWithCompany {
   contactName: string | null;
+  contactId: string | null;
   companyPriority: CompanyPriority;
   companyAccountStatus: AccountStatus;
   /** Canonical company owner from companies.user_id */
@@ -207,6 +208,7 @@ interface CompanyJoinRow {
 }
 
 interface ContactJoinRow {
+  id: string;
   company_id: string;
   first_name: string;
   last_name: string | null;
@@ -223,9 +225,9 @@ function formatContactName(firstName: string, lastName: string | null): string {
   return [firstName, lastName].filter(Boolean).join(" ").trim();
 }
 
-function buildContactNameByCompany(
+function buildPrimaryContactByCompany(
   contacts: ContactJoinRow[],
-): Map<string, string> {
+): Map<string, { id: string; name: string }> {
   const byCompany = new Map<string, ContactJoinRow[]>();
 
   for (const contact of contacts) {
@@ -234,7 +236,7 @@ function buildContactNameByCompany(
     byCompany.set(contact.company_id, existing);
   }
 
-  const result = new Map<string, string>();
+  const result = new Map<string, { id: string; name: string }>();
 
   for (const [companyId, companyContacts] of byCompany) {
     const primary =
@@ -242,10 +244,10 @@ function buildContactNameByCompany(
       companyContacts[0];
 
     if (primary) {
-      result.set(
-        companyId,
-        formatContactName(primary.first_name, primary.last_name),
-      );
+      result.set(companyId, {
+        id: primary.id,
+        name: formatContactName(primary.first_name, primary.last_name),
+      });
     }
   }
 
@@ -329,7 +331,7 @@ async function fetchContactsForCompanies(
 
   let query = supabase
     .from("contacts")
-    .select("company_id, first_name, last_name, is_primary")
+    .select("id, company_id, first_name, last_name, is_primary")
     .in("company_id", companyIds);
 
   if (!asAdmin) {
@@ -368,7 +370,7 @@ async function fetchProfilesForUsers(
 function enrichFollowUpRows(
   rows: FollowUpRecord[],
   companyById: Map<string, CompanyJoinRow>,
-  contactNameByCompany: Map<string, string>,
+  primaryContactByCompany: Map<string, { id: string; name: string }>,
   profileById: Map<string, ProfileJoinRow>,
 ): FollowUpEnriched[] {
   return rows.map((row) => {
@@ -377,11 +379,13 @@ function enrichFollowUpRows(
     const profile = companyOwnerUserId
       ? profileById.get(companyOwnerUserId)
       : null;
+    const primaryContact = primaryContactByCompany.get(row.company_id);
 
     return {
       ...row,
       companyName: company?.name ?? "Unknown company",
-      contactName: contactNameByCompany.get(row.company_id) ?? null,
+      contactName: primaryContact?.name ?? null,
+      contactId: primaryContact?.id ?? null,
       companyPriority: company?.priority ?? ("Medium" as CompanyPriority),
       companyAccountStatus: normalizeAccountStatus(company?.account_status),
       companyOwnerUserId,
@@ -438,7 +442,9 @@ async function enrichFollowUpRecords(
     return { data: [], error: profilesError };
   }
 
-  const contactNameByCompany = buildContactNameByCompany(contactsResult.data);
+  const primaryContactByCompany = buildPrimaryContactByCompany(
+    contactsResult.data,
+  );
   const profileById = new Map(
     ownerProfiles.map((profile) => [profile.id, profile]),
   );
@@ -446,7 +452,7 @@ async function enrichFollowUpRecords(
   const enriched = enrichFollowUpRows(
     rows,
     companyById,
-    contactNameByCompany,
+    primaryContactByCompany,
     profileById,
   );
 
@@ -465,6 +471,7 @@ export interface CreateFollowUpInput {
   notes?: string | null;
   dueAt: string;
   typeFields?: FollowUpTypeFormValues;
+  sourceFollowUpId?: string | null;
 }
 
 export async function fetchPendingFollowUpsForCompany(
@@ -715,7 +722,10 @@ export async function fetchCancelledFollowUps(
 
 export async function createFollowUp(
   input: CreateFollowUpInput,
-): Promise<{ error: { message?: string } | null }> {
+): Promise<{
+  error: { message?: string; code?: string } | null;
+  followUpId: string | null;
+}> {
   const { data: company, error: companyError } = await supabase
     .from("companies")
     .select("user_id")
@@ -723,11 +733,11 @@ export async function createFollowUp(
     .maybeSingle();
 
   if (companyError) {
-    return { error: companyError };
+    return { error: companyError, followUpId: null };
   }
 
   if (!company?.user_id) {
-    return { error: { message: "Company not found." } };
+    return { error: { message: "Company not found." }, followUpId: null };
   }
 
   const ownerUserId = company.user_id as string;
@@ -739,21 +749,35 @@ export async function createFollowUp(
         input.dueAt,
       );
 
-  const { error } = await supabase.from("follow_ups").insert({
-    user_id: ownerUserId,
-    company_id: input.companyId,
-    title: input.title,
-    notes: input.notes ?? null,
-    due_at: input.dueAt,
-    status: "pending" as FollowUpStatus,
-    ...seasonalFields,
-  });
+  const { data, error } = await supabase
+    .from("follow_ups")
+    .insert({
+      user_id: ownerUserId,
+      company_id: input.companyId,
+      title: input.title,
+      notes: input.notes ?? null,
+      due_at: input.dueAt,
+      status: "pending" as FollowUpStatus,
+      source_follow_up_id: input.sourceFollowUpId ?? null,
+      ...seasonalFields,
+    })
+    .select("id")
+    .maybeSingle();
 
   if (error) {
-    return { error };
+    return { error, followUpId: null };
   }
 
-  return syncCompanyNextFollowUpAt(input.companyId, ownerUserId);
+  const syncResult = await syncCompanyNextFollowUpAt(
+    input.companyId,
+    ownerUserId,
+  );
+
+  if (syncResult.error) {
+    return { error: syncResult.error, followUpId: data?.id ?? null };
+  }
+
+  return { error: null, followUpId: data?.id ?? null };
 }
 
 export async function syncCompanyNextFollowUpAt(
@@ -899,18 +923,21 @@ export async function syncCompanyCommercialDates(
   companyId: string,
   userId: string,
 ): Promise<{ error: { message?: string } | null }> {
-  const { data: latestActivity, error: activityError } = await supabase
+  const { data: latestActivities, error: activityError } = await supabase
     .from("activities")
-    .select("activity_at")
+    .select("activity_at, activity_type")
     .eq("company_id", companyId)
     .eq("user_id", userId)
     .order("activity_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(25);
 
   if (activityError) {
     return { error: activityError };
   }
+
+  const latestSuccessfulContact = (latestActivities ?? []).find(
+    (activity) => activity.activity_type !== "follow_up_no_response",
+  );
 
   const { data: nextFollowUp, error: followUpError } = await supabase
     .from("follow_ups")
@@ -929,7 +956,7 @@ export async function syncCompanyCommercialDates(
   const { error } = await supabase
     .from("companies")
     .update({
-      last_contact_at: latestActivity?.activity_at ?? null,
+      last_contact_at: latestSuccessfulContact?.activity_at ?? null,
       next_follow_up_at: nextFollowUp?.due_at ?? null,
     })
     .eq("id", companyId)

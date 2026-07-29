@@ -88,7 +88,8 @@ async function createNextFollowUp(
     typeFields: nextFollowUp.typeFields,
   };
 
-  return createFollowUp(followUpInput);
+  const result = await createFollowUp(followUpInput);
+  return { error: result.error };
 }
 
 export async function logCommercialActivity(

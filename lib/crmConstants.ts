@@ -34,6 +34,11 @@ export const ACTIVITY_TYPES = [
   { value: "visit", label: "Visit" },
   { value: "note", label: "Note" },
   { value: "other", label: "Other" },
+  { value: "follow_up_no_response", label: "No response" },
+  {
+    value: "follow_up_rescheduled_contact",
+    label: "Successful contact",
+  },
 ] as const;
 
 export type ActivityType = (typeof ACTIVITY_TYPES)[number]["value"];
@@ -42,6 +47,33 @@ export const ACTIVITY_TYPE_LABELS: Record<ActivityType, string> =
   Object.fromEntries(
     ACTIVITY_TYPES.map((option) => [option.value, option.label]),
   ) as Record<ActivityType, string>;
+
+/** Manual broker-logged channels (excludes system follow-up outcomes). */
+export const MANUAL_ACTIVITY_TYPES = ACTIVITY_TYPES.filter(
+  (option) =>
+    option.value !== "follow_up_no_response" &&
+    option.value !== "follow_up_rescheduled_contact",
+);
+
+export function isSuccessfulContactActivityType(type: string): boolean {
+  return (
+    type === "follow_up_rescheduled_contact" ||
+    type === "call" ||
+    type === "email" ||
+    type === "meeting" ||
+    type === "visit"
+  );
+}
+
+export function isAttemptedContactActivityType(type: string): boolean {
+  return (
+    isSuccessfulContactActivityType(type) || type === "follow_up_no_response"
+  );
+}
+
+export function updatesLastContactAt(type: string): boolean {
+  return type !== "follow_up_no_response";
+}
 
 export type FollowUpStatus = "pending" | "completed" | "cancelled";
 
@@ -186,5 +218,9 @@ export function activityTypeBadgeClass(type: ActivityType): string {
       return "bg-slate-100 text-slate-700 ring-slate-200";
     case "other":
       return "bg-slate-100 text-slate-700 ring-slate-200";
+    case "follow_up_no_response":
+      return "bg-orange-50 text-orange-800 ring-orange-200";
+    case "follow_up_rescheduled_contact":
+      return "bg-sky-50 text-sky-800 ring-sky-200";
   }
 }

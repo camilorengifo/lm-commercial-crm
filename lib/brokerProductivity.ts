@@ -36,6 +36,7 @@ export type BrokerProductivitySort =
 export interface ProductivityScoreInput {
   followUpsCompleted7d: number;
   activities7d: number;
+  successfulContacts7d: number;
   companiesCreated30d: number;
   contactsCreated30d: number;
   opportunitiesCreated30d: number;
@@ -49,6 +50,7 @@ export function computeProductivityScore(
   return (
     input.followUpsCompleted7d * 2 +
     input.activities7d * 1 +
+    input.successfulContacts7d * 1 +
     input.companiesCreated30d * 2 +
     input.contactsCreated30d * 2 +
     input.opportunitiesCreated30d * 5 +

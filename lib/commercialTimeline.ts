@@ -4,13 +4,14 @@ import { supabase } from "@/lib/supabaseClient";
 import { brokerCanAccessCompany } from "@/lib/brokerDataAccess";
 
 export const COMMERCIAL_TIMELINE_ACTIVITY_FIELDS =
-  "id, user_id, company_id, contact_id, activity_type, subject, notes, activity_at, created_at, scheduled_follow_up_at";
+  "id, user_id, company_id, contact_id, follow_up_id, activity_type, subject, notes, activity_at, created_at, scheduled_follow_up_at";
 
 export interface CommercialTimelineActivity {
   id: string;
   user_id: string;
   company_id: string;
   contact_id: string | null;
+  follow_up_id?: string | null;
   activity_type: ActivityType;
   subject: string | null;
   notes: string | null;

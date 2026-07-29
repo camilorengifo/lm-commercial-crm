@@ -4,19 +4,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
-import { FollowUpTypeFormFields } from "@/components/follow-up-type-form-fields";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { CrmAlert, CrmCard, PageHeader, StatCard, StatGrid } from "@/components/crm-ui";
-import {
-  followUpTypeFormFromRecord,
-  type FollowUpTypeFormValues,
-} from "@/lib/followUpSeasonal";
 import {
   ACCOUNT_STATUS_LABELS,
   accountStatusBadgeClass,
 } from "@/lib/accountStatus";
 import {
-  ACTIVITY_TYPES,
+  MANUAL_ACTIVITY_TYPES,
   COMPANY_PRIORITIES,
   FOLLOW_UP_STATUS_LABELS,
   priorityBadgeClass,
@@ -27,7 +22,6 @@ import {
 import { formatDate, formatDateTime, formatSupabaseError } from "@/lib/crmFormat";
 import {
   bucketFollowUpsWithCompanies,
-  completeFollowUp,
   createActivityNote,
   fetchCancelledFollowUps,
   fetchFollowUpWorkcenterData,
@@ -35,10 +29,16 @@ import {
   getFollowUpBucket,
   isCompletedThisWeek,
   isDueThisWeek,
-  rescheduleFollowUp,
   toDatetimeLocalValue,
   type FollowUpEnriched,
 } from "@/lib/followUps";
+import {
+  addCalendarDaysPreservingLocalTime,
+  completeFollowUpAndScheduleNext,
+  isFutureDueAt,
+  type FollowUpCompletionOutcome,
+  type ScheduleNextMode,
+} from "@/lib/followUpOutcomes";
 import { getDaysOverdue } from "@/lib/brokerDashboard";
 import {
   fetchAllProfiles,
@@ -102,127 +102,161 @@ function matchesSearch(followUp: FollowUpEnriched, query: string): boolean {
   return haystack.includes(normalized);
 }
 
-function RescheduleModal({
+function ScheduleNextFollowUpModal({
   followUp,
+  outcome,
   saving,
   error,
   onClose,
-  onSave,
+  onConfirm,
 }: {
   followUp: FollowUpEnriched;
+  outcome: FollowUpCompletionOutcome;
   saving: boolean;
   error: string | null;
   onClose: () => void;
-  onSave: (input: {
-    dueAt: string;
-    title: string;
-    notes: string;
-    typeFields: FollowUpTypeFormValues;
+  onConfirm: (input: {
+    scheduleMode: ScheduleNextMode;
+    newDueAt: string;
   }) => void;
 }) {
-  const [dueAt, setDueAt] = useState(toDatetimeLocalValue(followUp.due_at));
-  const [title, setTitle] = useState(followUp.title);
-  const [notes, setNotes] = useState(followUp.notes ?? "");
-  const [typeFields, setTypeFields] = useState<FollowUpTypeFormValues>(() =>
-    followUpTypeFormFromRecord(followUp),
-  );
+  const [scheduleMode, setScheduleMode] =
+    useState<ScheduleNextMode>("automatic_week");
+  const [dueAt, setDueAt] = useState(() => {
+    try {
+      return toDatetimeLocalValue(
+        addCalendarDaysPreservingLocalTime(followUp.due_at, 7),
+      );
+    } catch {
+      return toDatetimeLocalValue(followUp.due_at);
+    }
+  });
+  const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
-    setDueAt(toDatetimeLocalValue(followUp.due_at));
-    setTitle(followUp.title);
-    setNotes(followUp.notes ?? "");
-    setTypeFields(followUpTypeFormFromRecord(followUp));
+    setScheduleMode("automatic_week");
+    try {
+      setDueAt(
+        toDatetimeLocalValue(
+          addCalendarDaysPreservingLocalTime(followUp.due_at, 7),
+        ),
+      );
+    } catch {
+      setDueAt(toDatetimeLocalValue(followUp.due_at));
+    }
+    setLocalError(null);
   }, [followUp]);
+
+  const isNoResponse = outcome === "no_response";
+  const description = isNoResponse
+    ? "This follow-up will be completed as no response and a new pending follow-up will be created. Cancel keeps the current follow-up open."
+    : "This follow-up will be completed as a successful contact and a new pending follow-up will be created. Cancel keeps the current follow-up open.";
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setLocalError(null);
+
+    if (scheduleMode === "automatic_week") {
+      try {
+        const automaticDueAt = addCalendarDaysPreservingLocalTime(
+          followUp.due_at,
+          7,
+        );
+        onConfirm({ scheduleMode, newDueAt: automaticDueAt });
+      } catch {
+        setLocalError("Unable to calculate the automatic next follow-up date.");
+      }
+      return;
+    }
 
     const parsedDueAt = fromDatetimeLocalValue(dueAt);
     if (!parsedDueAt) {
+      setLocalError("Choose a valid date and time.");
       return;
     }
 
-    if (!title.trim()) {
+    if (!isFutureDueAt(parsedDueAt)) {
+      setLocalError("Choose a future date and time.");
       return;
     }
 
-    onSave({
-      dueAt: parsedDueAt,
-      title: title.trim(),
-      notes,
-      typeFields,
-    });
+    onConfirm({ scheduleMode, newDueAt: parsedDueAt });
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-lg rounded-xl border border-zinc-200 bg-white p-6 shadow-xl">
-        <h3 className="text-lg font-medium text-zinc-900">Reschedule follow-up</h3>
-        <p className="mt-1 text-sm text-zinc-500">
-          {followUp.companyName}
+        <h3 className="text-lg font-medium text-zinc-900">
+          Schedule next follow-up
+        </h3>
+        <p className="mt-1 text-sm text-zinc-500">{followUp.companyName}</p>
+        <p className="mt-2 text-sm text-zinc-600">{description}</p>
+        <p className="mt-2 text-xs text-zinc-500">
+          Current due date: {formatDateTime(followUp.due_at)}
         </p>
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
-          <div>
-            <label
-              htmlFor="reschedule-due"
-              className="crm-label"
-            >
-              New due date <span className="text-red-600">*</span>
+          <fieldset className="space-y-3">
+            <legend className="crm-label">Scheduling option</legend>
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-zinc-200 px-3 py-2.5 has-[:checked]:border-sky-300 has-[:checked]:bg-sky-50/60">
+              <input
+                type="radio"
+                name="schedule-mode"
+                className="mt-1"
+                checked={scheduleMode === "automatic_week"}
+                onChange={() => setScheduleMode("automatic_week")}
+                disabled={saving}
+              />
+              <span>
+                <span className="block text-sm font-medium text-zinc-900">
+                  Automatic – 1 Week
+                </span>
+                <span className="block text-xs text-zinc-500">
+                  Exactly 7 calendar days after the current due date, same local
+                  time.
+                </span>
+              </span>
             </label>
-            <input
-              id="reschedule-due"
-              type="datetime-local"
-              required
-              value={dueAt}
-              onChange={(event) => setDueAt(event.target.value)}
-              className="crm-input"
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="reschedule-title"
-              className="crm-label"
-            >
-              Title <span className="text-red-600">*</span>
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-zinc-200 px-3 py-2.5 has-[:checked]:border-sky-300 has-[:checked]:bg-sky-50/60">
+              <input
+                type="radio"
+                name="schedule-mode"
+                className="mt-1"
+                checked={scheduleMode === "choose_datetime"}
+                onChange={() => setScheduleMode("choose_datetime")}
+                disabled={saving}
+              />
+              <span>
+                <span className="block text-sm font-medium text-zinc-900">
+                  Choose Date & Time
+                </span>
+                <span className="block text-xs text-zinc-500">
+                  Pick a future date and time for the next follow-up.
+                </span>
+              </span>
             </label>
-            <input
-              id="reschedule-title"
-              type="text"
-              required
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              className="crm-input"
-            />
-          </div>
+          </fieldset>
 
-          <div>
-            <label
-              htmlFor="reschedule-notes"
-              className="crm-label"
-            >
-              Notes / next step
-            </label>
-            <textarea
-              id="reschedule-notes"
-              rows={3}
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              className="crm-input"
-              placeholder="What should happen next?"
-            />
-          </div>
+          {scheduleMode === "choose_datetime" && (
+            <div>
+              <label htmlFor="schedule-next-due" className="crm-label">
+                Next follow-up date <span className="text-red-600">*</span>
+              </label>
+              <input
+                id="schedule-next-due"
+                type="datetime-local"
+                required
+                value={dueAt}
+                onChange={(event) => setDueAt(event.target.value)}
+                className="crm-input"
+                disabled={saving}
+              />
+            </div>
+          )}
 
-          <FollowUpTypeFormFields
-            idPrefix="reschedule"
-            values={typeFields}
-            onChange={setTypeFields}
-          />
-
-          {error && (
+          {(localError || error) && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-              {error}
+              {localError ?? error}
             </p>
           )}
 
@@ -240,7 +274,11 @@ function RescheduleModal({
               disabled={saving}
               className="crm-btn-primary disabled:opacity-60"
             >
-              {saving ? "Saving..." : "Save reschedule"}
+              {saving
+                ? "Saving..."
+                : isNoResponse
+                  ? "Confirm no response"
+                  : "Confirm completion"}
             </button>
           </div>
         </form>
@@ -305,7 +343,7 @@ function ActivityNoteModal({
               }
               className="crm-select"
             >
-              {ACTIVITY_TYPES.map((option) => (
+              {MANUAL_ACTIVITY_TYPES.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -383,7 +421,7 @@ function FollowUpCard({
   canManage,
   actionLoading,
   onMarkComplete,
-  onReschedule,
+  onNoResponse,
   onAddActivity,
 }: {
   followUp: FollowUpEnriched;
@@ -392,7 +430,7 @@ function FollowUpCard({
   canManage: boolean;
   actionLoading: boolean;
   onMarkComplete: (followUp: FollowUpEnriched) => void;
-  onReschedule: (followUp: FollowUpEnriched) => void;
+  onNoResponse: (followUp: FollowUpEnriched) => void;
   onAddActivity: (followUp: FollowUpEnriched) => void;
 }) {
   const variantClasses: Record<WorkcenterTab | "cancelled", string> = {
@@ -493,11 +531,11 @@ function FollowUpCard({
               </button>
               <button
                 type="button"
-                onClick={() => onReschedule(followUp)}
+                onClick={() => onNoResponse(followUp)}
                 disabled={actionLoading}
-                className="inline-flex items-center justify-center rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center justify-center rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm font-medium text-orange-700 transition hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Reschedule
+                No Response
               </button>
             </>
           )}
@@ -585,9 +623,11 @@ export function FollowUpsPage() {
   const [brokerFilter, setBrokerFilter] = useState("all");
 
   const [actionFollowUpId, setActionFollowUpId] = useState<string | null>(null);
-  const [rescheduleTarget, setRescheduleTarget] =
-    useState<FollowUpEnriched | null>(null);
-  const [rescheduleError, setRescheduleError] = useState<string | null>(null);
+  const [scheduleTarget, setScheduleTarget] = useState<{
+    followUp: FollowUpEnriched;
+    outcome: FollowUpCompletionOutcome;
+  } | null>(null);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [activityTarget, setActivityTarget] = useState<FollowUpEnriched | null>(
     null,
   );
@@ -780,63 +820,49 @@ export function FollowUpsPage() {
     window.setTimeout(() => setSuccessMessage(null), 4000);
   }
 
-  async function handleMarkComplete(followUp: FollowUpEnriched) {
-    if (!user || !canManageFollowUp(followUp)) return;
-
-    setActionFollowUpId(followUp.id);
-    setFetchError(null);
-
-    const ownerUserId = followUp.companyOwnerUserId ?? followUp.user_id;
-    const { error } = await completeFollowUp(
-      followUp.id,
-      ownerUserId,
-      followUp.company_id,
-    );
-
-    if (error) {
-      setFetchError(formatSupabaseError(error));
-      setActionFollowUpId(null);
-      return;
-    }
-
-    await refreshData();
-    setActionFollowUpId(null);
-    showSuccess("Follow-up marked as complete.");
+  function openScheduleModal(
+    followUp: FollowUpEnriched,
+    outcome: FollowUpCompletionOutcome,
+  ) {
+    if (!canManageFollowUp(followUp)) return;
+    setScheduleError(null);
+    setScheduleTarget({ followUp, outcome });
   }
 
-  async function handleRescheduleSave(input: {
-    dueAt: string;
-    title: string;
-    notes: string;
-    typeFields: FollowUpTypeFormValues;
+  async function handleScheduleConfirm(input: {
+    scheduleMode: ScheduleNextMode;
+    newDueAt: string;
   }) {
-    if (!rescheduleTarget || !user) return;
+    if (!scheduleTarget || !user) return;
 
-    setActionFollowUpId(rescheduleTarget.id);
-    setRescheduleError(null);
+    const followUp = scheduleTarget.followUp;
+    const outcome = scheduleTarget.outcome;
+    setActionFollowUpId(followUp.id);
+    setScheduleError(null);
 
-    const ownerUserId =
-      rescheduleTarget.companyOwnerUserId ?? rescheduleTarget.user_id;
-    const { error } = await rescheduleFollowUp({
-      followUpId: rescheduleTarget.id,
-      ownerUserId,
-      companyId: rescheduleTarget.company_id,
-      dueAt: input.dueAt,
-      title: input.title,
-      notes: input.notes.trim() || null,
-      typeFields: input.typeFields,
+    const { error, newDueAt } = await completeFollowUpAndScheduleNext({
+      followUp,
+      outcome,
+      actorUserId: user.id,
+      newDueAt: input.newDueAt,
+      scheduleMode: input.scheduleMode,
+      asAdmin: isAdmin,
     });
 
     if (error) {
-      setRescheduleError(formatSupabaseError(error));
+      setScheduleError(formatSupabaseError(error));
       setActionFollowUpId(null);
       return;
     }
 
-    setRescheduleTarget(null);
+    setScheduleTarget(null);
     await refreshData();
     setActionFollowUpId(null);
-    showSuccess("Follow-up rescheduled.");
+    showSuccess(
+      outcome === "no_response"
+        ? `No response recorded. Next follow-up scheduled for ${formatDateTime(newDueAt)}.`
+        : `Follow-up completed. Next follow-up scheduled for ${formatDateTime(newDueAt)}.`,
+    );
   }
 
   async function handleActivitySave(input: {
@@ -1108,11 +1134,10 @@ export function FollowUpsPage() {
                 isAdmin={isAdmin}
                 canManage={canManageFollowUp(followUp)}
                 actionLoading={actionFollowUpId === followUp.id}
-                onMarkComplete={handleMarkComplete}
-                onReschedule={(item) => {
-                  setRescheduleError(null);
-                  setRescheduleTarget(item);
-                }}
+                onMarkComplete={(item) =>
+                  openScheduleModal(item, "completed_contact")
+                }
+                onNoResponse={(item) => openScheduleModal(item, "no_response")}
                 onAddActivity={(item) => {
                   setActivityError(null);
                   setActivityTarget(item);
@@ -1125,22 +1150,23 @@ export function FollowUpsPage() {
         {isAdmin && (
           <p className="mt-4 text-xs text-zinc-500">
             Admin view is read-only for broker-owned follow-ups. Brokers complete
-            and reschedule their own items.
+            their own items and schedule the next follow-up.
           </p>
         )}
       </CrmCard>
 
-      {rescheduleTarget && (
-        <RescheduleModal
-          followUp={rescheduleTarget}
-          saving={actionFollowUpId === rescheduleTarget.id}
-          error={rescheduleError}
+      {scheduleTarget && (
+        <ScheduleNextFollowUpModal
+          followUp={scheduleTarget.followUp}
+          outcome={scheduleTarget.outcome}
+          saving={actionFollowUpId === scheduleTarget.followUp.id}
+          error={scheduleError}
           onClose={() => {
             if (actionFollowUpId) return;
-            setRescheduleTarget(null);
-            setRescheduleError(null);
+            setScheduleTarget(null);
+            setScheduleError(null);
           }}
-          onSave={handleRescheduleSave}
+          onConfirm={(input) => void handleScheduleConfirm(input)}
         />
       )}
 
