@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { fetchOutreachDraft } from "@/lib/aiClient";
 import { AI_CLIENT_ERROR_MESSAGE } from "@/lib/aiConstants";
 import {
@@ -16,10 +16,42 @@ import {
   fetchContactsForCompany,
   formatContactName,
 } from "@/lib/loadOpportunities";
+import { companyDraftKey, usePersistentDraft } from "@/lib/usePersistentDraft";
 import { supabase } from "@/lib/supabaseClient";
 
 const DEFAULT_OUTREACH_TYPE: OutreachType = "Call Script";
 const DEFAULT_TONE: OutreachTone = "Professional";
+
+interface AiOutreachDraftState {
+  outreachType: OutreachType;
+  contactId: string;
+  tone: OutreachTone;
+  goal: string;
+  draft: OutreachDraftResponse | null;
+  editedFullDraft: string;
+}
+
+function emptyOutreachDraft(): AiOutreachDraftState {
+  return {
+    outreachType: DEFAULT_OUTREACH_TYPE,
+    contactId: "",
+    tone: DEFAULT_TONE,
+    goal: "",
+    draft: null,
+    editedFullDraft: "",
+  };
+}
+
+function isOutreachDraftEmpty(value: AiOutreachDraftState): boolean {
+  return (
+    !value.goal.trim() &&
+    !value.contactId &&
+    !value.draft &&
+    !value.editedFullDraft.trim() &&
+    value.outreachType === DEFAULT_OUTREACH_TYPE &&
+    value.tone === DEFAULT_TONE
+  );
+}
 
 export function AiOutreachAssistantSection({
   companyId,
@@ -39,18 +71,22 @@ export function AiOutreachAssistantSection({
   const [contacts, setContacts] = useState<ContactOption[]>([]);
   const [contactsLoading, setContactsLoading] = useState(true);
 
-  const [outreachType, setOutreachType] =
-    useState<OutreachType>(DEFAULT_OUTREACH_TYPE);
-  const [contactId, setContactId] = useState("");
-  const [tone, setTone] = useState<OutreachTone>(DEFAULT_TONE);
-  const [goal, setGoal] = useState("");
+  const draftKey = useMemo(
+    () => companyDraftKey(companyId, "ai-outreach"),
+    [companyId],
+  );
+
+  const [form, setForm, clearForm] = usePersistentDraft<AiOutreachDraftState>({
+    key: draftKey,
+    initialValue: emptyOutreachDraft(),
+    isEmpty: isOutreachDraftEmpty,
+  });
 
   const [loading, setLoading] = useState(false);
   const [savingActivity, setSavingActivity] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const [draft, setDraft] = useState<OutreachDraftResponse | null>(null);
 
   const scopedUserId = isAdmin ? ownerUserId : viewerUserId;
 
@@ -84,10 +120,10 @@ export function AiOutreachAssistantSection({
 
     const { data, error: requestError } = await fetchOutreachDraft({
       companyId,
-      contactId: contactId.trim() || null,
-      outreachType,
-      tone,
-      goal: goal.trim() || null,
+      contactId: form.contactId.trim() || null,
+      outreachType: form.outreachType,
+      tone: form.tone,
+      goal: form.goal.trim() || null,
     });
 
     if (requestError || !data) {
@@ -96,7 +132,11 @@ export function AiOutreachAssistantSection({
       return;
     }
 
-    setDraft(data.draft);
+    setForm((prev) => ({
+      ...prev,
+      draft: data.draft,
+      editedFullDraft: data.draft.fullDraft,
+    }));
     setLoading(false);
   }
 
@@ -106,10 +146,11 @@ export function AiOutreachAssistantSection({
   }
 
   async function handleCopy() {
-    if (!draft?.fullDraft) return;
+    const text = form.editedFullDraft || form.draft?.fullDraft;
+    if (!text) return;
 
     try {
-      await navigator.clipboard.writeText(draft.fullDraft);
+      await navigator.clipboard.writeText(text);
       setCopySuccess(true);
       window.setTimeout(() => setCopySuccess(false), 2000);
     } catch {
@@ -118,25 +159,28 @@ export function AiOutreachAssistantSection({
   }
 
   async function handleSaveAsActivity() {
-    if (!draft?.fullDraft) return;
+    const draftText = form.editedFullDraft || form.draft?.fullDraft;
+    if (!draftText || !form.draft) return;
 
     setSavingActivity(true);
     setSaveMessage(null);
     setError(null);
 
-    const selectedContact = contacts.find((contact) => contact.id === contactId);
+    const selectedContact = contacts.find(
+      (contact) => contact.id === form.contactId,
+    );
     const contactLabel = selectedContact
       ? formatContactName(selectedContact)
       : null;
 
     const notesParts = [
-      `Outreach type: ${outreachType}`,
-      `Tone: ${tone}`,
+      `Outreach type: ${form.outreachType}`,
+      `Tone: ${form.tone}`,
       contactLabel ? `Contact: ${contactLabel}` : null,
-      goal.trim() ? `Goal: ${goal.trim()}` : null,
-      draft.subjectLine ? `Subject: ${draft.subjectLine}` : null,
+      form.goal.trim() ? `Goal: ${form.goal.trim()}` : null,
+      form.draft.subjectLine ? `Subject: ${form.draft.subjectLine}` : null,
       "",
-      draft.fullDraft,
+      draftText,
     ].filter((part) => part !== null);
 
     const { error: insertError } = await supabase.from("activities").insert({
@@ -155,8 +199,16 @@ export function AiOutreachAssistantSection({
     }
 
     setSaveMessage("Draft saved to the Commercial Timeline.");
+    clearForm();
     onActivitySaved?.();
     setSavingActivity(false);
+  }
+
+  function handleDiscard() {
+    clearForm();
+    setError(null);
+    setSaveMessage(null);
+    setCopySuccess(false);
   }
 
   return (
@@ -187,9 +239,12 @@ export function AiOutreachAssistantSection({
             </label>
             <select
               id="outreach-type"
-              value={outreachType}
+              value={form.outreachType}
               onChange={(event) =>
-                setOutreachType(event.target.value as OutreachType)
+                setForm((prev) => ({
+                  ...prev,
+                  outreachType: event.target.value as OutreachType,
+                }))
               }
               disabled={loading}
               className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
@@ -214,8 +269,13 @@ export function AiOutreachAssistantSection({
             </label>
             <select
               id="outreach-contact"
-              value={contactId}
-              onChange={(event) => setContactId(event.target.value)}
+              value={form.contactId}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...prev,
+                  contactId: event.target.value,
+                }))
+              }
               disabled={loading || contactsLoading}
               className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -237,8 +297,13 @@ export function AiOutreachAssistantSection({
             </label>
             <select
               id="outreach-tone"
-              value={tone}
-              onChange={(event) => setTone(event.target.value as OutreachTone)}
+              value={form.tone}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...prev,
+                  tone: event.target.value as OutreachTone,
+                }))
+              }
               disabled={loading}
               className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -260,8 +325,10 @@ export function AiOutreachAssistantSection({
             <input
               id="outreach-goal"
               type="text"
-              value={goal}
-              onChange={(event) => setGoal(event.target.value)}
+              value={form.goal}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, goal: event.target.value }))
+              }
               disabled={loading}
               placeholder="Example: Ask for available lanes, follow up on a quote, reconnect after no response..."
               className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
@@ -269,13 +336,25 @@ export function AiOutreachAssistantSection({
           </div>
         </div>
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {loading ? "Generating draft..." : "Generate Draft"}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="submit"
+            disabled={loading}
+            className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loading ? "Generating draft..." : "Generate Draft"}
+          </button>
+          {!isOutreachDraftEmpty(form) && (
+            <button
+              type="button"
+              onClick={handleDiscard}
+              disabled={loading || savingActivity}
+              className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-60"
+            >
+              Discard draft
+            </button>
+          )}
+        </div>
       </form>
 
       {error && (
@@ -296,12 +375,13 @@ export function AiOutreachAssistantSection({
         </p>
       )}
 
-      {!loading && draft && (
+      {!loading && form.draft && (
         <div className="mt-6 space-y-4 border-t border-zinc-100 pt-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs text-zinc-500">
               Draft for broker review only. Copy and use in your own tools — the
-              CRM does not send messages or contact customers.
+              CRM does not send messages or contact customers. Your edits are
+              kept if you switch browser tabs.
             </p>
             <div className="flex flex-wrap gap-2">
               <button
@@ -330,19 +410,19 @@ export function AiOutreachAssistantSection({
             </div>
           </div>
 
-          {draft.subjectLine && (
+          {form.draft.subjectLine && (
             <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
                 Subject line
               </p>
               <p className="mt-1 text-sm font-medium text-zinc-900">
-                {draft.subjectLine}
+                {form.draft.subjectLine}
               </p>
             </div>
           )}
 
           <div className="space-y-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-            {draft.sections.map((section) => (
+            {form.draft.sections.map((section) => (
               <div key={section.title}>
                 <h3 className="text-sm font-semibold text-zinc-900">
                   {section.title}
@@ -355,12 +435,24 @@ export function AiOutreachAssistantSection({
           </div>
 
           <div className="rounded-lg border border-zinc-200 bg-white p-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-              Draft to copy
-            </p>
-            <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-800">
-              {draft.fullDraft}
-            </p>
+            <label
+              htmlFor="outreach-edited-draft"
+              className="text-xs font-medium uppercase tracking-wide text-zinc-500"
+            >
+              Draft to copy / edit
+            </label>
+            <textarea
+              id="outreach-edited-draft"
+              rows={12}
+              value={form.editedFullDraft}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...prev,
+                  editedFullDraft: event.target.value,
+                }))
+              }
+              className="mt-2 w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-800 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+            />
           </div>
         </div>
       )}

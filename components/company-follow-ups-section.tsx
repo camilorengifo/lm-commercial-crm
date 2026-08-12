@@ -43,6 +43,17 @@ import {
   formatContactName,
   type ContactOption,
 } from "@/lib/loadOpportunities";
+import { companyDraftKey, usePersistentDraft } from "@/lib/usePersistentDraft";
+
+function isLogFormEmpty(form: CommercialActivityFormValues): boolean {
+  return (
+    !form.notes.trim() &&
+    !form.contact_id &&
+    !form.schedule_next_follow_up &&
+    !form.next_follow_up_at &&
+    !form.next_follow_up_notes.trim()
+  );
+}
 
 function bucketLabel(bucket: ReturnType<typeof getFollowUpBucket>): string {
   switch (bucket) {
@@ -294,9 +305,12 @@ export function CompanyFollowUpsSection({
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  const [logForm, setLogForm] = useState<CommercialActivityFormValues>(() =>
-    emptyCommercialActivityForm(nowDatetimeLocal()),
-  );
+  const [logForm, setLogForm, clearLogForm] =
+    usePersistentDraft<CommercialActivityFormValues>({
+      key: companyDraftKey(companyId, "followup"),
+      initialValue: emptyCommercialActivityForm(nowDatetimeLocal()),
+      isEmpty: isLogFormEmpty,
+    });
   const [logSubmitting, setLogSubmitting] = useState(false);
   const [logError, setLogError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -384,7 +398,7 @@ export function CompanyFollowUpsSection({
       return;
     }
 
-    setLogForm(emptyCommercialActivityForm(nowDatetimeLocal()));
+    clearLogForm();
     setSuccessMessage("Activity logged successfully.");
     await refreshAll();
     onCompanyUpdated?.();
@@ -536,13 +550,28 @@ export function CompanyFollowUpsSection({
               </p>
             )}
 
-            <button
-              type="submit"
-              disabled={logSubmitting}
-              className="crm-btn-primary disabled:opacity-60"
-            >
-              {logSubmitting ? "Saving..." : "Save activity"}
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="submit"
+                disabled={logSubmitting}
+                className="crm-btn-primary disabled:opacity-60"
+              >
+                {logSubmitting ? "Saving..." : "Save activity"}
+              </button>
+              {!isLogFormEmpty(logForm) && (
+                <button
+                  type="button"
+                  disabled={logSubmitting}
+                  onClick={() => {
+                    clearLogForm();
+                    setLogError(null);
+                  }}
+                  className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-60"
+                >
+                  Discard draft
+                </button>
+              )}
+            </div>
           </form>
         </div>
       )}

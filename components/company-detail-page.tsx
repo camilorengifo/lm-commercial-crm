@@ -61,6 +61,28 @@ import {
   createCompanyContactsWarningMessage,
   createCompanySuccessMessage,
 } from "@/lib/companyCreateContacts";
+import {
+  companyDraftKey,
+  readCompanyDraft,
+  writeCompanyDraft,
+} from "@/lib/usePersistentDraft";
+
+const COMPANY_SECTIONS = [
+  { id: "overview", label: "Overview" },
+  { id: "contacts", label: "Contacts" },
+  { id: "follow-ups", label: "Follow-ups" },
+  { id: "opportunities", label: "Opportunities" },
+  { id: "timeline", label: "Timeline" },
+  { id: "ai-outreach", label: "AI Outreach" },
+] as const;
+
+type CompanySectionId = (typeof COMPANY_SECTIONS)[number]["id"];
+
+function isCompanySectionId(
+  value: string | null | undefined,
+): value is CompanySectionId {
+  return COMPANY_SECTIONS.some((section) => section.id === value);
+}
 
 interface CompanyOwnerInfo {
   name: string;
@@ -127,12 +149,25 @@ export function CompanyDetailPage() {
   const isAdmin = isAdminProfile(profile);
 
   const fetchCompany = useCallback(
-    async (userId: string, id: string, userProfile: UserProfile | null) => {
-      setFetchError(null);
-      setNotFound(false);
-      setCompanyAccessVerified(false);
-      setCompany(null);
-      setOwnerInfo(null);
+    async (
+      userId: string,
+      id: string,
+      userProfile: UserProfile | null,
+      options?: { soft?: boolean },
+    ) => {
+      const soft = options?.soft === true;
+
+      // Hard loads clear UI. Soft loads must NOT null company — that unmounts
+      // child forms and destroys in-progress drafts on auth token refresh.
+      if (!soft) {
+        setFetchError(null);
+        setNotFound(false);
+        setCompanyAccessVerified(false);
+        setCompany(null);
+        setOwnerInfo(null);
+      } else {
+        setFetchError(null);
+      }
 
       const { data, error, denied } = await fetchCompanyByIdForViewer<Company>({
         companyId: id,
@@ -148,7 +183,9 @@ export function CompanyDetailPage() {
       }
 
       if (denied || !data) {
-        setNotFound(true);
+        if (!soft) {
+          setNotFound(true);
+        }
         return;
       }
 
@@ -160,7 +197,9 @@ export function CompanyDetailPage() {
       };
 
       setCompany(nextCompany);
-      setReassignOwnerId(nextCompany.user_id);
+      setReassignOwnerId((current) =>
+        current && current.length > 0 ? current : nextCompany.user_id,
+      );
       setCompanyAccessVerified(true);
 
       const { data: ownerProfile } = await supabase
@@ -197,7 +236,7 @@ export function CompanyDetailPage() {
           email: ownerProfile.email ?? "—",
           officeName,
         });
-      } else {
+      } else if (!soft) {
         setOwnerInfo(null);
       }
     },
@@ -451,9 +490,15 @@ export function CompanyDetailPage() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!session?.user) {
         router.replace("/login");
+        return;
+      }
+
+      // Returning to the browser tab often refreshes the JWT. Do not tear down
+      // Company Detail or remount child forms on token refresh / initial session.
+      if (event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION") {
         return;
       }
 
@@ -462,12 +507,82 @@ export function CompanyDetailPage() {
       setProfile(userProfile);
 
       if (companyId) {
-        fetchCompany(session.user.id, companyId, userProfile);
+        // Soft refresh keeps mounted forms/drafts intact.
+        fetchCompany(session.user.id, companyId, userProfile, { soft: true });
       }
     });
 
     return () => subscription.unsubscribe();
   }, [router, companyId, fetchCompany]);
+
+  const tabParam = searchParams.get("tab");
+  const activeSection: CompanySectionId = isCompanySectionId(tabParam)
+    ? tabParam
+    : "overview";
+
+  const selectCompanySection = useCallback(
+    (section: CompanySectionId, options?: { scroll?: boolean }) => {
+      if (!companyId) return;
+
+      const nextParams = new URLSearchParams(searchParams.toString());
+      if (section === "overview") {
+        nextParams.delete("tab");
+      } else {
+        nextParams.set("tab", section);
+      }
+
+      const query = nextParams.toString();
+      router.replace(
+        query ? `/companies/${companyId}?${query}` : `/companies/${companyId}`,
+        { scroll: false },
+      );
+
+      writeCompanyDraft(companyDraftKey(companyId, "section"), { section });
+
+      if (options?.scroll !== false) {
+        window.requestAnimationFrame(() => {
+          document
+            .getElementById(`company-section-${section}`)
+            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      }
+    },
+    [companyId, router, searchParams],
+  );
+
+  useEffect(() => {
+    if (!companyId || !companyAccessVerified || !company) return;
+
+    const urlTab = searchParams.get("tab");
+    if (isCompanySectionId(urlTab)) {
+      writeCompanyDraft(companyDraftKey(companyId, "section"), {
+        section: urlTab,
+      });
+      window.requestAnimationFrame(() => {
+        document
+          .getElementById(`company-section-${urlTab}`)
+          ?.scrollIntoView({ behavior: "auto", block: "start" });
+      });
+      return;
+    }
+
+    const stored = readCompanyDraft<{ section: string }>(
+      companyDraftKey(companyId, "section"),
+    );
+    if (
+      stored &&
+      isCompanySectionId(stored.section) &&
+      stored.section !== "overview"
+    ) {
+      const nextParams = new URLSearchParams(searchParams.toString());
+      nextParams.set("tab", stored.section);
+      router.replace(`/companies/${companyId}?${nextParams.toString()}`, {
+        scroll: false,
+      });
+    }
+    // Only restore once access is verified for this company.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional one-shot restore
+  }, [companyId, companyAccessVerified]);
 
   if (loading) {
     return (
@@ -829,17 +944,45 @@ export function CompanyDetailPage() {
             </div>
 
             <div className="space-y-5">
+              <nav
+                className="sticky top-0 z-20 -mx-1 flex flex-wrap gap-2 border-b border-zinc-200 bg-zinc-50/95 px-1 py-3 backdrop-blur"
+                aria-label="Company sections"
+              >
+                {COMPANY_SECTIONS.map((section) => {
+                  const isActive = activeSection === section.id;
+                  return (
+                    <button
+                      key={section.id}
+                      type="button"
+                      onClick={() => selectCompanySection(section.id)}
+                      className={
+                        isActive
+                          ? "crm-tab-pill crm-tab-pill-active"
+                          : "crm-tab-pill"
+                      }
+                    >
+                      {section.label}
+                    </button>
+                  );
+                })}
+              </nav>
+
+              <div id="company-section-overview" className="scroll-mt-24" />
+
+              <div id="company-section-contacts" className="scroll-mt-24">
               <CompanyContactsSection
                 companyId={company.id}
                 ownerUserId={company.user_id}
                 viewerUserId={user.id}
                 isAdmin={isAdmin}
               />
+              </div>
               <CompanyAccountStatusSection
                 company={company}
                 canManage={canManageCompany}
                 onUpdated={handleAccountStatusUpdated}
               />
+              <div id="company-section-follow-ups" className="scroll-mt-24">
               <CompanyFollowUpsSection
                 companyId={company.id}
                 userId={scopedUserId}
@@ -849,6 +992,8 @@ export function CompanyDetailPage() {
                 onCompanyUpdated={refreshFollowUpSections}
                 externalRefreshKey={followUpsRefreshKey}
               />
+              </div>
+              <div id="company-section-opportunities" className="scroll-mt-24">
               <CompanyLoadOpportunitiesSection
                 companyId={company.id}
                 ownerUserId={company.user_id}
@@ -858,12 +1003,15 @@ export function CompanyDetailPage() {
                 canManage={canManageCompanyOpportunities}
                 onCompanyUpdated={handleCompanyUpdated}
               />
+              </div>
+              <div id="company-section-timeline" className="scroll-mt-24">
               <CompanyChronologySection
                 companyId={company.id}
                 userId={scopedUserId}
                 isAdmin={isAdmin}
                 externalRefreshKey={chronologyRefreshKey}
               />
+              </div>
               <div className="crm-workspace-toolbar">
                 <Link
                   href="/assistant"
@@ -878,6 +1026,7 @@ export function CompanyDetailPage() {
                   Draft next outreach
                 </Link>
               </div>
+              <div id="company-section-ai-outreach" className="scroll-mt-24">
               <AiOutreachAssistantSection
                 companyId={company.id}
                 companyName={company.name}
@@ -888,6 +1037,7 @@ export function CompanyDetailPage() {
                   refreshFollowUpSections();
                 }}
               />
+              </div>
             </div>
           </>
         )}

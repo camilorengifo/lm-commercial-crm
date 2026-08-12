@@ -107,8 +107,13 @@ export function ActiveUserGuard({ children }: { children: React.ReactNode }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (cancelled) {
+        return;
+      }
+
+      // Tab focus commonly refreshes JWTs; avoid redundant profile checks.
+      if (event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION") {
         return;
       }
 

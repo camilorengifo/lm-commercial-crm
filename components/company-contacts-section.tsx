@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { formatDate, formatSupabaseError } from "@/lib/crmFormat";
+import { companyDraftKey, usePersistentDraft, writeCompanyDraft } from "@/lib/usePersistentDraft";
 import { supabase } from "@/lib/supabaseClient";
 
 interface Contact {
@@ -37,6 +38,31 @@ const EMPTY_FORM: ContactFormState = {
   notes: "",
   is_primary: false,
 };
+
+function isContactFormEmpty(form: ContactFormState): boolean {
+  return (
+    !form.first_name.trim() &&
+    !form.last_name.trim() &&
+    !form.job_title.trim() &&
+    !form.email.trim() &&
+    !form.phone.trim() &&
+    !form.notes.trim() &&
+    !form.is_primary
+  );
+}
+
+interface ContactCreateDraft {
+  open: boolean;
+  form: ContactFormState;
+}
+
+function emptyCreateDraft(): ContactCreateDraft {
+  return { open: false, form: EMPTY_FORM };
+}
+
+function isCreateDraftEmpty(draft: ContactCreateDraft): boolean {
+  return !draft.open && isContactFormEmpty(draft.form);
+}
 
 function formatContactName(contact: Contact): string {
   return [contact.first_name, contact.last_name].filter(Boolean).join(" ");
@@ -241,13 +267,51 @@ export function CompanyContactsSection({
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [createForm, setCreateForm] = useState<ContactFormState>(EMPTY_FORM);
+  const createDraftKey = useMemo(
+    () => companyDraftKey(companyId, "contact-create"),
+    [companyId],
+  );
+  const [createDraft, setCreateDraft, clearCreateDraft] =
+    usePersistentDraft<ContactCreateDraft>({
+      key: createDraftKey,
+      initialValue: emptyCreateDraft(),
+      isEmpty: isCreateDraftEmpty,
+    });
+
+  const showCreateForm = createDraft.open;
+  const createForm = createDraft.form;
+
+  function setShowCreateForm(open: boolean) {
+    setCreateDraft((prev) => ({ ...prev, open }));
+  }
+
+  function setCreateForm(
+    next: ContactFormState | ((prev: ContactFormState) => ContactFormState),
+  ) {
+    setCreateDraft((prev) => ({
+      ...prev,
+      form: typeof next === "function" ? next(prev.form) : next,
+    }));
+  }
+
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<ContactFormState>(EMPTY_FORM);
+  const editDraftKey = useMemo(
+    () =>
+      editingId
+        ? companyDraftKey(companyId, `contact-edit:${editingId}`)
+        : companyDraftKey(companyId, "contact-edit:none"),
+    [companyId, editingId],
+  );
+  const [editForm, setEditForm, clearEditForm] =
+    usePersistentDraft<ContactFormState>({
+      key: editDraftKey,
+      initialValue: EMPTY_FORM,
+      isEmpty: isContactFormEmpty,
+      enabled: Boolean(editingId),
+    });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
@@ -332,8 +396,7 @@ export function CompanyContactsSection({
         return;
       }
 
-      setCreateForm(EMPTY_FORM);
-      setShowCreateForm(false);
+      clearCreateDraft();
       await fetchContacts();
     } catch (error) {
       setCreateError(formatSupabaseError(error as { message?: string }));
@@ -343,16 +406,21 @@ export function CompanyContactsSection({
   }
 
   function startEditing(contact: Contact) {
+    const nextForm = contactToForm(contact);
+    writeCompanyDraft(
+      companyDraftKey(companyId, `contact-edit:${contact.id}`),
+      nextForm,
+    );
     setEditingId(contact.id);
-    setEditForm(contactToForm(contact));
+    setEditForm(nextForm);
     setEditError(null);
     setShowCreateForm(false);
     setCreateError(null);
   }
 
   function cancelEditing() {
+    clearEditForm();
     setEditingId(null);
-    setEditForm(EMPTY_FORM);
     setEditError(null);
   }
 
@@ -393,8 +461,7 @@ export function CompanyContactsSection({
         return;
       }
 
-      setEditingId(null);
-      setEditForm(EMPTY_FORM);
+      cancelEditing();
       await fetchContacts();
     } catch (error) {
       setEditError(formatSupabaseError(error as { message?: string }));
@@ -441,7 +508,7 @@ export function CompanyContactsSection({
         <button
           type="button"
           onClick={() => {
-            setShowCreateForm((prev) => !prev);
+            setShowCreateForm(!showCreateForm);
             setCreateError(null);
             cancelEditing();
           }}
@@ -486,8 +553,7 @@ export function CompanyContactsSection({
               <button
                 type="button"
                 onClick={() => {
-                  setShowCreateForm(false);
-                  setCreateForm(EMPTY_FORM);
+                  clearCreateDraft();
                   setCreateError(null);
                 }}
                 className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
