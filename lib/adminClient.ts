@@ -1,6 +1,19 @@
 import { supabase } from "@/lib/supabaseClient";
-import type { AdminUserListItem } from "@/lib/adminUserManagement";
+import type {
+  AdminUserListItem,
+  AdminUserRemovalResult,
+} from "@/lib/adminUserManagement";
+import type { CrmOwnershipInspection } from "@/lib/crmOwnership";
 import type { UserRole } from "@/lib/userProfile";
+
+const REMOVAL_REQUEST_TIMEOUT_MS = 90_000;
+
+export interface AdminRequestResult<T> {
+  data: T | null;
+  error: string | null;
+  status: number;
+  timedOut: boolean;
+}
 
 export async function getAccessToken(): Promise<string | null> {
   const {
@@ -13,7 +26,8 @@ export async function getAccessToken(): Promise<string | null> {
 async function adminRequest<T>(
   path: string,
   options: RequestInit = {},
-): Promise<{ data: T | null; error: string | null; status: number }> {
+  timeoutMs = REMOVAL_REQUEST_TIMEOUT_MS,
+): Promise<AdminRequestResult<T>> {
   const accessToken = await getAccessToken();
 
   if (!accessToken) {
@@ -21,29 +35,61 @@ async function adminRequest<T>(
       data: null,
       error: "You must be signed in.",
       status: 401,
+      timedOut: false,
     };
   }
 
-  const response = await fetch(path, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      ...(options.headers ?? {}),
-    },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  const payload = (await response.json()) as T & { error?: string; message?: string };
+  try {
+    const response = await fetch(path, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        ...(options.headers ?? {}),
+      },
+    });
 
-  if (!response.ok) {
+    let payload: (T & { error?: string; message?: string }) | null = null;
+    try {
+      payload = (await response.json()) as T & { error?: string; message?: string };
+    } catch {
+      return {
+        data: null,
+        error: response.ok
+          ? "The server returned an unreadable response."
+          : "The server took too long or returned an unreadable response. Ownership was not checked yet.",
+        status: response.status,
+        timedOut: !response.ok,
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        data: null,
+        error: payload.error ?? payload.message ?? "Request failed.",
+        status: response.status,
+        timedOut: false,
+      };
+    }
+
+    return { data: payload, error: null, status: response.status, timedOut: false };
+  } catch (error) {
+    const aborted = error instanceof DOMException && error.name === "AbortError";
     return {
       data: null,
-      error: payload.error ?? payload.message ?? "Request failed.",
-      status: response.status,
+      error: aborted
+        ? "This is taking longer than expected."
+        : "Unable to reach the server.",
+      status: aborted ? 408 : 0,
+      timedOut: true,
     };
+  } finally {
+    clearTimeout(timer);
   }
-
-  return { data: payload, error: null, status: response.status };
 }
 
 export async function fetchAdminUsers() {
@@ -87,12 +133,17 @@ export async function removeAdminUser(input: {
   reassignToUserId?: string;
   confirmedForceDelete?: boolean;
 }) {
-  return adminRequest<{ message: string; reassignedCompanies?: number }>(
-    "/api/admin/delete-user",
-    {
-      method: "DELETE",
-      body: JSON.stringify(input),
-    },
+  return adminRequest<AdminUserRemovalResult>("/api/admin/delete-user", {
+    method: "DELETE",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function fetchUserCrmOwnership(userId: string) {
+  return adminRequest<CrmOwnershipInspection>(
+    `/api/admin/user-ownership?userId=${encodeURIComponent(userId)}`,
+    { method: "GET" },
+    20_000,
   );
 }
 

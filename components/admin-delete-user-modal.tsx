@@ -22,14 +22,17 @@ export function AdminDeleteUserModal({
   reassignToUserId,
   confirmText,
   submitting,
+  progress,
+  blockRetry,
   error,
   onReassignToUserIdChange,
   onConfirmTextChange,
   onCancel,
   onReassignRecords,
   onDeactivateUser,
-  onDeleteAnyway,
+  onPrepareConfirmedDelete,
   onConfirmDelete,
+  onCheckStatus,
 }: {
   open: boolean;
   targetUser: AdminUserListItem | null;
@@ -38,14 +41,17 @@ export function AdminDeleteUserModal({
   reassignToUserId: string;
   confirmText: string;
   submitting: boolean;
+  progress: string | null;
+  blockRetry: boolean;
   error: string | null;
   onReassignToUserIdChange: (userId: string) => void;
   onConfirmTextChange: (text: string) => void;
   onCancel: () => void;
   onReassignRecords: () => void;
   onDeactivateUser: () => void;
-  onDeleteAnyway: () => void;
+  onPrepareConfirmedDelete: () => void;
   onConfirmDelete: () => void;
+  onCheckStatus: () => void;
 }) {
   const targetLabel = useMemo(() => {
     if (!targetUser) return "this user";
@@ -68,10 +74,11 @@ export function AdminDeleteUserModal({
 
   if (!open || !targetUser) return null;
 
+  const controlsLocked = submitting || blockRetry;
   const confirmDeleteEnabled =
     confirmText === "DELETE" &&
     reassignToUserId.length > 0 &&
-    !submitting;
+    !controlsLocked;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -79,6 +86,7 @@ export function AdminDeleteUserModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="delete-user-title"
+        aria-busy={submitting}
         className="w-full max-w-lg rounded-xl border border-zinc-200 bg-white p-6 shadow-xl"
       >
         {step === "options" ? (
@@ -114,7 +122,7 @@ export function AdminDeleteUserModal({
                 onChange={(event) =>
                   onReassignToUserIdChange(event.target.value)
                 }
-                disabled={submitting}
+                disabled={controlsLocked}
                 className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <option value="">Select an owner...</option>
@@ -126,6 +134,15 @@ export function AdminDeleteUserModal({
               </select>
             </div>
 
+            {progress && (
+              <p
+                role="status"
+                className="mt-3 rounded-lg bg-zinc-50 px-3 py-2 text-sm text-zinc-700"
+              >
+                {progress}
+              </p>
+            )}
+
             {error && (
               <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
                 {error}
@@ -136,29 +153,40 @@ export function AdminDeleteUserModal({
               <button
                 type="button"
                 onClick={onReassignRecords}
-                disabled={submitting || !reassignToUserId}
+                disabled={controlsLocked || !reassignToUserId}
                 className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {submitting ? "Working..." : "Reassign records"}
+                Reassign records
               </button>
 
               <button
                 type="button"
                 onClick={onDeactivateUser}
-                disabled={submitting}
+                disabled={controlsLocked}
                 className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {submitting ? "Working..." : "Deactivate user"}
+                Deactivate user
               </button>
 
               <button
                 type="button"
-                onClick={onDeleteAnyway}
-                disabled={submitting}
+                onClick={onPrepareConfirmedDelete}
+                disabled={controlsLocked || !reassignToUserId}
                 className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Delete anyway
+                Reassign and delete
               </button>
+
+              {blockRetry && (
+                <button
+                  type="button"
+                  onClick={onCheckStatus}
+                  disabled={submitting}
+                  className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Check status
+                </button>
+              )}
 
               <button
                 type="button"
@@ -180,9 +208,9 @@ export function AdminDeleteUserModal({
             </h2>
 
             <p className="mt-2 text-sm text-zinc-700">
-              You are about to permanently remove access for {targetLabel}.
-              CRM records will be reassigned before deletion. This cannot be
-              undone.
+              CRM records for {targetLabel} will be reassigned first. The
+              account is deleted only after that reassignment is confirmed. If
+              reassignment fails, the account stays in place.
             </p>
 
             <div className="mt-4">
@@ -198,7 +226,7 @@ export function AdminDeleteUserModal({
                 onChange={(event) =>
                   onReassignToUserIdChange(event.target.value)
                 }
-                disabled={submitting}
+                disabled={controlsLocked}
                 className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <option value="">Select an owner...</option>
@@ -222,12 +250,21 @@ export function AdminDeleteUserModal({
                 type="text"
                 value={confirmText}
                 onChange={(event) => onConfirmTextChange(event.target.value)}
-                disabled={submitting}
+                disabled={controlsLocked}
                 autoComplete="off"
                 spellCheck={false}
                 className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
               />
             </div>
+
+            {progress && (
+              <p
+                role="status"
+                className="mt-3 rounded-lg bg-zinc-50 px-3 py-2 text-sm text-zinc-700"
+              >
+                {progress}
+              </p>
+            )}
 
             {error && (
               <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -236,6 +273,16 @@ export function AdminDeleteUserModal({
             )}
 
             <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              {blockRetry && (
+                <button
+                  type="button"
+                  onClick={onCheckStatus}
+                  disabled={submitting}
+                  className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Check status
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onCancel}
@@ -250,7 +297,7 @@ export function AdminDeleteUserModal({
                 disabled={!confirmDeleteEnabled}
                 className="inline-flex items-center justify-center rounded-lg bg-red-700 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {submitting ? "Removing..." : "Confirm delete"}
+                Confirm delete
               </button>
             </div>
           </>

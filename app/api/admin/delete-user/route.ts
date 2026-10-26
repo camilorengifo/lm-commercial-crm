@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  ReassignmentInProgressError,
   SuperAdminProtectionError,
   UserDeleteBlockedError,
   removeAdminUser,
@@ -13,6 +14,9 @@ interface DeleteUserBody {
   reassignToUserId?: string;
   confirmedForceDelete?: boolean;
 }
+
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export async function DELETE(request: Request) {
   const auth = await requireAdminFromRequest(request);
@@ -53,7 +57,10 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 403 });
     }
 
-    if (error instanceof UserDeleteBlockedError) {
+    if (
+      error instanceof UserDeleteBlockedError ||
+      error instanceof ReassignmentInProgressError
+    ) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
 

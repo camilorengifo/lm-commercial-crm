@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { AdminSubNav } from "@/components/admin-shared";
 import { useAdminAuth } from "@/components/admin-auth-context";
 import {
   deleteAdminUser,
   fetchAdminUsers,
+  fetchUserCrmOwnership,
   inviteAdminUser,
   removeAdminUser,
   updateAdminUser,
@@ -19,6 +20,7 @@ import {
 } from "@/components/admin-delete-user-modal";
 import { compareAssignableOwners } from "@/lib/adminCompanies";
 import { formatDate, formatDateTime } from "@/lib/crmFormat";
+import { decideAfterSlowReassignment } from "@/lib/crmOwnership";
 import { isAssignableCompanyOwner, type UserRole } from "@/lib/userProfile";
 import {
   canManageSuperAdminRole,
@@ -57,6 +59,10 @@ export function AdminUsersPage() {
   const [deleteReassignToUserId, setDeleteReassignToUserId] = useState("");
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deleteModalError, setDeleteModalError] = useState<string | null>(null);
+  const [removalProgress, setRemovalProgress] = useState<string | null>(null);
+  const [statusNotice, setStatusNotice] = useState<string | null>(null);
+  const [blockRemovalRetry, setBlockRemovalRetry] = useState(false);
+  const removalInFlight = useRef(false);
   const [deleteFeedback, setDeleteFeedback] = useState<{
     type: "success" | "error";
     message: string;
@@ -167,7 +173,20 @@ export function AdminUsersPage() {
     setUpdatingUserId(null);
   }
 
+  function resetDeleteModal() {
+    setDeleteTarget(null);
+    setDeleteStep("options");
+    setDeleteReassignToUserId("");
+    setDeleteConfirmText("");
+    setDeleteModalError(null);
+    setRemovalProgress(null);
+    setStatusNotice(null);
+    setBlockRemovalRetry(false);
+  }
+
   async function handleDeleteClick(row: AdminUserListItem) {
+    if (removalInFlight.current) return;
+
     if (!row.ownsCrmRecords) {
       const confirmed = window.confirm(
         "Are you sure you want to delete this user? This cannot be undone.",
@@ -177,27 +196,37 @@ export function AdminUsersPage() {
         return;
       }
 
+      removalInFlight.current = true;
       setDeletingUserId(row.id);
       setDeleteFeedback(null);
       setFetchError(null);
 
-      const { data, error } = await deleteAdminUser(row.id);
+      try {
+        const { data, error } = await deleteAdminUser(row.id);
 
-      if (error || !data) {
+        if (error || !data) {
+          setDeleteFeedback({
+            type: "error",
+            message: error ?? "Unable to delete user.",
+          });
+          return;
+        }
+
+        setDeleteFeedback({
+          type: "success",
+          message: data.message,
+        });
+        await loadUsers();
+      } catch (error) {
         setDeleteFeedback({
           type: "error",
-          message: error ?? "Unable to delete user.",
+          message:
+            error instanceof Error ? error.message : "Unable to delete user.",
         });
+      } finally {
+        removalInFlight.current = false;
         setDeletingUserId(null);
-        return;
       }
-
-      setDeleteFeedback({
-        type: "success",
-        message: data.message,
-      });
-      await loadUsers();
-      setDeletingUserId(null);
       return;
     }
 
@@ -206,18 +235,17 @@ export function AdminUsersPage() {
     setDeleteReassignToUserId("");
     setDeleteConfirmText("");
     setDeleteModalError(null);
+    setRemovalProgress(null);
+    setStatusNotice(null);
+    setBlockRemovalRetry(false);
   }
 
   function closeDeleteModal() {
-    if (deletingUserId) {
+    if (removalInFlight.current) {
       return;
     }
 
-    setDeleteTarget(null);
-    setDeleteStep("options");
-    setDeleteReassignToUserId("");
-    setDeleteConfirmText("");
-    setDeleteModalError(null);
+    resetDeleteModal();
   }
 
   const assignableDeleteTargets = users
@@ -240,65 +268,135 @@ export function AdminUsersPage() {
     )
     .sort(compareAssignableOwners);
 
+  async function reviewOwnershipAfterDelay(userId: string) {
+    setBlockRemovalRetry(true);
+    setRemovalProgress(
+      "This is taking longer than expected. Checking whether the original operation finished…",
+    );
+
+    const status = await fetchUserCrmOwnership(userId);
+    if (status.error || !status.data) {
+      setDeleteModalError(
+        status.error ??
+          "The request timed out, and ownership could not be checked. Do not start another reassignment until status can be read.",
+      );
+      return;
+    }
+
+    const decision = decideAfterSlowReassignment({
+      inProgress: status.data.inProgress,
+      counts: status.data.counts,
+      accountDeleted: false,
+    });
+
+    if (decision.action === "wait") {
+      setBlockRemovalRetry(true);
+      setStatusNotice(null);
+      setDeleteModalError(decision.message);
+      return;
+    }
+
+    setBlockRemovalRetry(false);
+    if (decision.action === "complete") {
+      setDeleteModalError(null);
+      setStatusNotice(decision.message);
+      setDeleteFeedback({ type: "success", message: decision.message });
+      await loadUsers();
+      return;
+    }
+
+    setStatusNotice(null);
+    setDeleteModalError(decision.message);
+  }
+
+  async function runModalRemoval(
+    progress: string,
+    kind: "ownership" | "deactivate",
+    task: () => Promise<{
+      data: { message: string } | null;
+      error: string | null;
+      timedOut: boolean;
+    }>,
+  ) {
+    if (!deleteTarget || removalInFlight.current || blockRemovalRetry) return;
+
+    const userId = deleteTarget.id;
+    removalInFlight.current = true;
+    setDeletingUserId(userId);
+    setDeleteModalError(null);
+    setStatusNotice(null);
+    setRemovalProgress(progress);
+
+    try {
+      const result = await task();
+      if (result.timedOut) {
+        if (kind === "deactivate") {
+          setBlockRemovalRetry(false);
+          setDeleteModalError(
+            "The deactivation request did not finish. Refresh the user list before trying again. Another deactivation was not sent.",
+          );
+          return;
+        }
+        await reviewOwnershipAfterDelay(userId);
+        return;
+      }
+
+      if (result.error || !result.data) {
+        setDeleteModalError(result.error ?? "Unable to complete this action.");
+        return;
+      }
+
+      setDeleteFeedback({ type: "success", message: result.data.message });
+      await loadUsers();
+      resetDeleteModal();
+    } catch (error) {
+      setDeleteModalError(
+        error instanceof Error
+          ? error.message
+          : "Unable to complete this action.",
+      );
+    } finally {
+      removalInFlight.current = false;
+      setDeletingUserId(null);
+      setRemovalProgress(null);
+    }
+  }
+
   async function handleReassignRecords() {
     if (!deleteTarget || !deleteReassignToUserId) {
       setDeleteModalError("Select an owner to receive the records.");
       return;
     }
 
-    setDeletingUserId(deleteTarget.id);
-    setDeleteModalError(null);
-
-    const { data, error } = await removeAdminUser({
-      userId: deleteTarget.id,
-      mode: "reassign",
-      reassignToUserId: deleteReassignToUserId,
-    });
-
-    if (error || !data) {
-      setDeleteModalError(error ?? "Unable to reassign records.");
-      setDeletingUserId(null);
-      return;
-    }
-
-    setDeleteFeedback({
-      type: "success",
-      message: data.message,
-    });
-    await loadUsers();
-    setDeletingUserId(null);
-    closeDeleteModal();
+    const destinationUserId = deleteReassignToUserId;
+    const userId = deleteTarget.id;
+    await runModalRemoval("Reassigning CRM records…", "ownership", () =>
+      removeAdminUser({
+        userId,
+        mode: "reassign",
+        reassignToUserId: destinationUserId,
+      }),
+    );
   }
 
   async function handleDeactivateUser() {
-    if (!deleteTarget) {
-      return;
-    }
+    if (!deleteTarget) return;
 
-    setDeletingUserId(deleteTarget.id);
-    setDeleteModalError(null);
-
-    const { data, error } = await removeAdminUser({
-      userId: deleteTarget.id,
-      mode: "deactivate",
-    });
-
-    if (error || !data) {
-      setDeleteModalError(error ?? "Unable to deactivate user.");
-      setDeletingUserId(null);
-      return;
-    }
-
-    setDeleteFeedback({
-      type: "success",
-      message: data.message,
-    });
-    await loadUsers();
-    setDeletingUserId(null);
-    closeDeleteModal();
+    const userId = deleteTarget.id;
+    await runModalRemoval("Deactivating user…", "deactivate", () =>
+      removeAdminUser({
+        userId,
+        mode: "deactivate",
+      }),
+    );
   }
 
-  function handleDeleteAnyway() {
+  function handlePrepareConfirmedDelete() {
+    if (removalInFlight.current || blockRemovalRetry) return;
+    if (!deleteReassignToUserId) {
+      setDeleteModalError("Select an owner to receive the records.");
+      return;
+    }
     setDeleteStep("confirm");
     setDeleteConfirmText("");
     setDeleteModalError(null);
@@ -316,29 +414,32 @@ export function AdminUsersPage() {
       return;
     }
 
-    setDeletingUserId(deleteTarget.id);
-    setDeleteModalError(null);
+    const destinationUserId = deleteReassignToUserId;
+    const userId = deleteTarget.id;
+    await runModalRemoval("Reassigning CRM records…", "ownership", () =>
+      removeAdminUser({
+        userId,
+        mode: "delete",
+        reassignToUserId: destinationUserId,
+        confirmedForceDelete: true,
+      }),
+    );
+  }
 
-    const { data, error } = await removeAdminUser({
-      userId: deleteTarget.id,
-      mode: "delete",
-      reassignToUserId: deleteReassignToUserId,
-      confirmedForceDelete: true,
-    });
+  async function handleCheckOwnershipStatus() {
+    if (!deleteTarget || removalInFlight.current) return;
 
-    if (error || !data) {
-      setDeleteModalError(error ?? "Unable to delete user.");
+    const userId = deleteTarget.id;
+    removalInFlight.current = true;
+    setDeletingUserId(userId);
+    setRemovalProgress("Checking whether the original operation finished…");
+    try {
+      await reviewOwnershipAfterDelay(userId);
+    } finally {
+      removalInFlight.current = false;
       setDeletingUserId(null);
-      return;
+      setRemovalProgress(null);
     }
-
-    setDeleteFeedback({
-      type: "success",
-      message: data.message,
-    });
-    await loadUsers();
-    setDeletingUserId(null);
-    closeDeleteModal();
   }
 
   if (loading) {
@@ -566,7 +667,7 @@ export function AdminUsersPage() {
               {users.map((row) => {
                 const isSelf = row.id === user.id;
                 const isUpdating = updatingUserId === row.id;
-                const isDeleting = deletingUserId === row.id;
+                const isDeleting = deletingUserId === row.id && deleteTarget === null;
                 const isProtectedPrimary = isPrimarySuperAdminEmail(row.email);
                 const isTargetSuperAdmin = row.role === "super_admin";
                 const roleLocked =
@@ -582,7 +683,10 @@ export function AdminUsersPage() {
                 );
                 const activeLocked = isSelf || isProtectedPrimary;
                 const deleteLocked =
-                  isSelf || isProtectedPrimary || isUpdating || isDeleting;
+                  isSelf ||
+                  isProtectedPrimary ||
+                  isUpdating ||
+                  deletingUserId !== null;
 
                 return (
                   <tr key={row.id}>
@@ -703,14 +807,17 @@ export function AdminUsersPage() {
         reassignToUserId={deleteReassignToUserId}
         confirmText={deleteConfirmText}
         submitting={deletingUserId !== null}
+        progress={removalProgress ?? statusNotice}
+        blockRetry={blockRemovalRetry}
         error={deleteModalError}
         onReassignToUserIdChange={setDeleteReassignToUserId}
         onConfirmTextChange={setDeleteConfirmText}
         onCancel={closeDeleteModal}
         onReassignRecords={handleReassignRecords}
         onDeactivateUser={handleDeactivateUser}
-        onDeleteAnyway={handleDeleteAnyway}
+        onPrepareConfirmedDelete={handlePrepareConfirmedDelete}
         onConfirmDelete={handleConfirmDelete}
+        onCheckStatus={handleCheckOwnershipStatus}
       />
     </AuthenticatedLayout>
   );
