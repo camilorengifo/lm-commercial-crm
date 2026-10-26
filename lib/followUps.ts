@@ -2,7 +2,13 @@ import {
   normalizeAccountStatus,
   type AccountStatus,
 } from "@/lib/accountStatus";
-import type { ActivityType, CompanyPriority, FollowUpStatus } from "@/lib/crmConstants";
+import {
+  updatesLastContactAt,
+  type ActivityType,
+  type CompanyPriority,
+  type FollowUpStatus,
+} from "@/lib/crmConstants";
+import { followUpCreateBlockMessage } from "@/lib/outreachSuppression";
 import {
   resolveFollowUpSeasonalFields,
   type FollowUpType,
@@ -68,12 +74,13 @@ export const FOLLOW_UP_COMPLETED_LIMIT = 100;
 export type { FollowUpStatus };
 
 export const FOLLOW_UP_SELECT_FIELDS =
-  "id, user_id, company_id, title, notes, due_at, status, completed_at, created_at, follow_up_type, reminder_lead_days, reminder_start_date, seasonal_context";
+  "id, user_id, company_id, contact_id, title, notes, due_at, status, completed_at, created_at, follow_up_type, reminder_lead_days, reminder_start_date, seasonal_context, disposition_reason, disposition_notes, disposition_at, disposition_by";
 
 export interface FollowUpRecord {
   id: string;
   user_id: string;
   company_id: string;
+  contact_id?: string | null;
   title: string;
   notes: string | null;
   due_at: string;
@@ -84,6 +91,10 @@ export interface FollowUpRecord {
   reminder_lead_days?: number | null;
   reminder_start_date?: string | null;
   seasonal_context?: string | null;
+  disposition_reason?: string | null;
+  disposition_notes?: string | null;
+  disposition_at?: string | null;
+  disposition_by?: string | null;
 }
 
 export interface FollowUpWithCompany extends FollowUpRecord {
@@ -99,6 +110,7 @@ export interface FollowUpEnriched extends FollowUpWithCompany {
   companyOwnerUserId: string | null;
   brokerName: string | null;
   brokerEmail: string | null;
+  dispositionByName?: string | null;
   /** Present for completed follow-ups when an outcome activity exists. */
   completionOutcome?: "successful_contact" | "no_response" | null;
   /** Due date of the successor follow-up created after completion, if any. */
@@ -395,6 +407,7 @@ function enrichFollowUpRows(
       companyOwnerUserId,
       brokerName: profile ? getProfileDisplayName(profile) : null,
       brokerEmail: profile?.email ?? null,
+      dispositionByName: null,
     };
   });
 }
@@ -583,6 +596,7 @@ export interface CreateFollowUpInput {
   dueAt: string;
   typeFields?: FollowUpTypeFormValues;
   sourceFollowUpId?: string | null;
+  contactId?: string | null;
 }
 
 export async function fetchPendingFollowUpsForCompany(
@@ -832,6 +846,110 @@ export async function fetchCancelledFollowUps(
   return enrichFollowUpRecords(rows, userId, asAdmin);
 }
 
+async function attachDispositionActors(
+  rows: FollowUpEnriched[],
+): Promise<FollowUpEnriched[]> {
+  const actorIds = [
+    ...new Set(
+      rows
+        .map((row) => row.disposition_by)
+        .filter((actorId): actorId is string => Boolean(actorId)),
+    ),
+  ];
+
+  if (actorIds.length === 0) {
+    return rows;
+  }
+
+  const { data: profiles } = await fetchProfilesForUsers(actorIds);
+  const nameById = new Map(
+    profiles.map((profile) => [profile.id, getProfileDisplayName(profile)]),
+  );
+
+  return rows.map((row) => ({
+    ...row,
+    dispositionByName: row.disposition_by
+      ? nameById.get(row.disposition_by) ?? null
+      : null,
+  }));
+}
+
+export async function fetchDoNotFollowUpFollowUps(
+  userId: string,
+  asAdmin = false,
+): Promise<{
+  data: FollowUpEnriched[];
+  error: { message?: string } | null;
+}> {
+  const { ownedCompanyIds, error: scopeError } =
+    await resolvePersonalFollowUpCompanyScope(userId, asAdmin);
+
+  if (scopeError) {
+    return { data: [], error: scopeError };
+  }
+
+  if (ownedCompanyIds && ownedCompanyIds.size === 0) {
+    return { data: [], error: null };
+  }
+
+  const { data, error } = await supabase
+    .from("follow_ups")
+    .select(FOLLOW_UP_SELECT_FIELDS)
+    .eq("status", "do_not_follow_up")
+    .order("disposition_at", { ascending: false })
+    .limit(FOLLOW_UP_COMPLETED_LIMIT);
+
+  if (error) {
+    logFollowUpsQueryError("fetchDoNotFollowUpFollowUps", error);
+    return { data: [], error };
+  }
+
+  const rows = ownedCompanyIds
+    ? filterFollowUpsToOwnedCompanies(
+        (data as FollowUpRecord[]) ?? [],
+        ownedCompanyIds,
+      )
+    : ((data as FollowUpRecord[]) ?? []);
+
+  const enriched = await enrichFollowUpRecords(rows, userId, asAdmin);
+  if (enriched.error) {
+    return enriched;
+  }
+
+  return {
+    data: await attachDispositionActors(enriched.data),
+    error: null,
+  };
+}
+
+export async function fetchDoNotFollowUpFollowUpsForCompany(
+  companyId: string,
+  ownerUserId: string,
+  asAdmin = false,
+): Promise<{
+  data: FollowUpRecord[];
+  error: { message?: string } | null;
+}> {
+  let query = supabase
+    .from("follow_ups")
+    .select(FOLLOW_UP_SELECT_FIELDS)
+    .eq("company_id", companyId)
+    .eq("status", "do_not_follow_up")
+    .order("disposition_at", { ascending: false })
+    .limit(FOLLOW_UP_COMPLETED_LIMIT);
+
+  if (!asAdmin) {
+    query = query.eq("user_id", ownerUserId);
+  }
+
+  const { data, error } = await query;
+
+  return {
+    data: (data as FollowUpRecord[]) ?? [],
+    error,
+  };
+}
+
 export async function createFollowUp(
   input: CreateFollowUpInput,
 ): Promise<{
@@ -853,6 +971,40 @@ export async function createFollowUp(
   }
 
   const ownerUserId = company.user_id as string;
+  const contactId = input.contactId?.trim() || null;
+
+  if (contactId) {
+    const { data: contact, error: contactError } = await supabase
+      .from("contacts")
+      .select("id, company_id")
+      .eq("id", contactId)
+      .eq("company_id", input.companyId)
+      .maybeSingle();
+
+    if (contactError) {
+      return { error: contactError, followUpId: null };
+    }
+
+    if (!contact) {
+      return {
+        error: { message: "Contact does not belong to this company." },
+        followUpId: null,
+      };
+    }
+  }
+
+  const block = await followUpCreateBlockMessage(supabase, {
+    companyId: input.companyId,
+    contactId,
+  });
+
+  if (block.error) {
+    return { error: block.error, followUpId: null };
+  }
+
+  if (block.message) {
+    return { error: { message: block.message }, followUpId: null };
+  }
 
   const seasonalFields = input.typeFields
     ? resolveFollowUpSeasonalFields(input.typeFields, input.dueAt)
@@ -866,6 +1018,7 @@ export async function createFollowUp(
     .insert({
       user_id: ownerUserId,
       company_id: input.companyId,
+      contact_id: contactId,
       title: input.title,
       notes: input.notes ?? null,
       due_at: input.dueAt,
@@ -937,7 +1090,7 @@ export async function completeFollowUp(
     query = query.eq("user_id", ownerUserId);
   }
 
-  const { error } = await query;
+  const { error } = await query.eq("status", "pending");
 
   if (error) {
     return { error };
@@ -960,6 +1113,30 @@ export interface RescheduleFollowUpInput {
 export async function rescheduleFollowUp(
   input: RescheduleFollowUpInput,
 ): Promise<{ error: { message?: string } | null }> {
+  const { data: existing, error: existingError } = await supabase
+    .from("follow_ups")
+    .select("status")
+    .eq("id", input.followUpId)
+    .eq("company_id", input.companyId)
+    .maybeSingle();
+
+  if (existingError) {
+    return { error: existingError };
+  }
+
+  if (!existing) {
+    return { error: { message: "Follow-up not found." } };
+  }
+
+  if (existing.status === "do_not_follow_up") {
+    return {
+      error: {
+        message:
+          "This follow-up was closed with Do Not Follow Up and cannot be rescheduled.",
+      },
+    };
+  }
+
   const updates: Record<string, string | number | null> = {
     due_at: input.dueAt,
     status: "pending",
@@ -1052,8 +1229,8 @@ export async function syncCompanyCommercialDates(
     return { error: activityError };
   }
 
-  const latestSuccessfulContact = (latestActivities ?? []).find(
-    (activity) => activity.activity_type !== "follow_up_no_response",
+  const latestSuccessfulContact = (latestActivities ?? []).find((activity) =>
+    updatesLastContactAt(activity.activity_type),
   );
 
   const { data: nextFollowUp, error: followUpError } = await supabase

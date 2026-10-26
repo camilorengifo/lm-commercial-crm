@@ -109,6 +109,10 @@ export async function POST(request: Request) {
       return aiClientErrorResponse("Company not found.", 404);
     }
 
+    if (context.outreachBlockedReason) {
+      return aiClientErrorResponse(context.outreachBlockedReason, 409);
+    }
+
     const { data, error } = await generateJsonCompletion<OutreachDraftResponse>({
       systemPrompt: OUTREACH_SYSTEM_PROMPT,
       userPrompt: buildOutreachUserPrompt(context),

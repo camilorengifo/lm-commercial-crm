@@ -30,7 +30,9 @@ import {
   normalizeFollowUpType,
   type FollowUpTypeFormValues,
 } from "@/lib/followUpSeasonal";
+import { liftOutreachSuppression } from "@/lib/doNotFollowUp";
 import {
+  fetchDoNotFollowUpFollowUpsForCompany,
   fetchPendingFollowUpsForCompany,
   fromDatetimeLocalValue as followUpFromDatetimeLocalValue,
   getFollowUpBucket,
@@ -38,11 +40,18 @@ import {
   toDatetimeLocalValue,
   type FollowUpRecord,
 } from "@/lib/followUps";
+import { fetchActiveSuppressionsForCompany, type ActiveOutreachSuppression } from "@/lib/outreachSuppression";
+import {
+  COMPANY_FOLLOW_UP_SUPPRESSED_MESSAGE,
+  CONTACT_FOLLOW_UP_SUPPRESSED_MESSAGE,
+  doNotFollowUpReasonLabel,
+} from "@/lib/outreachSuppressionRules";
 import {
   fetchContactsForCompany,
   formatContactName,
   type ContactOption,
 } from "@/lib/loadOpportunities";
+import { supabase } from "@/lib/supabaseClient";
 import { companyDraftKey, usePersistentDraft } from "@/lib/usePersistentDraft";
 
 function isLogFormEmpty(form: CommercialActivityFormValues): boolean {
@@ -219,6 +228,8 @@ function CompleteFollowUpModal({
   contacts,
   saving,
   error,
+  companySuppressed,
+  scheduleWarningFor,
   onClose,
   onComplete,
 }: {
@@ -226,6 +237,8 @@ function CompleteFollowUpModal({
   contacts: ContactOption[];
   saving: boolean;
   error: string | null;
+  companySuppressed: boolean;
+  scheduleWarningFor: (contactId: string) => string | null;
   onClose: () => void;
   onComplete: (form: CommercialActivityFormValues) => void;
 }) {
@@ -252,6 +265,12 @@ function CompleteFollowUpModal({
             setForm={setForm}
             contacts={contacts}
             idPrefix={`complete-${followUp.id}`}
+            scheduleFollowUpDisabled={companySuppressed}
+            scheduleFollowUpWarning={
+              companySuppressed || form.schedule_next_follow_up
+                ? scheduleWarningFor(form.contact_id || followUp.contact_id || "")
+                : null
+            }
           />
 
           {error && (
@@ -289,6 +308,7 @@ export function CompanyFollowUpsSection({
   companyPriority,
   canManage = true,
   isAdmin = false,
+  actorUserId,
   onCompanyUpdated,
   externalRefreshKey,
 }: {
@@ -297,11 +317,20 @@ export function CompanyFollowUpsSection({
   companyPriority: CompanyPriority;
   canManage?: boolean;
   isAdmin?: boolean;
+  actorUserId?: string;
   onCompanyUpdated?: () => void;
   externalRefreshKey?: number;
 }) {
   const [followUps, setFollowUps] = useState<FollowUpRecord[]>([]);
+  const [closedFollowUps, setClosedFollowUps] = useState<FollowUpRecord[]>([]);
   const [contacts, setContacts] = useState<ContactOption[]>([]);
+  const [suppressedCompany, setSuppressedCompany] = useState(false);
+  const [suppressions, setSuppressions] = useState<ActiveOutreachSuppression[]>(
+    [],
+  );
+  const [liftingSuppressionId, setLiftingSuppressionId] = useState<
+    string | null
+  >(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
@@ -329,16 +358,26 @@ export function CompanyFollowUpsSection({
     setFetchError(null);
 
     try {
-      const [followUpsResult, contactsResult] = await Promise.all([
-        fetchPendingFollowUpsForCompany(companyId, userId, isAdmin),
-        fetchContactsForCompany(userId, companyId, isAdmin),
-      ]);
+      const [followUpsResult, contactsResult, closedResult, suppressionResult] =
+        await Promise.all([
+          fetchPendingFollowUpsForCompany(companyId, userId, isAdmin),
+          fetchContactsForCompany(userId, companyId, isAdmin),
+          fetchDoNotFollowUpFollowUpsForCompany(companyId, userId, isAdmin),
+          fetchActiveSuppressionsForCompany(supabase, companyId),
+        ]);
 
       if (followUpsResult.error) throw followUpsResult.error;
       if (contactsResult.error) throw contactsResult.error;
+      if (closedResult.error) throw closedResult.error;
+      if (suppressionResult.error) throw suppressionResult.error;
 
       setFollowUps(followUpsResult.data);
+      setClosedFollowUps(closedResult.data);
       setContacts(contactsResult.data);
+      setSuppressions(suppressionResult.data);
+      setSuppressedCompany(
+        suppressionResult.data.some((item) => item.scope === "company"),
+      );
     } catch (error) {
       setFetchError(formatSupabaseError(error as { message?: string }));
     }
@@ -353,6 +392,52 @@ export function CompanyFollowUpsSection({
     if (externalRefreshKey === undefined || externalRefreshKey === 0) return;
     refreshAll();
   }, [externalRefreshKey, refreshAll]);
+
+  function schedulingWarningFor(contactId: string): string | null {
+    if (suppressedCompany) {
+      return COMPANY_FOLLOW_UP_SUPPRESSED_MESSAGE;
+    }
+
+    if (
+      contactId &&
+      suppressions.some(
+        (item) => item.scope === "contact" && item.contact_id === contactId,
+      )
+    ) {
+      return CONTACT_FOLLOW_UP_SUPPRESSED_MESSAGE;
+    }
+
+    return null;
+  }
+
+  function contactLabel(contactId: string | null): string {
+    if (!contactId) return "this contact";
+    const contact = contacts.find((item) => item.id === contactId);
+    return contact ? formatContactName(contact) : "this contact";
+  }
+
+  async function handleLiftSuppression(suppressionId: string) {
+    if (!isAdmin) return;
+    const actorId = actorUserId || userId;
+    setLiftingSuppressionId(suppressionId);
+    setFetchError(null);
+
+    const { error } = await liftOutreachSuppression({
+      suppressionId,
+      actorUserId: actorId,
+    });
+
+    if (error) {
+      setFetchError(formatSupabaseError(error));
+      setLiftingSuppressionId(null);
+      return;
+    }
+
+    setSuccessMessage("Outreach suppression was lifted. New follow-ups can be scheduled again.");
+    await refreshAll();
+    onCompanyUpdated?.();
+    setLiftingSuppressionId(null);
+  }
 
   async function handleLogActivity(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -377,6 +462,15 @@ export function CompanyFollowUpsSection({
       setLogError("Next follow-up date is not valid.");
       setLogSubmitting(false);
       return;
+    }
+
+    if (logForm.schedule_next_follow_up) {
+      const schedulingWarning = schedulingWarningFor(logForm.contact_id);
+      if (schedulingWarning) {
+        setLogError(schedulingWarning);
+        setLogSubmitting(false);
+        return;
+      }
     }
 
     const { error } = await logCommercialActivity({
@@ -430,6 +524,17 @@ export function CompanyFollowUpsSection({
       return;
     }
 
+    if (form.schedule_next_follow_up) {
+      const schedulingWarning = schedulingWarningFor(
+        form.contact_id || completeTarget.contact_id || "",
+      );
+      if (schedulingWarning) {
+        setCompleteError(schedulingWarning);
+        setCompletingId(null);
+        return;
+      }
+    }
+
     const { error } = await completeFollowUpWithActivity({
       followUpId: completeTarget.id,
       userId,
@@ -438,7 +543,7 @@ export function CompanyFollowUpsSection({
       activityType: form.activity_type,
       activityAt: activityAt!,
       notes: form.notes,
-      contactId: form.contact_id || null,
+      contactId: form.contact_id || completeTarget.contact_id || null,
       nextFollowUp:
         nextDueAt && form.schedule_next_follow_up
           ? commercialActivityFormToNextFollowUp(form, nextDueAt)
@@ -529,6 +634,35 @@ export function CompanyFollowUpsSection({
         </p>
       )}
 
+      {suppressions.length > 0 && (
+        <div className="mb-6 space-y-3">
+          {suppressions.map((suppression) => (
+            <div
+              key={suppression.id}
+              className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900"
+            >
+              <p>
+                {suppression.scope === "company"
+                  ? COMPANY_FOLLOW_UP_SUPPRESSED_MESSAGE
+                  : `Future follow-ups are suppressed for ${contactLabel(suppression.contact_id)}. Other people at this company can still be scheduled.`}
+              </p>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => void handleLiftSuppression(suppression.id)}
+                  disabled={liftingSuppressionId === suppression.id}
+                  className="mt-3 inline-flex items-center justify-center rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-800 transition hover:bg-red-100 disabled:opacity-60"
+                >
+                  {liftingSuppressionId === suppression.id
+                    ? "Saving..."
+                    : "Allow follow-ups again"}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       {canManage && (
         <div className="mb-8 rounded-lg border border-zinc-200 bg-zinc-50 p-5">
           <h3 className="mb-1 text-sm font-semibold text-zinc-900">
@@ -542,6 +676,14 @@ export function CompanyFollowUpsSection({
               setForm={setLogForm}
               contacts={contacts}
               idPrefix="company-log-activity"
+              scheduleFollowUpDisabled={suppressedCompany}
+              scheduleFollowUpWarning={
+                suppressedCompany
+                  ? schedulingWarningFor(logForm.contact_id)
+                  : logForm.schedule_next_follow_up
+                    ? schedulingWarningFor(logForm.contact_id)
+                    : null
+              }
             />
 
             {logError && (
@@ -700,6 +842,42 @@ export function CompanyFollowUpsSection({
         )}
       </div>
 
+      {closedFollowUps.length > 0 && (
+        <div className="mt-8">
+          <h3 className="mb-2 text-sm font-semibold text-zinc-900">
+            Do Not Follow Up
+          </h3>
+          <p className="mb-3 text-sm text-zinc-500">
+            These follow-ups were closed and removed from the active agenda.
+            They are kept for history and are not completed sales activity.
+          </p>
+          <ul className="divide-y divide-zinc-100 rounded-lg border border-red-100">
+            {closedFollowUps.map((followUp) => (
+              <li key={followUp.id} className="space-y-1 bg-red-50/30 p-4">
+                <p className="text-sm font-semibold text-zinc-900">
+                  {followUp.title}
+                </p>
+                <p className="text-sm text-zinc-700">
+                  <span className="font-medium text-zinc-600">Reason:</span>{" "}
+                  {doNotFollowUpReasonLabel(followUp.disposition_reason)}
+                </p>
+                {followUp.disposition_at && (
+                  <p className="text-sm text-zinc-700">
+                    <span className="font-medium text-zinc-600">Closed:</span>{" "}
+                    {formatDateTime(followUp.disposition_at)}
+                  </p>
+                )}
+                {followUp.disposition_notes?.trim() && (
+                  <p className="text-sm text-zinc-700">
+                    {followUp.disposition_notes}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {editTarget && (
         <EditFollowUpModal
           followUp={editTarget}
@@ -719,6 +897,8 @@ export function CompanyFollowUpsSection({
           contacts={contacts}
           saving={completingId === completeTarget.id}
           error={completeError}
+          companySuppressed={suppressedCompany}
+          scheduleWarningFor={schedulingWarningFor}
           onClose={() => {
             setCompleteTarget(null);
             setCompleteError(null);

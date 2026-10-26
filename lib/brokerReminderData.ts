@@ -9,6 +9,12 @@ import {
   getOpportunityPipelineValue,
 } from "@/lib/brokerProductivity";
 import { getFollowUpBucket } from "@/lib/followUps";
+import { fetchSuppressionIndex } from "@/lib/outreachSuppression";
+import {
+  isCompanyOutreachSuppressed,
+  isContactOutreachSuppressed,
+  isFollowUpOutreachSuppressed,
+} from "@/lib/outreachSuppressionRules";
 import { isWorkingCompanyRecord } from "@/lib/accountStatus";
 import {
   isSeasonalFollowUpType,
@@ -115,6 +121,7 @@ interface CompanyRow {
 interface FollowUpRow {
   id: string;
   company_id: string;
+  contact_id?: string | null;
   title: string;
   notes: string | null;
   due_at: string;
@@ -124,6 +131,7 @@ interface FollowUpRow {
 }
 
 interface ContactRow {
+  id: string;
   company_id: string;
   first_name: string;
   last_name: string | null;
@@ -316,6 +324,7 @@ export async function buildBrokerReminderData(
     followUpsResult,
     contactsResult,
     opportunitiesResult,
+    suppressionResult,
   ] = await Promise.all([
     supabase
       .from("companies")
@@ -326,14 +335,14 @@ export async function buildBrokerReminderData(
     supabase
       .from("follow_ups")
       .select(
-        "id, company_id, title, notes, due_at, follow_up_type, reminder_start_date, seasonal_context",
+        "id, company_id, contact_id, title, notes, due_at, follow_up_type, reminder_start_date, seasonal_context",
       )
       .eq("user_id", userId)
       .eq("status", "pending")
       .order("due_at", { ascending: true }),
     supabase
       .from("contacts")
-      .select("company_id, first_name, last_name, is_primary")
+      .select("id, company_id, first_name, last_name, is_primary")
       .eq("user_id", userId),
     supabase
       .from("load_opportunities")
@@ -344,16 +353,25 @@ export async function buildBrokerReminderData(
       .in("status", OPEN_OPPORTUNITY_STATUSES)
       .order("updated_at", { ascending: false })
       .limit(50),
+    fetchSuppressionIndex(supabase, { userId }),
   ]);
 
   if (companiesResult.error) throw companiesResult.error;
   if (followUpsResult.error) throw followUpsResult.error;
   if (contactsResult.error) throw contactsResult.error;
   if (opportunitiesResult.error) throw opportunitiesResult.error;
+  if (suppressionResult.error) throw suppressionResult.error;
 
-  const companies = (companiesResult.data as CompanyRow[]) ?? [];
-  const followUps = (followUpsResult.data as FollowUpRow[]) ?? [];
-  const contacts = (contactsResult.data as ContactRow[]) ?? [];
+  const suppressionIndex = suppressionResult.index;
+  const companies = ((companiesResult.data as CompanyRow[]) ?? []).filter(
+    (company) => !isCompanyOutreachSuppressed(suppressionIndex, company.id),
+  );
+  const followUps = ((followUpsResult.data as FollowUpRow[]) ?? []).filter(
+    (followUp) => !isFollowUpOutreachSuppressed(suppressionIndex, followUp),
+  );
+  const contacts = ((contactsResult.data as ContactRow[]) ?? []).filter(
+    (contact) => !isContactOutreachSuppressed(suppressionIndex, contact.id),
+  );
   const opportunities = (opportunitiesResult.data as OpportunityRow[]) ?? [];
 
   const companyById = new Map(companies.map((company) => [company.id, company]));

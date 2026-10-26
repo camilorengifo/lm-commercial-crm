@@ -36,6 +36,7 @@ export interface CompleteAndScheduleNextInput {
     | "contactName"
     | "companyName"
     | "companyOwnerUserId"
+    | "contact_id"
   >;
   outcome: FollowUpCompletionOutcome;
   actorUserId: string;
@@ -382,6 +383,7 @@ export async function completeFollowUpAndScheduleNext(
     dueAt: newDueAt,
     typeFields: buildCarriedTypeFields(input.followUp),
     sourceFollowUpId: completedFollowUpId,
+    contactId: input.followUp.contact_id ?? null,
   });
 
   if (createResult.error && !createResult.followUpId) {

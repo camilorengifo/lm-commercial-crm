@@ -20,10 +20,12 @@ import {
   type FollowUpStatus,
 } from "@/lib/crmConstants";
 import { formatDate, formatDateTime, formatSupabaseError } from "@/lib/crmFormat";
+import { stopFollowUp } from "@/lib/doNotFollowUp";
 import {
   bucketFollowUpsWithCompanies,
   createActivityNote,
   fetchCancelledFollowUps,
+  fetchDoNotFollowUpFollowUps,
   fetchFollowUpWorkcenterData,
   fromDatetimeLocalValue,
   getFollowUpBucket,
@@ -32,6 +34,12 @@ import {
   toDatetimeLocalValue,
   type FollowUpEnriched,
 } from "@/lib/followUps";
+import {
+  DO_NOT_FOLLOW_UP_REASONS,
+  doNotFollowUpReasonLabel,
+  type DoNotFollowUpReason,
+  type FollowUpSuppressionChoice,
+} from "@/lib/outreachSuppressionRules";
 import {
   addCalendarDaysPreservingLocalTime,
   completeFollowUpAndScheduleNext,
@@ -50,7 +58,9 @@ import {
 import { supabase } from "@/lib/supabaseClient";
 
 type WorkcenterTab = "today" | "overdue" | "upcoming" | "completed";
+type ClosedFollowUpVariant = "cancelled" | "do_not_follow_up";
 type StatusFilter = "open" | FollowUpStatus;
+type FollowUpCardVariant = WorkcenterTab | ClosedFollowUpVariant;
 type DueDateFilter = "all" | "today" | "overdue" | "this_week";
 
 function SummaryCard({
@@ -414,6 +424,203 @@ function ActivityNoteModal({
   );
 }
 
+function DoNotFollowUpModal({
+  followUp,
+  saving,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  followUp: FollowUpEnriched;
+  saving: boolean;
+  error: string | null;
+  onClose: () => void;
+  onConfirm: (input: {
+    reason: DoNotFollowUpReason;
+    notes: string;
+    suppression: FollowUpSuppressionChoice;
+  }) => void;
+}) {
+  const [reason, setReason] = useState<DoNotFollowUpReason | "">("");
+  const [notes, setNotes] = useState("");
+  const [suppression, setSuppression] =
+    useState<FollowUpSuppressionChoice>("none");
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const associatedContactId = followUp.contact_id ?? followUp.contactId;
+  const associatedContactName = followUp.contactName?.trim() || null;
+  const showSuppression =
+    reason === "customer_requested_no_contact";
+
+  useEffect(() => {
+    setReason("");
+    setNotes("");
+    setSuppression("none");
+    setLocalError(null);
+  }, [followUp]);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLocalError(null);
+
+    if (!reason) {
+      setLocalError("Choose a reason.");
+      return;
+    }
+
+    if (suppression === "contact" && !associatedContactId) {
+      setLocalError(
+        "This follow-up has no associated contact. Stop this follow-up only, or suppress the entire company.",
+      );
+      return;
+    }
+
+    onConfirm({
+      reason,
+      notes,
+      suppression: showSuppression ? suppression : "none",
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 shadow-xl">
+        <h3 className="text-lg font-medium text-zinc-900">Stop Follow-ups?</h3>
+        <p className="mt-1 text-sm text-zinc-500">{followUp.companyName}</p>
+        <p className="mt-2 text-sm text-zinc-600">
+          Are you sure you want to stop follow-up attempts for this prospect?
+          This action will remove the follow-up from your active agenda.
+        </p>
+        <p className="mt-2 text-sm text-zinc-600">
+          The company record stays in the CRM. This does not archive or delete
+          the company, and it is not recorded as a completed sales activity.
+        </p>
+
+        <form onSubmit={handleSubmit} className="mt-5 space-y-4">
+          <div>
+            <label htmlFor="dnf-reason" className="crm-label">
+              Reason
+            </label>
+            <select
+              id="dnf-reason"
+              required
+              value={reason}
+              onChange={(event) => {
+                const next = event.target.value as DoNotFollowUpReason | "";
+                setReason(next);
+                if (next !== "customer_requested_no_contact") {
+                  setSuppression("none");
+                }
+              }}
+              className="crm-select"
+            >
+              <option value="">Select a reason</option>
+              {DO_NOT_FOLLOW_UP_REASONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {showSuppression && (
+            <fieldset className="space-y-3 rounded-lg border border-red-100 bg-red-50/40 p-3">
+              <legend className="px-1 text-sm font-medium text-zinc-800">
+                Future follow-ups
+              </legend>
+              <p className="text-sm text-zinc-600">
+                Stopping this follow-up is separate from suppressing future
+                outreach. Choose whether anyone else at this company can still
+                be scheduled.
+              </p>
+              <label className="flex items-start gap-2 text-sm text-zinc-800">
+                <input
+                  type="radio"
+                  name="dnf-suppression"
+                  className="mt-1"
+                  checked={suppression === "none"}
+                  onChange={() => setSuppression("none")}
+                />
+                <span>
+                  Stop this follow-up only. Other contacts at the company can
+                  still receive follow-ups.
+                </span>
+              </label>
+              {associatedContactId && (
+                <label className="flex items-start gap-2 text-sm text-zinc-800">
+                  <input
+                    type="radio"
+                    name="dnf-suppression"
+                    className="mt-1"
+                    checked={suppression === "contact"}
+                    onChange={() => setSuppression("contact")}
+                  />
+                  <span>
+                    Also suppress future follow-ups for{" "}
+                    {associatedContactName ?? "this contact"} only. Other people
+                    at the company are not affected.
+                  </span>
+                </label>
+              )}
+              <label className="flex items-start gap-2 text-sm text-zinc-800">
+                <input
+                  type="radio"
+                  name="dnf-suppression"
+                  className="mt-1"
+                  checked={suppression === "company"}
+                  onChange={() => setSuppression("company")}
+                />
+                <span>
+                  Also suppress future follow-ups for the entire company. The
+                  company is not archived or deleted.
+                </span>
+              </label>
+            </fieldset>
+          )}
+
+          <div>
+            <label htmlFor="dnf-notes" className="crm-label">
+              Notes <span className="font-normal text-zinc-500">(optional)</span>
+            </label>
+            <textarea
+              id="dnf-notes"
+              rows={3}
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              className="crm-input"
+              placeholder="Optional context for the commercial timeline"
+            />
+          </div>
+
+          {(localError || error) && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              {localError || error}
+            </p>
+          )}
+
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex items-center justify-center rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-800 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {saving ? "Saving..." : "Confirm Do Not Follow Up"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function FollowUpCard({
   followUp,
   variant,
@@ -422,23 +629,26 @@ function FollowUpCard({
   actionLoading,
   onMarkComplete,
   onNoResponse,
+  onDoNotFollowUp,
   onAddActivity,
 }: {
   followUp: FollowUpEnriched;
-  variant: WorkcenterTab | "cancelled";
+  variant: FollowUpCardVariant;
   isAdmin: boolean;
   canManage: boolean;
   actionLoading: boolean;
   onMarkComplete: (followUp: FollowUpEnriched) => void;
   onNoResponse: (followUp: FollowUpEnriched) => void;
+  onDoNotFollowUp: (followUp: FollowUpEnriched) => void;
   onAddActivity: (followUp: FollowUpEnriched) => void;
 }) {
-  const variantClasses: Record<WorkcenterTab | "cancelled", string> = {
+  const variantClasses: Record<FollowUpCardVariant, string> = {
     overdue: "crm-follow-up-urgent",
     today: "crm-follow-up-today",
     upcoming: "crm-card crm-card-padded shadow-sm",
     completed: "crm-card crm-card-padded border-emerald-200 bg-emerald-50/40",
     cancelled: "crm-card crm-card-padded bg-slate-50",
+    do_not_follow_up: "crm-card crm-card-padded border-red-200 bg-red-50/30",
   };
 
   const followUpNote = followUp.notes?.trim() || followUp.title;
@@ -534,11 +744,48 @@ function FollowUpCard({
             </p>
           )}
 
-          {variant !== "completed" && (
+          {variant !== "completed" && variant !== "do_not_follow_up" && (
             <p className="text-sm text-zinc-700">
               <span className="font-medium text-zinc-600">Next step:</span>{" "}
               {followUpNote}
             </p>
+          )}
+
+          {variant === "do_not_follow_up" && (
+            <>
+              <p className="text-sm text-zinc-700">
+                <span className="font-medium text-zinc-600">Reason:</span>{" "}
+                {doNotFollowUpReasonLabel(followUp.disposition_reason)}
+              </p>
+              {followUp.disposition_notes?.trim() && (
+                <p className="text-sm text-zinc-700">
+                  <span className="font-medium text-zinc-600">
+                    Disposition notes:
+                  </span>{" "}
+                  {followUp.disposition_notes}
+                </p>
+              )}
+              {followUp.disposition_at && (
+                <p className="text-sm text-zinc-700">
+                  <span className="font-medium text-zinc-600">Closed:</span>{" "}
+                  {formatDateTime(followUp.disposition_at)}
+                </p>
+              )}
+              {(followUp.dispositionByName || followUp.disposition_by) && (
+                <p className="text-sm text-zinc-700">
+                  <span className="font-medium text-zinc-600">Closed by:</span>{" "}
+                  {followUp.dispositionByName ?? "Recorded user"}
+                </p>
+              )}
+              {followUpNote && (
+                <p className="text-sm text-zinc-700">
+                  <span className="font-medium text-zinc-600">
+                    Original note:
+                  </span>{" "}
+                  {followUpNote}
+                </p>
+              )}
+            </>
           )}
 
           {variant === "completed" && followUpNote && (
@@ -571,6 +818,14 @@ function FollowUpCard({
                 className="inline-flex items-center justify-center rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm font-medium text-orange-700 transition hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 No Response
+              </button>
+              <button
+                type="button"
+                onClick={() => onDoNotFollowUp(followUp)}
+                disabled={actionLoading}
+                className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-800 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Do Not Follow Up
               </button>
             </>
           )}
@@ -645,6 +900,9 @@ export function FollowUpsPage() {
   const [cancelledFollowUps, setCancelledFollowUps] = useState<
     FollowUpEnriched[]
   >([]);
+  const [doNotFollowUpFollowUps, setDoNotFollowUpFollowUps] = useState<
+    FollowUpEnriched[]
+  >([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -667,6 +925,11 @@ export function FollowUpsPage() {
     null,
   );
   const [activityError, setActivityError] = useState<string | null>(null);
+  const [doNotFollowUpTarget, setDoNotFollowUpTarget] =
+    useState<FollowUpEnriched | null>(null);
+  const [doNotFollowUpError, setDoNotFollowUpError] = useState<string | null>(
+    null,
+  );
 
   const isAdmin = isAdminProfile(profile);
 
@@ -687,6 +950,23 @@ export function FollowUpsPage() {
 
       setPendingFollowUps(data.pending);
       setCompletedFollowUps(data.completed);
+    },
+    [],
+  );
+
+  const loadDoNotFollowUp = useCallback(
+    async (userId: string, asAdmin: boolean) => {
+      const { data, error } = await fetchDoNotFollowUpFollowUps(
+        userId,
+        asAdmin,
+      );
+
+      if (error) {
+        setFetchError(formatSupabaseError(error));
+        return;
+      }
+
+      setDoNotFollowUpFollowUps(data);
     },
     [],
   );
@@ -739,6 +1019,11 @@ export function FollowUpsPage() {
     loadCancelled(user.id, isAdmin);
   }, [statusFilter, user, isAdmin, loadCancelled]);
 
+  useEffect(() => {
+    if (statusFilter !== "do_not_follow_up" || !user) return;
+    loadDoNotFollowUp(user.id, isAdmin);
+  }, [statusFilter, user, isAdmin, loadDoNotFollowUp]);
+
   const buckets = useMemo(
     () => bucketFollowUpsWithCompanies(pendingFollowUps),
     [pendingFollowUps],
@@ -766,6 +1051,10 @@ export function FollowUpsPage() {
     activeTab === "completed" || statusFilter === "completed";
 
   const baseList = useMemo(() => {
+    if (statusFilter === "do_not_follow_up") {
+      return doNotFollowUpFollowUps;
+    }
+
     if (statusFilter === "cancelled") {
       return cancelledFollowUps;
     }
@@ -781,6 +1070,7 @@ export function FollowUpsPage() {
     activeTab,
     completedThisWeekFollowUps,
     cancelledFollowUps,
+    doNotFollowUpFollowUps,
     buckets,
   ]);
 
@@ -797,8 +1087,11 @@ export function FollowUpsPage() {
         return false;
       }
 
-      // Completed / cancelled views must not be constrained by Status=Open.
-      if (!viewingCompleted && statusFilter !== "cancelled") {
+      const viewingHistorical =
+        statusFilter === "cancelled" || statusFilter === "do_not_follow_up";
+
+      // Completed / historical views must not be constrained by Status=Open.
+      if (!viewingCompleted && !viewingHistorical) {
         if (statusFilter === "open" && followUp.status !== "pending") {
           return false;
         }
@@ -815,7 +1108,7 @@ export function FollowUpsPage() {
         dueDateFilter !== "all" &&
         followUp.status === "pending" &&
         !viewingCompleted &&
-        statusFilter !== "cancelled"
+        !viewingHistorical
       ) {
         const bucket = getFollowUpBucket(followUp.due_at);
         if (dueDateFilter === "today" && bucket !== "today") return false;
@@ -843,7 +1136,11 @@ export function FollowUpsPage() {
       setStatusFilter("completed");
       return;
     }
-    if (statusFilter === "completed" || statusFilter === "cancelled") {
+    if (
+      statusFilter === "completed" ||
+      statusFilter === "cancelled" ||
+      statusFilter === "do_not_follow_up"
+    ) {
       setStatusFilter("open");
     }
   }
@@ -864,6 +1161,9 @@ export function FollowUpsPage() {
     await loadFollowUps(user.id, isAdmin);
     if (statusFilter === "cancelled") {
       await loadCancelled(user.id, isAdmin);
+    }
+    if (statusFilter === "do_not_follow_up") {
+      await loadDoNotFollowUp(user.id, isAdmin);
     }
   }
 
@@ -951,6 +1251,50 @@ export function FollowUpsPage() {
     showSuccess("Activity note saved to the company timeline.");
   }
 
+  async function handleDoNotFollowUpConfirm(input: {
+    reason: DoNotFollowUpReason;
+    notes: string;
+    suppression: FollowUpSuppressionChoice;
+  }) {
+    if (!doNotFollowUpTarget || !user) return;
+    if (!canManageFollowUp(doNotFollowUpTarget)) return;
+
+    const followUp = doNotFollowUpTarget;
+    setActionFollowUpId(followUp.id);
+    setDoNotFollowUpError(null);
+
+    const { error } = await stopFollowUp({
+      followUpId: followUp.id,
+      companyId: followUp.company_id,
+      ownerUserId: followUp.companyOwnerUserId ?? followUp.user_id,
+      actorUserId: user.id,
+      asAdmin: isAdmin,
+      reason: input.reason,
+      notes: input.notes,
+      associatedContactId: followUp.contact_id ?? followUp.contactId,
+      associatedContactName: followUp.contactName,
+      companyName: followUp.companyName,
+      suppression: input.suppression,
+    });
+
+    if (error) {
+      setDoNotFollowUpError(formatSupabaseError(error));
+      setActionFollowUpId(null);
+      return;
+    }
+
+    setDoNotFollowUpTarget(null);
+    await refreshData();
+    setActionFollowUpId(null);
+    showSuccess(
+      input.suppression === "company"
+        ? "Follow-up closed. Future follow-ups are suppressed for this company."
+        : input.suppression === "contact"
+          ? "Follow-up closed. Future follow-ups are suppressed for this contact only."
+          : "Follow-up closed. It was removed from the active agenda.",
+    );
+  }
+
   if (loading) {
     return (
       <div className="crm-loading-screen">
@@ -963,12 +1307,14 @@ export function FollowUpsPage() {
     return null;
   }
 
-  const cardVariant: WorkcenterTab | "cancelled" =
-    statusFilter === "cancelled"
-      ? "cancelled"
-      : activeTab === "completed" || statusFilter === "completed"
-        ? "completed"
-        : activeTab;
+  const cardVariant: FollowUpCardVariant =
+    statusFilter === "do_not_follow_up"
+      ? "do_not_follow_up"
+      : statusFilter === "cancelled"
+        ? "cancelled"
+        : activeTab === "completed" || statusFilter === "completed"
+          ? "completed"
+          : activeTab;
 
   return (
     <AuthenticatedLayout maxWidthClass="max-w-[1400px]">
@@ -1062,6 +1408,7 @@ export function FollowUpsPage() {
               <option value="pending">Pending</option>
               <option value="completed">Completed</option>
               <option value="cancelled">Cancelled</option>
+              <option value="do_not_follow_up">Do Not Follow Up</option>
             </select>
           </div>
 
@@ -1178,15 +1525,23 @@ export function FollowUpsPage() {
       <CrmCard padding>
         <div className="mb-4">
           <h2 className="crm-section-title">
-            {activeTabConfig.title}
+            {statusFilter === "do_not_follow_up"
+              ? "Do Not Follow Up"
+              : activeTabConfig.title}
           </h2>
           <p className="crm-section-subtitle">
-            {activeTabConfig.description}
+            {statusFilter === "do_not_follow_up"
+              ? "Follow-ups closed so they leave the active agenda. They stay on the company timeline and are not counted as completed sales activity."
+              : activeTabConfig.description}
           </p>
         </div>
 
         {filteredFollowUps.length === 0 ? (
-          <p className="text-sm text-zinc-500">{activeTabConfig.emptyMessage}</p>
+          <p className="text-sm text-zinc-500">
+            {statusFilter === "do_not_follow_up"
+              ? "No follow-ups have been closed with Do Not Follow Up."
+              : activeTabConfig.emptyMessage}
+          </p>
         ) : (
           <ul className="space-y-3">
             {filteredFollowUps.map((followUp) => (
@@ -1201,6 +1556,11 @@ export function FollowUpsPage() {
                   openScheduleModal(item, "completed_contact")
                 }
                 onNoResponse={(item) => openScheduleModal(item, "no_response")}
+                onDoNotFollowUp={(item) => {
+                  if (!canManageFollowUp(item)) return;
+                  setDoNotFollowUpError(null);
+                  setDoNotFollowUpTarget(item);
+                }}
                 onAddActivity={(item) => {
                   setActivityError(null);
                   setActivityTarget(item);
@@ -1234,6 +1594,19 @@ export function FollowUpsPage() {
         />
       )}
 
+      {doNotFollowUpTarget && (
+        <DoNotFollowUpModal
+          followUp={doNotFollowUpTarget}
+          saving={actionFollowUpId === doNotFollowUpTarget.id}
+          error={doNotFollowUpError}
+          onClose={() => {
+            if (actionFollowUpId) return;
+            setDoNotFollowUpTarget(null);
+            setDoNotFollowUpError(null);
+          }}
+          onConfirm={(input) => void handleDoNotFollowUpConfirm(input)}
+        />
+      )}
       {activityTarget && (
         <ActivityNoteModal
           followUp={activityTarget}

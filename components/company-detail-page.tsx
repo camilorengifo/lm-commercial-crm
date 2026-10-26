@@ -986,6 +986,7 @@ export function CompanyDetailPage() {
               <CompanyFollowUpsSection
                 companyId={company.id}
                 userId={scopedUserId}
+                actorUserId={user.id}
                 companyPriority={company.priority}
                 canManage={canManageFollowUps}
                 isAdmin={isAdmin}

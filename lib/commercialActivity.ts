@@ -86,6 +86,7 @@ async function createNextFollowUp(
     notes: nextFollowUp.notes?.trim() || null,
     dueAt: nextFollowUp.dueAt,
     typeFields: nextFollowUp.typeFields,
+    contactId: input.contactId,
   };
 
   const result = await createFollowUp(followUpInput);
@@ -141,16 +142,25 @@ export async function completeFollowUpWithActivity(
       completed_at: new Date().toISOString(),
     })
     .eq("id", input.followUpId)
-    .eq("company_id", input.companyId);
+    .eq("company_id", input.companyId)
+    .eq("status", "pending");
 
   if (!input.asAdmin) {
     query = query.eq("user_id", input.userId);
   }
 
-  const { error: completeError } = await query;
+  const { data: completedRow, error: completeError } = await query
+    .select("id")
+    .maybeSingle();
 
   if (completeError) {
     return { error: completeError };
+  }
+
+  if (!completedRow) {
+    return {
+      error: { message: "Only open follow-ups can be completed." },
+    };
   }
 
   const nextDueAt = input.nextFollowUp?.dueAt ?? null;

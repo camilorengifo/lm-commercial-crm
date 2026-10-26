@@ -39,6 +39,8 @@ export const ACTIVITY_TYPES = [
     value: "follow_up_rescheduled_contact",
     label: "Successful contact",
   },
+  { value: "do_not_follow_up", label: "Do not follow up" },
+  { value: "outreach_suppression", label: "Outreach suppression" },
 ] as const;
 
 export type ActivityType = (typeof ACTIVITY_TYPES)[number]["value"];
@@ -52,7 +54,9 @@ export const ACTIVITY_TYPE_LABELS: Record<ActivityType, string> =
 export const MANUAL_ACTIVITY_TYPES = ACTIVITY_TYPES.filter(
   (option) =>
     option.value !== "follow_up_no_response" &&
-    option.value !== "follow_up_rescheduled_contact",
+    option.value !== "follow_up_rescheduled_contact" &&
+    option.value !== "do_not_follow_up" &&
+    option.value !== "outreach_suppression",
 );
 
 export function isSuccessfulContactActivityType(type: string): boolean {
@@ -72,15 +76,24 @@ export function isAttemptedContactActivityType(type: string): boolean {
 }
 
 export function updatesLastContactAt(type: string): boolean {
-  return type !== "follow_up_no_response";
+  return (
+    type !== "follow_up_no_response" &&
+    type !== "do_not_follow_up" &&
+    type !== "outreach_suppression"
+  );
 }
 
-export type FollowUpStatus = "pending" | "completed" | "cancelled";
+export type FollowUpStatus =
+  | "pending"
+  | "completed"
+  | "cancelled"
+  | "do_not_follow_up";
 
 export const FOLLOW_UP_STATUS_LABELS: Record<FollowUpStatus, string> = {
   pending: "Pending",
   completed: "Completed",
   cancelled: "Cancelled",
+  do_not_follow_up: "Do Not Follow Up",
 };
 
 export const LOAD_OPPORTUNITY_STATUSES = [
@@ -222,5 +235,9 @@ export function activityTypeBadgeClass(type: ActivityType): string {
       return "bg-orange-50 text-orange-800 ring-orange-200";
     case "follow_up_rescheduled_contact":
       return "bg-sky-50 text-sky-800 ring-sky-200";
+    case "do_not_follow_up":
+      return "bg-red-50 text-red-800 ring-red-200";
+    case "outreach_suppression":
+      return "bg-slate-100 text-slate-700 ring-slate-200";
   }
 }

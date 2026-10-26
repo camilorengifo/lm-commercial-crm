@@ -22,6 +22,12 @@ import {
   type LoadOpportunityWithCompany,
 } from "@/lib/loadOpportunities";
 import { supabase } from "@/lib/supabaseClient";
+import { fetchSuppressionIndex } from "@/lib/outreachSuppression";
+import {
+  isCompanyOutreachSuppressed,
+  isContactOutreachSuppressed,
+  isFollowUpOutreachSuppressed,
+} from "@/lib/outreachSuppressionRules";
 
 const HIGH_PRIORITY_INACTIVITY_DAYS = 7;
 const RECENT_ACTIVITY_DAYS = 7;
@@ -114,6 +120,7 @@ interface ActivityRow {
 }
 
 interface ContactRow {
+  id: string;
   company_id: string;
   first_name: string;
   last_name: string | null;
@@ -387,6 +394,7 @@ export async function fetchBrokerDashboardData(
     activitiesResult,
     contactsResult,
     opportunitiesResult,
+    suppressionResult,
   ] = await Promise.all([
     supabase
       .from("companies")
@@ -403,9 +411,10 @@ export async function fetchBrokerDashboardData(
       .limit(50),
     supabase
       .from("contacts")
-      .select("company_id, first_name, last_name, is_primary")
+      .select("id, company_id, first_name, last_name, is_primary")
       .eq("user_id", userId),
     fetchLoadOpportunitiesWithCompanies(userId),
+    fetchSuppressionIndex(supabase, { userId }),
   ]);
 
   if (companiesResult.error) {
@@ -427,6 +436,12 @@ export async function fetchBrokerDashboardData(
   if (opportunitiesResult.error) {
     return { data: null, error: opportunitiesResult.error };
   }
+
+  if (suppressionResult.error) {
+    return { data: null, error: suppressionResult.error };
+  }
+
+  const suppressionIndex = suppressionResult.index;
 
   const companies = ((companiesResult.data ?? []) as Array<
     Omit<CompanyDashboardRow, "sales_stage" | "priority"> & {
@@ -451,13 +466,17 @@ export async function fetchBrokerDashboardData(
     (activity) => workingCompanyIds.has(activity.company_id),
   );
   const contactNameByCompany = buildContactNameByCompany(
-    ((contactsResult.data as ContactRow[]) ?? []).filter((contact) =>
-      workingCompanyIds.has(contact.company_id),
+    ((contactsResult.data as ContactRow[]) ?? []).filter(
+      (contact) =>
+        workingCompanyIds.has(contact.company_id) &&
+        !isContactOutreachSuppressed(suppressionIndex, contact.id),
     ),
   );
   const followUps = enrichFollowUps(
-    followUpsResult.data.filter((followUp) =>
-      workingCompanyIds.has(followUp.company_id),
+    followUpsResult.data.filter(
+      (followUp) =>
+        workingCompanyIds.has(followUp.company_id) &&
+        !isFollowUpOutreachSuppressed(suppressionIndex, followUp),
     ),
     contactNameByCompany,
     priorityByCompany,
@@ -501,14 +520,22 @@ export async function fetchBrokerDashboardData(
     followUps.map((followUp) => followUp.company_id),
   );
 
+  const recommendableCompanies = companies.filter(
+    (company) => !isCompanyOutreachSuppressed(suppressionIndex, company.id),
+  );
+
   const highPriorityCompanies = buildHighPriorityCompanies(
-    companies,
+    recommendableCompanies,
     activityByCompany,
     pendingFollowUpCompanyIds,
   );
 
   const openOpportunities = (opportunitiesResult.data ?? [])
     .filter((opportunity) => workingCompanyIds.has(opportunity.company_id))
+    .filter(
+      (opportunity) =>
+        !isCompanyOutreachSuppressed(suppressionIndex, opportunity.company_id),
+    )
     .filter((opportunity) =>
       OPEN_OPPORTUNITY_STATUSES.includes(
         normalizeOpportunityStage(opportunity.status),
@@ -563,7 +590,7 @@ export async function fetchBrokerDashboardData(
           (opportunity) =>
             normalizeOpportunityStage(opportunity.status) === "lost",
         ).length,
-        hotPriorityCount: companies.filter((company) =>
+        hotPriorityCount: recommendableCompanies.filter((company) =>
           isHighPriorityLevel(company.priority),
         ).length,
         recentActivityCount7d,

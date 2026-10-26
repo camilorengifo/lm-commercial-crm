@@ -8,6 +8,7 @@ If information is missing or insufficient, say that clearly in your output.
 Be practical, direct, and professional. Use freight brokerage language.
 Keep each bullet concise. Do not write long essays.
 Reference company names from the data when relevant.
+If the data marks a company or contact as outreach-suppressed, do not recommend calling, emailing, messaging, or scheduling a follow-up with that company or contact. Say that follow-up is stopped.
 Return valid JSON only.
 `.trim();
 
@@ -66,7 +67,8 @@ export function buildAccountUserPrompt(summary: AccountCrmSummary): string {
 
 ${JSON.stringify(summary, null, 2)}
 
-Summarize what is happening, the next best action, risks, opportunity notes, and a suggested follow-up timing with reason.`;
+Summarize what is happening, the next best action, risks, opportunity notes, and a suggested follow-up timing with reason.
+If outreachSuppression is present, do not recommend contacting the suppressed company or contacts and do not propose a new follow-up date for them.`;
 }
 
 function normalizeStringArray(value: unknown): string[] {

@@ -5,6 +5,14 @@ import {
   type SalesStage,
 } from "@/lib/crmConstants";
 import { getFollowUpBucket } from "@/lib/followUps";
+import { fetchSuppressionIndex } from "@/lib/outreachSuppression";
+import {
+  COMPANY_FOLLOW_UP_SUPPRESSED_MESSAGE,
+  CONTACT_FOLLOW_UP_SUPPRESSED_MESSAGE,
+  isCompanyOutreachSuppressed,
+  isContactOutreachSuppressed,
+  isFollowUpOutreachSuppressed,
+} from "@/lib/outreachSuppressionRules";
 
 const INACTIVITY_DAYS = 14;
 const RECENT_OPPORTUNITY_DAYS = 30;
@@ -26,6 +34,7 @@ interface CompanyRow {
 interface FollowUpRow {
   id: string;
   company_id: string;
+  contact_id?: string | null;
   title: string;
   notes: string | null;
   due_at: string;
@@ -200,6 +209,10 @@ export interface AccountCrmSummary {
     notes: string | null;
     updatedAt: string;
   }>;
+  outreachSuppression: {
+    companySuppressed: boolean;
+    suppressedContactNames: string[];
+  } | null;
 }
 
 export async function buildBrokerCrmSummary(
@@ -212,6 +225,7 @@ export async function buildBrokerCrmSummary(
     followUpsResult,
     activitiesResult,
     opportunitiesResult,
+    suppressionResult,
   ] = await Promise.all([
     supabase
       .from("companies")
@@ -225,7 +239,7 @@ export async function buildBrokerCrmSummary(
       .eq("user_id", userId),
     supabase
       .from("follow_ups")
-      .select("id, company_id, title, notes, due_at, status, companies ( name )")
+      .select("id, company_id, contact_id, title, notes, due_at, status, companies ( name )")
       .eq("user_id", userId)
       .eq("status", "pending")
       .order("due_at", { ascending: true }),
@@ -245,6 +259,7 @@ export async function buildBrokerCrmSummary(
       .eq("user_id", userId)
       .order("updated_at", { ascending: false })
       .limit(100),
+    fetchSuppressionIndex(supabase, { userId }),
   ]);
 
   if (companiesResult.error) throw companiesResult.error;
@@ -252,11 +267,20 @@ export async function buildBrokerCrmSummary(
   if (followUpsResult.error) throw followUpsResult.error;
   if (activitiesResult.error) throw activitiesResult.error;
   if (opportunitiesResult.error) throw opportunitiesResult.error;
+  if (suppressionResult.error) throw suppressionResult.error;
 
-  const companies = (companiesResult.data as CompanyRow[]) ?? [];
-  const followUps = (followUpsResult.data as FollowUpRow[]) ?? [];
+  const suppressionIndex = suppressionResult.index;
+  const companies = ((companiesResult.data as CompanyRow[]) ?? []).filter(
+    (company) => !isCompanyOutreachSuppressed(suppressionIndex, company.id),
+  );
+  const followUps = ((followUpsResult.data as FollowUpRow[]) ?? []).filter(
+    (followUp) => !isFollowUpOutreachSuppressed(suppressionIndex, followUp),
+  );
   const activities = (activitiesResult.data as ActivityRow[]) ?? [];
-  const opportunities = (opportunitiesResult.data as OpportunityRow[]) ?? [];
+  const opportunities = ((opportunitiesResult.data as OpportunityRow[]) ?? []).filter(
+    (opportunity) =>
+      !isCompanyOutreachSuppressed(suppressionIndex, opportunity.company_id),
+  );
 
   const companyById = new Map(companies.map((company) => [company.id, company]));
   const activityCountByCompany = new Map<string, number>();
@@ -479,8 +503,13 @@ export async function buildAccountCrmSummary(
   if (companyError) throw companyError;
   if (!company) return null;
 
-  const [contactsResult, followUpsResult, activitiesResult, opportunitiesResult] =
-    await Promise.all([
+  const [
+    contactsResult,
+    followUpsResult,
+    activitiesResult,
+    opportunitiesResult,
+    suppressionResult,
+  ] = await Promise.all([
       supabase
         .from("contacts")
         .select("id, first_name, last_name, email, phone, job_title, is_primary")
@@ -489,7 +518,7 @@ export async function buildAccountCrmSummary(
         .order("is_primary", { ascending: false }),
       supabase
         .from("follow_ups")
-        .select("title, notes, due_at, status")
+        .select("title, notes, due_at, status, contact_id")
         .eq("company_id", companyId)
         .eq("user_id", dataOwnerUserId)
         .eq("status", "pending")
@@ -509,12 +538,51 @@ export async function buildAccountCrmSummary(
         .eq("company_id", companyId)
         .eq("user_id", dataOwnerUserId)
         .order("updated_at", { ascending: false }),
+      fetchSuppressionIndex(supabase, {
+        userId: dataOwnerUserId,
+        companyId,
+      }),
     ]);
 
   if (contactsResult.error) throw contactsResult.error;
   if (followUpsResult.error) throw followUpsResult.error;
   if (activitiesResult.error) throw activitiesResult.error;
   if (opportunitiesResult.error) throw opportunitiesResult.error;
+  if (suppressionResult.error) throw suppressionResult.error;
+
+  const suppressionIndex = suppressionResult.index;
+  const companySuppressed = isCompanyOutreachSuppressed(
+    suppressionIndex,
+    companyId,
+  );
+  const contactRows = (contactsResult.data as ContactRow[]) ?? [];
+  const suppressedContactNames = contactRows
+    .filter(
+      (contact) =>
+        companySuppressed ||
+        isContactOutreachSuppressed(suppressionIndex, contact.id),
+    )
+    .map((contact) =>
+      [contact.first_name, contact.last_name].filter(Boolean).join(" "),
+    )
+    .filter(Boolean);
+  const visibleContacts = companySuppressed
+    ? []
+    : contactRows.filter(
+        (contact) => !isContactOutreachSuppressed(suppressionIndex, contact.id),
+      );
+  const visibleOpportunities = companySuppressed
+    ? []
+    : ((opportunitiesResult.data as OpportunityRow[]) ?? []);
+  const visibleFollowUps = companySuppressed
+    ? []
+    : (followUpsResult.data ?? []).filter(
+        (followUp) =>
+          !isFollowUpOutreachSuppressed(suppressionIndex, {
+            company_id: companyId,
+            contact_id: followUp.contact_id as string | null,
+          }),
+      );
 
   const formatLane = (
     origin: string | null,
@@ -540,14 +608,14 @@ export async function buildAccountCrmSummary(
       lastContactAt: formatDateLabel(company.last_contact_at),
       nextFollowUpAt: formatDateLabel(company.next_follow_up_at),
     },
-    contacts: ((contactsResult.data as ContactRow[]) ?? []).map((contact) => ({
+    contacts: visibleContacts.map((contact) => ({
       name: [contact.first_name, contact.last_name].filter(Boolean).join(" "),
       email: contact.email,
       phone: contact.phone,
       jobTitle: contact.job_title,
       isPrimary: contact.is_primary,
     })),
-    pendingFollowUps: (followUpsResult.data ?? []).map((followUp) => ({
+    pendingFollowUps: visibleFollowUps.map((followUp) => ({
       title: followUp.title,
       dueAt: formatDateLabel(followUp.due_at) ?? followUp.due_at,
       notes: followUp.notes,
@@ -559,7 +627,7 @@ export async function buildAccountCrmSummary(
         formatDateLabel(activity.activity_at) ?? activity.activity_at,
       notes: activity.notes,
     })),
-    opportunities: ((opportunitiesResult.data as OpportunityRow[]) ?? []).map(
+    opportunities: visibleOpportunities.map(
       (opportunity) => ({
         status: opportunity.status,
         lane: formatLane(opportunity.lane_origin, opportunity.lane_destination),
@@ -572,6 +640,13 @@ export async function buildAccountCrmSummary(
           formatDateLabel(opportunity.updated_at) ?? opportunity.updated_at,
       }),
     ),
+    outreachSuppression:
+      companySuppressed || suppressedContactNames.length > 0
+        ? {
+            companySuppressed,
+            suppressedContactNames,
+          }
+        : null,
   };
 }
 
@@ -596,6 +671,7 @@ export interface OutreachCrmContext {
   }>;
   recentActivities: AccountCrmSummary["recentActivities"];
   opportunities: AccountCrmSummary["opportunities"];
+  outreachBlockedReason: string | null;
 }
 
 export async function buildOutreachCrmContext(
@@ -616,6 +692,31 @@ export async function buildOutreachCrmContext(
   );
   if (!baseSummary) return null;
 
+  const { index: suppressionIndex, error: suppressionError } =
+    await fetchSuppressionIndex(supabase, {
+      userId: dataOwnerUserId,
+      companyId,
+    });
+
+  if (suppressionError) throw suppressionError;
+
+  let outreachBlockedReason: string | null = null;
+  if (isCompanyOutreachSuppressed(suppressionIndex, companyId)) {
+    outreachBlockedReason = COMPANY_FOLLOW_UP_SUPPRESSED_MESSAGE;
+  } else if (
+    input.contactId &&
+    isContactOutreachSuppressed(suppressionIndex, input.contactId)
+  ) {
+    outreachBlockedReason = CONTACT_FOLLOW_UP_SUPPRESSED_MESSAGE;
+  } else if (
+    !input.contactId &&
+    baseSummary.contacts.length === 0 &&
+    (baseSummary.outreachSuppression?.suppressedContactNames.length ?? 0) > 0
+  ) {
+    outreachBlockedReason =
+      "Every contact on this company has declined further follow-up. Outreach was not drafted.";
+  }
+
   const { data: allFollowUps, error: followUpsError } = await supabase
     .from("follow_ups")
     .select("title, notes, due_at, status, completed_at")
@@ -628,7 +729,7 @@ export async function buildOutreachCrmContext(
 
   let selectedContact: OutreachCrmContext["selectedContact"] = null;
 
-  if (input.contactId) {
+  if (input.contactId && !outreachBlockedReason) {
     const { data: contact, error: contactError } = await supabase
       .from("contacts")
       .select("first_name, last_name, email, phone, job_title")
@@ -670,5 +771,6 @@ export async function buildOutreachCrmContext(
     completedFollowUps,
     recentActivities: baseSummary.recentActivities,
     opportunities: baseSummary.opportunities,
+    outreachBlockedReason,
   };
 }

@@ -71,12 +71,16 @@ export function CommercialActivityFormFields({
   contacts,
   idPrefix,
   showContactField = true,
+  scheduleFollowUpDisabled = false,
+  scheduleFollowUpWarning = null,
 }: {
   form: CommercialActivityFormValues;
   setForm: React.Dispatch<React.SetStateAction<CommercialActivityFormValues>>;
   contacts: ContactOption[];
   idPrefix: string;
   showContactField?: boolean;
+  scheduleFollowUpDisabled?: boolean;
+  scheduleFollowUpWarning?: string | null;
 }) {
   return (
     <div className="grid gap-4 sm:grid-cols-2">
@@ -177,6 +181,7 @@ export function CommercialActivityFormFields({
           <input
             type="checkbox"
             checked={form.schedule_next_follow_up}
+            disabled={scheduleFollowUpDisabled}
             onChange={(event) =>
               setForm((prev) => ({
                 ...prev,
@@ -187,6 +192,11 @@ export function CommercialActivityFormFields({
           />
           Schedule next follow-up
         </label>
+        {scheduleFollowUpWarning && (
+          <p className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+            {scheduleFollowUpWarning}
+          </p>
+        )}
       </div>
 
       {form.schedule_next_follow_up && (

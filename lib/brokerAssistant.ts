@@ -6,6 +6,12 @@ import {
   shouldIncludeSeasonalFollowUp,
 } from "@/lib/followUpSeasonal";
 import { getFollowUpBucket } from "@/lib/followUps";
+import { fetchSuppressionIndex } from "@/lib/outreachSuppression";
+import {
+  isCompanyOutreachSuppressed,
+  isContactOutreachSuppressed,
+  isFollowUpOutreachSuppressed,
+} from "@/lib/outreachSuppressionRules";
 import { getOpportunityPipelineValue } from "@/lib/brokerProductivity";
 
 const INACTIVITY_DAYS = 14;
@@ -37,6 +43,7 @@ interface ContactRow {
 interface FollowUpRow {
   id: string;
   company_id: string;
+  contact_id?: string | null;
   title: string;
   notes: string | null;
   due_at: string;
@@ -354,6 +361,7 @@ export async function fetchBrokerAssistantSnapshot(
     followUpsResult,
     activitiesResult,
     opportunitiesResult,
+    suppressionResult,
   ] = await Promise.all([
     supabase
       .from("companies")
@@ -370,7 +378,7 @@ export async function fetchBrokerAssistantSnapshot(
     supabase
       .from("follow_ups")
       .select(
-        "id, company_id, title, notes, due_at, status, follow_up_type, reminder_start_date, seasonal_context",
+        "id, company_id, contact_id, title, notes, due_at, status, follow_up_type, reminder_start_date, seasonal_context",
       )
       .eq("user_id", userId)
       .eq("status", "pending"),
@@ -386,6 +394,7 @@ export async function fetchBrokerAssistantSnapshot(
         "id, company_id, name, status, estimated_revenue_usd, quoted_rate, target_rate, updated_at",
       )
       .eq("user_id", userId),
+    fetchSuppressionIndex(supabase, { userId }),
   ]);
 
   if (companiesResult.error) throw companiesResult.error;
@@ -393,16 +402,25 @@ export async function fetchBrokerAssistantSnapshot(
   if (followUpsResult.error) throw followUpsResult.error;
   if (activitiesResult.error) throw activitiesResult.error;
   if (opportunitiesResult.error) throw opportunitiesResult.error;
+  if (suppressionResult.error) throw suppressionResult.error;
 
-  const companies = ((companiesResult.data as CompanyRow[]) ?? []).filter(
-    (company) => isWorkingCompanyRecord(company),
-  );
+  const suppressionIndex = suppressionResult.index;
+
+  const companies = ((companiesResult.data as CompanyRow[]) ?? [])
+    .filter((company) => isWorkingCompanyRecord(company))
+    .filter(
+      (company) => !isCompanyOutreachSuppressed(suppressionIndex, company.id),
+    );
   const workingCompanyIds = new Set(companies.map((company) => company.id));
-  const contacts = ((contactsResult.data as ContactRow[]) ?? []).filter((contact) =>
-    workingCompanyIds.has(contact.company_id),
+  const contacts = ((contactsResult.data as ContactRow[]) ?? []).filter(
+    (contact) =>
+      workingCompanyIds.has(contact.company_id) &&
+      !isContactOutreachSuppressed(suppressionIndex, contact.id),
   );
   const followUps = ((followUpsResult.data as FollowUpRow[]) ?? []).filter(
-    (followUp) => workingCompanyIds.has(followUp.company_id),
+    (followUp) =>
+      workingCompanyIds.has(followUp.company_id) &&
+      !isFollowUpOutreachSuppressed(suppressionIndex, followUp),
   );
   const activities = ((activitiesResult.data as ActivityRow[]) ?? []).filter(
     (activity) => workingCompanyIds.has(activity.company_id),
