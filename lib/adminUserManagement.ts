@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getFollowUpBucket } from "@/lib/followUps";
 import {
+  isAssignableCompanyOwnerRole,
   normalizeUserRole,
   type UserRole,
 } from "@/lib/userProfile";
@@ -28,6 +29,8 @@ const CRM_OWNERSHIP_TABLES = [
   "activities",
   "follow_ups",
   "load_opportunities",
+  "company_ai_insights",
+  "outreach_suppressions",
   "broker_reminder_logs",
 ] as const;
 
@@ -37,7 +40,10 @@ const COMPANY_SCOPED_OWNERSHIP_TABLES = [
   "follow_ups",
   "load_opportunities",
   "company_ai_insights",
+  "outreach_suppressions",
 ] as const;
+
+const OPTIONAL_OWNERSHIP_TABLES = new Set<string>(["outreach_suppressions"]);
 
 export interface AdminUserListItem {
   id: string;
@@ -47,6 +53,7 @@ export interface AdminUserListItem {
   officeId: string | null;
   officeName: string;
   isActive: boolean;
+  isBlocked: boolean;
   createdAt: string | null;
   lastSignInAt: string | null;
   companyCount: number;
@@ -252,7 +259,9 @@ export async function listAdminUsers(): Promise<AdminUserListItem[]> {
   ] = await Promise.all([
     admin
       .from("profiles")
-      .select("id, email, full_name, role, is_active, created_at, office_id")
+      .select(
+        "id, email, full_name, role, is_active, is_blocked, created_at, office_id",
+      )
       .order("email"),
     admin.from("offices").select("id, name").eq("is_active", true),
     fetchCompanyOwnershipByUser(admin),
@@ -316,6 +325,7 @@ export async function listAdminUsers(): Promise<AdminUserListItem[]> {
       ? officeNameById.get(profile.office_id) ?? UNASSIGNED_OFFICE_LABEL
       : UNASSIGNED_OFFICE_LABEL,
     isActive: profile.is_active ?? true,
+    isBlocked: profile.is_blocked === true,
     createdAt: profile.created_at ?? null,
     lastSignInAt: authUsersById.get(profile.id) ?? null,
     companyCount: companyCountByUser.get(profile.id) ?? 0,
@@ -528,6 +538,30 @@ export class UserDeleteBlockedError extends Error {
   }
 }
 
+function isMissingOwnershipTableError(error: {
+  message?: string;
+  code?: string;
+}): boolean {
+  const message = (error.message ?? "").toLowerCase();
+  return (
+    error.code === "42P01" ||
+    error.code === "PGRST205" ||
+    message.includes("could not find the table") ||
+    (message.includes("relation") && message.includes("does not exist"))
+  );
+}
+
+function ignoreMissingOptionalTable(
+  table: string,
+  error: { message?: string; code?: string } | null,
+): boolean {
+  return (
+    error !== null &&
+    OPTIONAL_OWNERSHIP_TABLES.has(table) &&
+    isMissingOwnershipTableError(error)
+  );
+}
+
 async function userOwnsCrmRecords(
   admin: SupabaseClient,
   userId: string,
@@ -539,7 +573,10 @@ async function userOwnsCrmRecords(
         .select("id", { count: "exact", head: true })
         .eq("user_id", userId);
 
-      if (error) throw error;
+      if (error) {
+        if (ignoreMissingOptionalTable(table, error)) return 0;
+        throw error;
+      }
       return count ?? 0;
     }),
   );
@@ -553,14 +590,21 @@ async function assertActiveReassignTarget(
 ): Promise<void> {
   const { data, error } = await admin
     .from("profiles")
-    .select("id, is_active")
+    .select("id, role, is_active, is_blocked")
     .eq("id", userId)
     .maybeSingle();
 
   if (error) throw error;
 
-  if (!data || data.is_active === false) {
-    throw new Error("Target user profile not found or inactive.");
+  if (
+    !data ||
+    data.is_active === false ||
+    data.is_blocked === true ||
+    !isAssignableCompanyOwnerRole(data.role)
+  ) {
+    throw new Error(
+      "Companies can only be reassigned to an active broker, admin, or super admin.",
+    );
   }
 }
 
@@ -582,7 +626,7 @@ async function reassignCompanyOwnerAdmin(
       .update({ user_id: newUserId })
       .eq("company_id", companyId);
 
-    if (error) throw error;
+    if (error && !ignoreMissingOptionalTable(table, error)) throw error;
   }
 }
 
@@ -616,7 +660,7 @@ export async function reassignUserCrmRecordsAdmin(
       .update({ user_id: toUserId })
       .eq("user_id", fromUserId);
 
-    if (error) throw error;
+    if (error && !ignoreMissingOptionalTable(table, error)) throw error;
   }
 
   return companyIds.length;
@@ -736,7 +780,7 @@ export async function removeAdminUser(input: {
 
   if (input.mode === "reassign") {
     if (!reassignToUserId) {
-      throw new Error("Select a broker or admin to receive the records.");
+      throw new Error("Select an owner to receive the records.");
     }
 
     if (!ownsRecords) {
@@ -768,7 +812,7 @@ export async function removeAdminUser(input: {
 
     if (!reassignToUserId) {
       throw new UserDeleteBlockedError(
-        "This user owns CRM records. Choose a broker or admin to receive the records, or deactivate the user instead.",
+        "This user owns CRM records. Choose an owner to receive the records, or deactivate the user instead.",
       );
     }
 

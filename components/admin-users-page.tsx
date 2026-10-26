@@ -17,8 +17,9 @@ import {
   AdminDeleteUserModal,
   type AdminDeleteUserAssignee,
 } from "@/components/admin-delete-user-modal";
+import { compareAssignableOwners } from "@/lib/adminCompanies";
 import { formatDate, formatDateTime } from "@/lib/crmFormat";
-import { type UserRole } from "@/lib/userProfile";
+import { isAssignableCompanyOwner, type UserRole } from "@/lib/userProfile";
 import {
   canManageSuperAdminRole,
   getAssignableRolesForActor,
@@ -223,21 +224,25 @@ export function AdminUsersPage() {
     .filter(
       (row) =>
         row.id !== deleteTarget?.id &&
-        row.isActive &&
-        (row.role === "broker" || row.role === "admin"),
+        isAssignableCompanyOwner({
+          role: row.role,
+          is_active: row.isActive,
+          is_blocked: row.isBlocked,
+        }),
     )
     .map(
       (row): AdminDeleteUserAssignee => ({
         userId: row.id,
         name: row.fullName?.trim() || row.email,
         email: row.email,
+        role: row.role,
       }),
     )
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort(compareAssignableOwners);
 
   async function handleReassignRecords() {
     if (!deleteTarget || !deleteReassignToUserId) {
-      setDeleteModalError("Select a broker or admin to receive the records.");
+      setDeleteModalError("Select an owner to receive the records.");
       return;
     }
 
@@ -306,7 +311,7 @@ export function AdminUsersPage() {
 
     if (!deleteReassignToUserId) {
       setDeleteModalError(
-        "Select a broker or admin to receive the records before deleting.",
+        "Select an owner to receive the records before deleting.",
       );
       return;
     }

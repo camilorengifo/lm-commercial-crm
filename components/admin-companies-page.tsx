@@ -19,6 +19,7 @@ import {
   fetchAdminCompaniesOversightMeta,
   fetchAdminCompaniesOversightPage,
   fetchOversightCompanyIdsForFilters,
+  compareAssignableOwners,
   formatAssignableOwnerLabel,
   OVERSIGHT_SEARCH_DEBOUNCE_MS,
   OVERSIGHT_TABLE_DEFAULT_PAGE_SIZE,
@@ -258,14 +259,7 @@ export function AdminCompaniesPage() {
       return [] as AdminCompaniesBrokerOption[];
     }
 
-    return [...meta.brokers].sort((a, b) => {
-      const roleOrder = a.role === b.role ? 0 : a.role === "admin" ? -1 : 1;
-      if (roleOrder !== 0) {
-        return roleOrder;
-      }
-
-      return a.name.localeCompare(b.name);
-    });
+    return [...meta.brokers].sort(compareAssignableOwners);
   }, [meta]);
 
   const activeBrokerOwnershipSummary = useMemo(() => {

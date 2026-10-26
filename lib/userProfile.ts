@@ -50,6 +50,24 @@ export function canManageOpportunities(
   );
 }
 
+export function isAssignableCompanyOwnerRole(
+  role: string | null | undefined,
+): boolean {
+  return role === "broker" || role === "admin" || role === "super_admin";
+}
+
+export function isAssignableCompanyOwner(profile: {
+  role: string | null | undefined;
+  is_active?: boolean | null;
+  is_blocked?: boolean | null;
+}): boolean {
+  return (
+    profile.is_active !== false &&
+    profile.is_blocked !== true &&
+    isAssignableCompanyOwnerRole(profile.role)
+  );
+}
+
 export function isActiveProfile(profile: UserProfile | null | undefined): boolean {
   return profile?.is_active !== false;
 }

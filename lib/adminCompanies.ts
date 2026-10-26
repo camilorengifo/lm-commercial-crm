@@ -7,6 +7,7 @@ import {
 import { getFollowUpBucket } from "@/lib/followUps";
 import {
   getProfileDisplayName,
+  isAssignableCompanyOwner,
   normalizeUserRole,
   type UserProfile,
   type UserRole,
@@ -1745,41 +1746,39 @@ function buildOversightOwnerOptions(input: {
     });
   }
 
-  return Array.from(ownersById.values()).sort((a, b) => {
-    const roleOrder = a.role === b.role ? 0 : a.role === "admin" ? -1 : 1;
-    if (roleOrder !== 0) {
-      return roleOrder;
-    }
-
-    return a.name.localeCompare(b.name);
-  });
+  return Array.from(ownersById.values()).sort(compareAssignableOwners);
 }
 
 export const ADMIN_COMPANY_PRIORITIES = COMPANY_PRIORITIES;
+
+function assignableOwnerRoleRank(role: UserRole): number {
+  if (role === "super_admin") return 0;
+  if (role === "admin") return 1;
+  return 2;
+}
+
+export function compareAssignableOwners(
+  a: Pick<AdminCompaniesBrokerOption, "name" | "role">,
+  b: Pick<AdminCompaniesBrokerOption, "name" | "role">,
+): number {
+  const roleOrder =
+    assignableOwnerRoleRank(a.role) - assignableOwnerRoleRank(b.role);
+  if (roleOrder !== 0) return roleOrder;
+  return a.name.localeCompare(b.name);
+}
 
 export function getAssignableCompanyOwners(
   profiles: UserProfile[],
 ): AdminCompaniesBrokerOption[] {
   return profiles
-    .filter(
-      (profile) =>
-        profile.is_active !== false &&
-        !profile.is_blocked &&
-        (profile.role === "broker" ||
-          profile.role === "admin" ||
-          profile.role === "super_admin"),
-    )
+    .filter((profile) => isAssignableCompanyOwner(profile))
     .map((profile) => ({
       userId: profile.id,
       name: getProfileDisplayName(profile),
       email: profile.email ?? "—",
       role: profile.role,
     }))
-    .sort((a, b) => {
-      const roleOrder = a.role === b.role ? 0 : a.role === "admin" ? -1 : 1;
-      if (roleOrder !== 0) return roleOrder;
-      return a.name.localeCompare(b.name);
-    });
+    .sort(compareAssignableOwners);
 }
 
 export function attentionBadgeLabel(badge: AdminCompanyAttentionBadge): string {

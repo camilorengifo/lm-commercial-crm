@@ -2,11 +2,14 @@
 
 import { useEffect, useMemo } from "react";
 import type { AdminUserListItem } from "@/lib/adminUserManagement";
+import { formatAssignableOwnerLabel } from "@/lib/adminCompanies";
+import type { UserRole } from "@/lib/userProfile";
 
 export interface AdminDeleteUserAssignee {
   userId: string;
   name: string;
   email: string;
+  role: UserRole;
 }
 
 type DeleteStep = "options" | "confirm";
@@ -114,10 +117,10 @@ export function AdminDeleteUserModal({
                 disabled={submitting}
                 className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <option value="">Select a broker or admin...</option>
+                <option value="">Select an owner...</option>
                 {assignableOwners.map((owner) => (
                   <option key={owner.userId} value={owner.userId}>
-                    {owner.name} ({owner.email})
+                    {formatAssignableOwnerLabel(owner)}
                   </option>
                 ))}
               </select>
@@ -198,10 +201,10 @@ export function AdminDeleteUserModal({
                 disabled={submitting}
                 className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <option value="">Select a broker or admin...</option>
+                <option value="">Select an owner...</option>
                 {assignableOwners.map((owner) => (
                   <option key={owner.userId} value={owner.userId}>
-                    {owner.name} ({owner.email})
+                    {formatAssignableOwnerLabel(owner)}
                   </option>
                 ))}
               </select>
