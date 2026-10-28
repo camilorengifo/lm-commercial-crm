@@ -1013,6 +1013,13 @@ export function CompanyDetailPage() {
                 isAdmin={isAdmin}
                 canManage={canManageFollowUps}
                 externalRefreshKey={chronologyRefreshKey}
+                onCompanyUpdated={() => {
+                  if (user && companyId && profile) {
+                    return fetchCompany(user.id, companyId, profile, {
+                      soft: true,
+                    });
+                  }
+                }}
               />
               </div>
               <div className="crm-workspace-toolbar">

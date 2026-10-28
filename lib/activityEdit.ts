@@ -9,6 +9,7 @@ export const ACTIVITY_DESCRIPTION_MAX_LENGTH = 2000;
 
 export const ACTIVITY_UPDATED_MESSAGE = "Activity updated.";
 export const ACTIVITY_UNCHANGED_MESSAGE = "No changes to save.";
+export const ACTIVITY_DELETED_MESSAGE = "Timeline entry deleted.";
 
 const LOCKED_ACTIVITY_TYPES = new Set<ActivityType>([
   "follow_up_no_response",
@@ -58,6 +59,28 @@ export function canEditCommercialActivity(input: {
     input.viewerUserId.length > 0 &&
     input.viewerUserId === input.activityUserId
   );
+}
+
+/** Automatic follow-up and suppression rows stay on the timeline. */
+export function supportsCommercialActivityDeletion(
+  activityType: ActivityType,
+): boolean {
+  return !LOCKED_ACTIVITY_TYPES.has(activityType);
+}
+
+/**
+ * UI permission. delete_commercial_activity enforces the same ownership
+ * rules and refuses automatic follow-up and suppression history.
+ */
+export function canDeleteCommercialActivity(input: {
+  canManage: boolean;
+  isAdmin: boolean;
+  viewerUserId: string;
+  activityUserId: string;
+  activityType: ActivityType;
+}): boolean {
+  if (!supportsCommercialActivityDeletion(input.activityType)) return false;
+  return canEditCommercialActivity(input);
 }
 
 export function normalizeActivityEditDraft(
@@ -143,6 +166,17 @@ export function activityEditIsUnchanged(input: {
     originalNotes === normalized.notes &&
     input.originalActivityType === normalized.activityType
   );
+}
+
+/** Identifies one timeline entry. Related records are intentionally absent. */
+export function commercialActivityDeleteBody(input: {
+  activityId: string;
+  companyId: string;
+}) {
+  return {
+    activityId: input.activityId,
+    companyId: input.companyId,
+  };
 }
 
 /** Fields sent to the server. Associations and dates are intentionally absent. */

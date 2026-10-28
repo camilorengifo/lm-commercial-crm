@@ -6,8 +6,12 @@ import {
   ACTIVITY_UNCHANGED_MESSAGE,
   activityEditIsUnchanged,
   canChangeActivityType,
+  ACTIVITY_DELETED_MESSAGE,
+  canDeleteCommercialActivity,
   canEditCommercialActivity,
+  commercialActivityDeleteBody,
   commercialActivityUpdateBody,
+  supportsCommercialActivityDeletion,
   validateActivityEdit,
   validateActivityTypeChange,
 } from "./activityEdit";
@@ -219,5 +223,123 @@ assert.doesNotMatch(updateSql, /created_at/);
 assert.doesNotMatch(updateSql, /updated_by/);
 
 assert.equal(ACTIVITY_UNCHANGED_MESSAGE, "No changes to save.");
+
+assert.equal(supportsCommercialActivityDeletion("call"), true);
+assert.equal(supportsCommercialActivityDeletion("note"), true);
+assert.equal(supportsCommercialActivityDeletion("follow_up_no_response"), false);
+assert.equal(
+  supportsCommercialActivityDeletion("follow_up_rescheduled_contact"),
+  false,
+);
+assert.equal(supportsCommercialActivityDeletion("do_not_follow_up"), false);
+assert.equal(supportsCommercialActivityDeletion("outreach_suppression"), false);
+
+assert.equal(
+  canDeleteCommercialActivity({
+    canManage: true,
+    isAdmin: false,
+    viewerUserId: broker,
+    activityUserId: broker,
+    activityType: "call",
+  }),
+  true,
+);
+
+assert.equal(
+  canDeleteCommercialActivity({
+    canManage: true,
+    isAdmin: true,
+    viewerUserId: broker,
+    activityUserId: otherBroker,
+    activityType: "email",
+  }),
+  true,
+);
+
+assert.equal(
+  canDeleteCommercialActivity({
+    canManage: true,
+    isAdmin: true,
+    viewerUserId: broker,
+    activityUserId: broker,
+    activityType: "follow_up_no_response",
+  }),
+  false,
+);
+
+assert.equal(
+  canDeleteCommercialActivity({
+    canManage: true,
+    isAdmin: false,
+    viewerUserId: broker,
+    activityUserId: otherBroker,
+    activityType: "note",
+  }),
+  false,
+);
+
+assert.equal(
+  canDeleteCommercialActivity({
+    canManage: false,
+    isAdmin: false,
+    viewerUserId: broker,
+    activityUserId: broker,
+    activityType: "note",
+  }),
+  false,
+);
+
+const deleteBody = commercialActivityDeleteBody({
+  activityId: broker,
+  companyId: otherBroker,
+});
+assert.deepEqual(Object.keys(deleteBody).sort(), ["activityId", "companyId"]);
+assert.equal("follow_up_id" in deleteBody, false);
+assert.equal("notes" in deleteBody, false);
+
+const deleteSql = readFileSync(
+  join(
+    dirname(fileURLToPath(import.meta.url)),
+    "../supabase/migrations/037_delete_commercial_activity.sql",
+  ),
+  "utf8",
+);
+
+assert.match(deleteSql, /SECURITY DEFINER/);
+assert.match(deleteSql, /SET search_path = public/);
+assert.match(deleteSql, /This timeline entry cannot be deleted/);
+assert.match(deleteSql, /You do not have permission to delete this activity/);
+assert.doesNotMatch(deleteSql, /DELETE FROM public\.follow_ups/);
+assert.doesNotMatch(deleteSql, /UPDATE public\.follow_ups/);
+assert.doesNotMatch(deleteSql, /DELETE FROM public\.companies/);
+assert.doesNotMatch(deleteSql, /DELETE FROM public\.contacts/);
+assert.ok(
+  deleteSql.indexOf("This timeline entry cannot be deleted.") <
+    deleteSql.indexOf("DELETE FROM public.activities"),
+);
+
+const deleteAuditsSql = deleteSql.slice(
+  deleteSql.indexOf("DELETE FROM public.activity_edit_audits"),
+  deleteSql.indexOf("DELETE FROM public.activities"),
+);
+assert.match(deleteAuditsSql, /activity_id = p_activity_id/);
+assert.match(deleteAuditsSql, /company_id = p_company_id/);
+
+const deleteActivitySql = deleteSql.slice(
+  deleteSql.indexOf("DELETE FROM public.activities"),
+  deleteSql.indexOf("GET DIAGNOSTICS v_deleted"),
+);
+assert.match(deleteActivitySql, /id = p_activity_id/);
+assert.match(deleteActivitySql, /company_id = p_company_id/);
+
+const contactRefreshSql = deleteSql.slice(
+  deleteSql.indexOf("-- company_last_contact_refresh:"),
+);
+assert.match(contactRefreshSql, /SET last_contact_at/);
+assert.match(contactRefreshSql, /last_contact_at IS NOT DISTINCT FROM v_activity_at/);
+assert.doesNotMatch(contactRefreshSql, /next_follow_up_at/);
+assert.doesNotMatch(contactRefreshSql, /DELETE FROM/);
+
+assert.equal(ACTIVITY_DELETED_MESSAGE, "Timeline entry deleted.");
 
 console.log("activity edit tests passed");
