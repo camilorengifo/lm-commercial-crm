@@ -4,7 +4,10 @@ import { supabase } from "@/lib/supabaseClient";
 import { brokerCanAccessCompany } from "@/lib/brokerDataAccess";
 
 export const COMMERCIAL_TIMELINE_ACTIVITY_FIELDS =
-  "id, user_id, company_id, contact_id, follow_up_id, activity_type, subject, notes, activity_at, created_at, scheduled_follow_up_at";
+  "id, user_id, company_id, contact_id, follow_up_id, activity_type, subject, notes, activity_at, created_at, updated_at, updated_by, scheduled_follow_up_at";
+
+const COMMERCIAL_TIMELINE_ACTIVITY_FIELDS_WITHOUT_EDITOR =
+  "id, user_id, company_id, contact_id, follow_up_id, activity_type, subject, notes, activity_at, created_at, updated_at, scheduled_follow_up_at";
 
 export interface CommercialTimelineActivity {
   id: string;
@@ -17,15 +20,22 @@ export interface CommercialTimelineActivity {
   notes: string | null;
   activity_at: string;
   created_at: string;
+  updated_at: string;
+  updated_by: string | null;
   scheduled_follow_up_at: string | null;
   contactName: string | null;
   brokerEmail: string | null;
+  editedByEmail: string | null;
 }
 
 interface ContactRow {
   id: string;
   first_name: string;
   last_name: string | null;
+}
+
+function isMissingActivityEditorColumn(error: { message?: string }): boolean {
+  return (error.message ?? "").toLowerCase().includes("updated_by");
 }
 
 export async function fetchCommercialTimelineActivities(input: {
@@ -67,7 +77,30 @@ export async function fetchCommercialTimelineActivities(input: {
     query = query.eq("user_id", input.userId);
   }
 
-  const { data, error } = await query;
+  let { data, error } = await query;
+
+  if (error && isMissingActivityEditorColumn(error)) {
+    let legacyQuery = supabase
+      .from("activities")
+      .select(COMMERCIAL_TIMELINE_ACTIVITY_FIELDS_WITHOUT_EDITOR)
+      .eq("company_id", input.companyId)
+      .order("activity_at", { ascending: false });
+
+    if (!input.isAdmin) {
+      legacyQuery = legacyQuery.eq("user_id", input.userId);
+    }
+
+    const legacy = await legacyQuery;
+    if (legacy.error) {
+      return { data: [], error: legacy.error };
+    }
+
+    data = (legacy.data ?? []).map((row) => ({
+      ...row,
+      updated_by: null,
+    }));
+    error = null;
+  }
 
   if (error) {
     return { data: [], error };
@@ -75,7 +108,7 @@ export async function fetchCommercialTimelineActivities(input: {
 
   const rows = (data ?? []) as Omit<
     CommercialTimelineActivity,
-    "contactName" | "brokerEmail"
+    "contactName" | "brokerEmail" | "editedByEmail"
   >[];
 
   const contactIds = [
@@ -86,7 +119,13 @@ export async function fetchCommercialTimelineActivities(input: {
     ),
   ];
 
-  const userIds = [...new Set(rows.map((row) => row.user_id))];
+  const userIds = [
+    ...new Set(
+      rows.flatMap((row) =>
+        row.updated_by ? [row.user_id, row.updated_by] : [row.user_id],
+      ),
+    ),
+  ];
 
   const contactsById = new Map<string, ContactRow>();
   const profilesByUserId = new Map<string, string | null>();
@@ -137,6 +176,9 @@ export async function fetchCommercialTimelineActivities(input: {
         ...row,
         contactName: contact ? formatContactName(contact) : null,
         brokerEmail: profilesByUserId.get(row.user_id) ?? null,
+        editedByEmail: row.updated_by
+          ? profilesByUserId.get(row.updated_by) ?? null
+          : null,
       };
     }),
     error: null,

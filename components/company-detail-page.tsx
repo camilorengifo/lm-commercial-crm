@@ -1009,7 +1009,9 @@ export function CompanyDetailPage() {
               <CompanyChronologySection
                 companyId={company.id}
                 userId={scopedUserId}
+                viewerUserId={user.id}
                 isAdmin={isAdmin}
+                canManage={canManageFollowUps}
                 externalRefreshKey={chronologyRefreshKey}
               />
               </div>
