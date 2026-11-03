@@ -816,6 +816,17 @@ export function CompanyDetailPage() {
               </div>
 
               <dl className="grid gap-4 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <DetailField label="Main phone number">
+                    {company.main_phone ? (
+                      <a href={`tel:${company.main_phone}`} className="crm-link">
+                        {company.main_phone}
+                      </a>
+                    ) : (
+                      "—"
+                    )}
+                  </DetailField>
+                </div>
                 <DetailField label="City">{company.city || "—"}</DetailField>
                 <DetailField label="State">{company.state || "—"}</DetailField>
                 <DetailField label="Country">

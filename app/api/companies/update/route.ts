@@ -3,6 +3,7 @@ import { fetchProfileForUser } from "@/lib/authProfile";
 import { isAdminProfile, isBlockedProfile } from "@/lib/userProfile";
 import { getAuthenticatedUser } from "@/lib/supabaseServer";
 import { COMPANY_PRIORITIES, type CompanyPriority } from "@/lib/crmConstants";
+import { normalizeOptionalMainPhone } from "@/lib/companies";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -18,6 +19,7 @@ function isCompanyPriority(value: string): value is CompanyPriority {
 interface UpdateCompanyBody {
   companyId?: string;
   name?: string;
+  main_phone?: string | null;
   city?: string | null;
   state?: string | null;
   country?: string | null;
@@ -72,6 +74,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid priority." }, { status: 400 });
   }
 
+  const mainPhone = normalizeOptionalMainPhone(body.main_phone);
+  if (mainPhone.error) {
+    return NextResponse.json({ error: mainPhone.error }, { status: 400 });
+  }
+
   const { error: rpcError } = await supabase.rpc("update_company_details", {
     p_company_id: companyId,
     p_name: name,
@@ -82,6 +89,7 @@ export async function POST(request: Request) {
     p_general_notes: body.general_notes?.trim() ?? "",
     p_last_contact_at: body.last_contact_at ?? null,
     p_next_follow_up_at: body.next_follow_up_at ?? null,
+    p_main_phone: mainPhone.phone ?? "",
   });
 
   if (rpcError) {

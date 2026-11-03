@@ -10,6 +10,7 @@ export interface CompanyRecord {
   country: string | null;
   priority: CompanyPriority;
   sales_stage: string;
+  main_phone: string | null;
   general_notes: string | null;
   last_contact_at: string | null;
   next_follow_up_at: string | null;
@@ -104,31 +105,78 @@ export function sortCompanies<T extends CompanyRecord>(
   return sorted;
 }
 
+const MAIN_PHONE_MAX_LENGTH = 40;
+const MAIN_PHONE_PATTERN = /^\+?[\d\s().-]+$/;
+
+export function normalizeOptionalMainPhone(
+  value: string | null | undefined,
+): { phone: string | null; error: string | null } {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) {
+    return { phone: null, error: null };
+  }
+
+  if (
+    trimmed.length > MAIN_PHONE_MAX_LENGTH ||
+    !MAIN_PHONE_PATTERN.test(trimmed) ||
+    !/\d/.test(trimmed)
+  ) {
+    return {
+      phone: null,
+      error:
+        "Enter a valid phone number. Country codes such as +1, +52, and +57 are supported.",
+    };
+  }
+
+  return { phone: trimmed, error: null };
+}
+
+function digitsOnly(value: string): string {
+  return value.replace(/\D/g, "");
+}
+
+export function companyMatchesSearch(
+  company: CompanyRecord,
+  search: string,
+): boolean {
+  const query = search.trim().toLowerCase();
+  if (!query) return true;
+
+  const phone = company.main_phone ?? "";
+  const haystack = [
+    company.name,
+    company.city,
+    company.state,
+    company.country,
+    company.priority,
+    phone,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (haystack.includes(query)) return true;
+
+  const queryDigits = digitsOnly(query);
+  if (queryDigits.length >= 3 && digitsOnly(phone).includes(queryDigits)) {
+    return true;
+  }
+
+  return false;
+}
+
 export function filterCompaniesBySearch<T extends CompanyRecord>(
   companies: T[],
   search: string,
 ): T[] {
-  const query = search.trim().toLowerCase();
+  const query = search.trim();
   if (!query) return companies;
 
-  return companies.filter((company) => {
-    const haystack = [
-      company.name,
-      company.city,
-      company.state,
-      company.country,
-      company.priority,
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-
-    return haystack.includes(query);
-  });
+  return companies.filter((company) => companyMatchesSearch(company, query));
 }
 
 export const COMPANY_LIST_SELECT =
-  "id, user_id, name, city, state, country, priority, sales_stage, general_notes, last_contact_at, next_follow_up_at, created_at, deleted_at, deleted_by, delete_reason, account_status, account_disposition, archived_at, archived_by, archive_reason, archive_notes";
+  "id, user_id, name, main_phone, city, state, country, priority, sales_stage, general_notes, last_contact_at, next_follow_up_at, created_at, deleted_at, deleted_by, delete_reason, account_status, account_disposition, archived_at, archived_by, archive_reason, archive_notes";
 
 export function toDatetimeLocalValue(value: string | null): string {
   if (!value) return "";

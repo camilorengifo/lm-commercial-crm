@@ -755,6 +755,7 @@ export async function executeSpreadsheetImport(
         .insert(
           buildCompanyInsertPayload(ownerUserId, {
             name: row.companyName.trim(),
+            main_phone: null,
             city: row.city,
             state: row.state,
             country: row.country,

@@ -23,6 +23,7 @@ import {
   COMPANY_LIST_SELECT,
   COMPANY_SORT_OPTIONS,
   filterCompaniesBySearch,
+  normalizeOptionalMainPhone,
   sortCompanies,
   type CompanyRecord,
   type CompanySortOption,
@@ -727,10 +728,18 @@ export function CompaniesPage() {
       return;
     }
 
+    const mainPhone = normalizeOptionalMainPhone(form.main_phone);
+    if (mainPhone.error) {
+      setFormError(mainPhone.error);
+      setSubmitting(false);
+      return;
+    }
+
     const contactsToCreate = filterNonEmptyContacts(contactRows);
 
     const { data, error } = await createCompany({
       name: trimmedName,
+      main_phone: mainPhone.phone,
       city: form.city.trim() || null,
       state: form.state.trim() || null,
       country: form.country,
@@ -823,7 +832,7 @@ export function CompaniesPage() {
             <input
               id="search"
               type="search"
-              placeholder="Search companies..."
+              placeholder="Search name, city, or phone..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               className="crm-input"
@@ -1150,6 +1159,30 @@ export function CompaniesPage() {
                     className="crm-input"
                     placeholder="Acme Freight Co."
                   />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label htmlFor="main_phone" className="crm-label">
+                    Main phone number
+                  </label>
+                  <input
+                    id="main_phone"
+                    type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    value={form.main_phone}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        main_phone: event.target.value,
+                      }))
+                    }
+                    className="crm-input"
+                    placeholder="+52 55 1234 5678"
+                  />
+                  <p className="mt-1.5 text-xs text-slate-500">
+                    Optional. Include the country code, such as +1, +52, or +57.
+                  </p>
                 </div>
 
                 <div>

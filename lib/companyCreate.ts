@@ -10,6 +10,7 @@ import {
   buildContactInsertPayload,
   filterNonEmptyContacts,
 } from "@/lib/companyCreateContacts";
+import { normalizeOptionalMainPhone } from "@/lib/companies";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -24,6 +25,7 @@ export function isCompanyPriority(value: string): value is CompanyPriority {
 
 export interface CompanyCreateFields {
   name: string;
+  main_phone: string | null;
   city: string | null;
   state: string | null;
   country: string | null;
@@ -64,6 +66,7 @@ export function buildCompanyInsertPayload(
   return {
     user_id: authUserId,
     name: fields.name.trim(),
+    main_phone: fields.main_phone,
     city: fields.city,
     state: fields.state,
     country: fields.country,
@@ -76,6 +79,7 @@ export function buildCompanyInsertPayload(
 
 export function parseCompanyCreateFields(body: {
   name?: string;
+  main_phone?: string | null;
   city?: string | null;
   state?: string | null;
   country?: string | null;
@@ -109,9 +113,15 @@ export function parseCompanyCreateFields(body: {
     return { fields: null, error: "Invalid last contact date." };
   }
 
+  const mainPhone = normalizeOptionalMainPhone(body.main_phone);
+  if (mainPhone.error) {
+    return { fields: null, error: mainPhone.error };
+  }
+
   return {
     fields: {
       name,
+      main_phone: mainPhone.phone,
       city: body.city?.trim() || null,
       state: body.state?.trim() || null,
       country: body.country?.trim() || null,

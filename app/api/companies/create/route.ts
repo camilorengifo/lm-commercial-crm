@@ -12,6 +12,7 @@ import { getAuthenticatedUser } from "@/lib/supabaseServer";
 
 interface CreateCompanyBody {
   name?: string;
+  main_phone?: string | null;
   city?: string | null;
   state?: string | null;
   country?: string | null;

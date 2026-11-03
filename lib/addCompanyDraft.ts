@@ -9,6 +9,7 @@ export const ADD_COMPANY_DRAFT_VERSION = 1;
 
 export interface AddCompanyFormState {
   name: string;
+  main_phone: string;
   city: string;
   state: string;
   country: string;
@@ -32,6 +33,7 @@ export interface AddCompanyDraft {
 
 export const EMPTY_ADD_COMPANY_FORM: AddCompanyFormState = {
   name: "",
+  main_phone: "",
   city: "",
   state: "",
   country: "United States",
@@ -55,6 +57,7 @@ export function isAddCompanyFormEmpty(
 ): boolean {
   const formMatchesEmpty =
     form.name.trim() === "" &&
+    form.main_phone.trim() === "" &&
     form.city.trim() === "" &&
     form.state.trim() === "" &&
     form.country === EMPTY_ADD_COMPANY_FORM.country &&
@@ -99,6 +102,7 @@ export function saveAddCompanyDraft(
 function normalizeDraftForm(form: Partial<AddCompanyFormState>): AddCompanyFormState {
   return {
     name: typeof form.name === "string" ? form.name : "",
+    main_phone: typeof form.main_phone === "string" ? form.main_phone : "",
     city: typeof form.city === "string" ? form.city : "",
     state: typeof form.state === "string" ? form.state : "",
     country:

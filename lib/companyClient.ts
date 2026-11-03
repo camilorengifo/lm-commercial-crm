@@ -42,6 +42,7 @@ async function companyRequest<T>(
 export interface UpdateCompanyInput {
   companyId: string;
   name: string;
+  main_phone: string | null;
   city: string | null;
   state: string | null;
   country: string | null;
@@ -222,6 +223,7 @@ export async function bulkUpdateCompanyFieldsInBatches(input: {
 
 export interface CreateCompanyInput {
   name: string;
+  main_phone: string | null;
   city: string | null;
   state: string | null;
   country: string | null;

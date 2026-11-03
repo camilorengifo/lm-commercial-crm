@@ -8,6 +8,7 @@ import {
 } from "@/lib/crmConstants";
 import {
   fromDatetimeLocalValue,
+  normalizeOptionalMainPhone,
   toDatetimeLocalValue,
   type CompanyRecord,
 } from "@/lib/companies";
@@ -25,6 +26,7 @@ export function CompanyEditModal({
   onSaved: () => void;
 }) {
   const [name, setName] = useState("");
+  const [mainPhone, setMainPhone] = useState("");
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
   const [country, setCountry] = useState("United States");
@@ -39,6 +41,7 @@ export function CompanyEditModal({
     if (!open || !company) return;
 
     setName(company.name);
+    setMainPhone(company.main_phone ?? "");
     setCity(company.city ?? "");
     setState(company.state ?? "");
     setCountry(company.country ?? "United States");
@@ -67,9 +70,17 @@ export function CompanyEditModal({
     setSaving(true);
     setError(null);
 
+    const normalizedPhone = normalizeOptionalMainPhone(mainPhone);
+    if (normalizedPhone.error) {
+      setSaving(false);
+      setError(normalizedPhone.error);
+      return;
+    }
+
     const { error: requestError } = await updateCompanyDetails({
       companyId: company!.id,
       name: name.trim(),
+      main_phone: normalizedPhone.phone,
       city: city.trim() || null,
       state: state.trim() || null,
       country: country.trim() || null,
@@ -110,6 +121,28 @@ export function CompanyEditModal({
               onChange={(event) => setName(event.target.value)}
               className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
             />
+          </div>
+
+          <div>
+            <label
+              htmlFor="edit-main-phone"
+              className="mb-1.5 block text-sm font-medium text-zinc-700"
+            >
+              Main phone number
+            </label>
+            <input
+              id="edit-main-phone"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              value={mainPhone}
+              onChange={(event) => setMainPhone(event.target.value)}
+              placeholder="+52 55 1234 5678"
+              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+            />
+            <p className="mt-1.5 text-xs text-zinc-500">
+              Optional. Include the country code, such as +1, +52, or +57.
+            </p>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
