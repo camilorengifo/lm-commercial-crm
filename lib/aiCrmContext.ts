@@ -5,6 +5,7 @@ import {
   type SalesStage,
 } from "@/lib/crmConstants";
 import { businessCalendarDate, getFollowUpBucket } from "@/lib/followUps";
+import { buildLanePatterns, type LanePattern } from "@/lib/laneIntelligence";
 import { fetchSuppressionIndex } from "@/lib/outreachSuppression";
 import {
   COMPANY_FOLLOW_UP_SUPPRESSED_MESSAGE,
@@ -27,6 +28,7 @@ interface CompanyRow {
   state: string | null;
   country: string | null;
   general_notes: string | null;
+  main_phone?: string | null;
   last_contact_at: string | null;
   next_follow_up_at: string | null;
 }
@@ -63,6 +65,9 @@ interface OpportunityRow {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  frequency?: string | null;
+  estimated_loads_per_week?: number | null;
+  name?: string | null;
   companies: { name: string } | { name: string }[] | null;
 }
 
@@ -176,6 +181,7 @@ export interface AccountCrmSummary {
     state: string | null;
     country: string | null;
     generalNotes: string | null;
+    mainPhone: string | null;
     lastContactAt: string | null;
     nextFollowUpAt: string | null;
   };
@@ -206,6 +212,12 @@ export interface AccountCrmSummary {
     quotedRate: number | null;
     notes: string | null;
     updatedAt: string;
+    createdAt: string | null;
+    origin: string | null;
+    destination: string | null;
+    frequency: string | null;
+    estimatedLoadsPerWeek: number | null;
+    name: string | null;
   }>;
   outreachSuppression: {
     companySuppressed: boolean;
@@ -492,7 +504,7 @@ export async function buildAccountCrmSummary(
   const { data: company, error: companyError } = await supabase
     .from("companies")
     .select(
-      "id, name, sales_stage, priority, city, state, country, general_notes, last_contact_at, next_follow_up_at",
+      "id, name, sales_stage, priority, city, state, country, general_notes, main_phone, last_contact_at, next_follow_up_at",
     )
     .eq("id", companyId)
     .eq("user_id", dataOwnerUserId)
@@ -531,7 +543,7 @@ export async function buildAccountCrmSummary(
       supabase
         .from("load_opportunities")
         .select(
-          "status, lane_origin, lane_destination, equipment_type, commodity, target_rate, quoted_rate, notes, updated_at",
+          "status, name, lane_origin, lane_destination, equipment_type, commodity, frequency, estimated_loads_per_week, target_rate, quoted_rate, notes, created_at, updated_at",
         )
         .eq("company_id", companyId)
         .eq("user_id", dataOwnerUserId)
@@ -603,6 +615,7 @@ export async function buildAccountCrmSummary(
       state: company.state,
       country: company.country,
       generalNotes: company.general_notes,
+      mainPhone: company.main_phone ?? null,
       lastContactAt: formatDateLabel(company.last_contact_at),
       nextFollowUpAt: formatDateLabel(company.next_follow_up_at),
     },
@@ -636,6 +649,12 @@ export async function buildAccountCrmSummary(
         notes: opportunity.notes,
         updatedAt:
           formatDateLabel(opportunity.updated_at) ?? opportunity.updated_at,
+        createdAt: formatDateLabel(opportunity.created_at),
+        origin: opportunity.lane_origin,
+        destination: opportunity.lane_destination,
+        frequency: opportunity.frequency ?? null,
+        estimatedLoadsPerWeek: opportunity.estimated_loads_per_week ?? null,
+        name: opportunity.name ?? null,
       }),
     ),
     outreachSuppression:
@@ -646,6 +665,12 @@ export async function buildAccountCrmSummary(
           }
         : null,
   };
+}
+
+export interface OutreachDraftFeedback {
+  rating: string;
+  outreachType: string;
+  createdAt: string;
 }
 
 export interface OutreachCrmContext {
@@ -667,8 +692,17 @@ export interface OutreachCrmContext {
     completedAt: string | null;
     notes: string | null;
   }>;
+  commercialTimeline: Array<{
+    kind: "follow_up" | "activity";
+    status: string | null;
+    title: string | null;
+    notes: string | null;
+    occurredAt: string | null;
+  }>;
   recentActivities: AccountCrmSummary["recentActivities"];
   opportunities: AccountCrmSummary["opportunities"];
+  lanePatterns: LanePattern[];
+  priorDraftFeedback: OutreachDraftFeedback[];
   outreachBlockedReason: string | null;
 }
 
@@ -715,15 +749,42 @@ export async function buildOutreachCrmContext(
       "Every contact on this company has declined further follow-up. Outreach was not drafted.";
   }
 
-  const { data: allFollowUps, error: followUpsError } = await supabase
-    .from("follow_ups")
-    .select("title, notes, due_at, status, completed_at")
-    .eq("company_id", companyId)
-    .eq("user_id", dataOwnerUserId)
-    .order("due_at", { ascending: false })
-    .limit(20);
+  const [followUpsResult, activitiesResult, feedbackResult] = await Promise.all([
+    supabase
+      .from("follow_ups")
+      .select("title, notes, due_at, status, completed_at")
+      .eq("company_id", companyId)
+      .eq("user_id", dataOwnerUserId)
+      .order("due_at", { ascending: false })
+      .limit(40),
+    supabase
+      .from("activities")
+      .select("activity_type, subject, notes, activity_at")
+      .eq("company_id", companyId)
+      .eq("user_id", dataOwnerUserId)
+      .order("activity_at", { ascending: false })
+      .limit(40),
+    supabase
+      .from("outreach_draft_feedback")
+      .select("rating, outreach_type, created_at")
+      .eq("company_id", companyId)
+      .order("created_at", { ascending: false })
+      .limit(12),
+  ]);
 
-  if (followUpsError) throw followUpsError;
+  if (followUpsResult.error) throw followUpsResult.error;
+  if (activitiesResult.error) throw activitiesResult.error;
+
+  const feedbackMissing =
+    feedbackResult.error &&
+    (feedbackResult.error.code === "PGRST205" ||
+      feedbackResult.error.code === "42P01" ||
+      /outreach_draft_feedback/i.test(feedbackResult.error.message));
+
+  if (feedbackResult.error && !feedbackMissing) throw feedbackResult.error;
+
+  const allFollowUps = followUpsResult.data ?? [];
+  const timelineActivities = activitiesResult.data ?? [];
 
   let selectedContact: OutreachCrmContext["selectedContact"] = null;
 
@@ -748,14 +809,48 @@ export async function buildOutreachCrmContext(
     }
   }
 
-  const completedFollowUps = (allFollowUps ?? [])
+  const completedFollowUps = allFollowUps
     .filter((followUp) => followUp.status === "completed")
-    .slice(0, 8)
+    .slice(0, 12)
     .map((followUp) => ({
       title: followUp.title,
       completedAt: formatDateLabel(followUp.completed_at),
       notes: followUp.notes,
     }));
+
+  const recentActivities = timelineActivities.map((activity) => ({
+    type: activity.activity_type,
+    subject: activity.subject,
+    activityAt: formatDateLabel(activity.activity_at) ?? activity.activity_at,
+    notes: activity.notes,
+  }));
+
+  const commercialTimeline = [
+    ...allFollowUps.map((followUp) => ({
+      kind: "follow_up" as const,
+      status: followUp.status,
+      title: followUp.title,
+      notes: followUp.notes,
+      occurredAt:
+        formatDateLabel(followUp.completed_at ?? followUp.due_at) ??
+        followUp.due_at,
+    })),
+    ...recentActivities.map((activity) => ({
+      kind: "activity" as const,
+      status: activity.type,
+      title: activity.subject,
+      notes: activity.notes,
+      occurredAt: activity.activityAt,
+    })),
+  ];
+
+  const priorDraftFeedback: OutreachDraftFeedback[] = feedbackMissing
+    ? []
+    : (feedbackResult.data ?? []).map((row) => ({
+        rating: row.rating,
+        outreachType: row.outreach_type,
+        createdAt: formatDateLabel(row.created_at) ?? row.created_at,
+      }));
 
   return {
     generatedAt: new Date().toISOString(),
@@ -767,8 +862,11 @@ export async function buildOutreachCrmContext(
     contacts: baseSummary.contacts,
     pendingFollowUps: baseSummary.pendingFollowUps,
     completedFollowUps,
-    recentActivities: baseSummary.recentActivities,
+    commercialTimeline,
+    recentActivities,
     opportunities: baseSummary.opportunities,
+    lanePatterns: buildLanePatterns(baseSummary.opportunities),
+    priorDraftFeedback,
     outreachBlockedReason,
   };
 }

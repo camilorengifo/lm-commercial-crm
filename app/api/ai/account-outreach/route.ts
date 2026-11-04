@@ -70,7 +70,7 @@ export async function POST(request: Request) {
       access.dataOwnerUserId,
       companyId,
       {
-        outreachType: "Follow-up Email",
+        outreachType: "Relationship Follow-up",
         tone: "Professional",
         goal: "Plan the next commercial touch based on CRM context",
         contactId: null,

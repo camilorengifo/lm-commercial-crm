@@ -7,8 +7,11 @@ import type { AccountSummaryResponse } from "@/lib/aiPrompts";
 import type { BrokerRecommendationsResponse } from "@/lib/aiPrompts";
 import type { BrokerActionPlanResponse } from "@/lib/aiPrompts";
 import type { AccountOutreachQuickResponse } from "@/lib/aiPrompts";
+import type { LanePattern } from "@/lib/laneIntelligence";
+import type { MarketResearchResult } from "@/lib/marketResearchRules";
 import type {
   OutreachDraftResponse,
+  OutreachFeedbackRating,
   OutreachTone,
   OutreachType,
 } from "@/lib/aiPrompts";
@@ -95,6 +98,17 @@ export async function fetchAccountSummary(companyId: string) {
   }>("/api/ai/account-summary", { companyId });
 }
 
+export interface OutreachIntelligence {
+  crmFacts: string[];
+  lanePatterns: LanePattern[];
+  marketResearch: MarketResearchResult | null;
+  priorDraftFeedback: Array<{
+    rating: string;
+    outreachType: string;
+    createdAt: string;
+  }>;
+}
+
 export async function fetchOutreachDraft(input: {
   companyId: string;
   contactId: string | null;
@@ -105,6 +119,7 @@ export async function fetchOutreachDraft(input: {
   return postAiRequest<{
     success: true;
     draft: OutreachDraftResponse;
+    intelligence: OutreachIntelligence;
     message: string;
     companyName: string;
     generatedAt: string;
@@ -114,5 +129,17 @@ export async function fetchOutreachDraft(input: {
     outreachType: input.outreachType,
     tone: input.tone,
     goal: input.goal,
+  });
+}
+
+export async function saveOutreachFeedback(input: {
+  companyId: string;
+  outreachType: OutreachType;
+  rating: OutreachFeedbackRating;
+}) {
+  return postAiRequest<{ success: true; saved: true }>("/api/ai/outreach-feedback", {
+    companyId: input.companyId,
+    outreachType: input.outreachType,
+    rating: input.rating,
   });
 }

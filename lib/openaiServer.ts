@@ -252,3 +252,89 @@ export async function generateJsonCompletion<T>(input: {
     };
   }
 }
+
+export async function createWebSearchResponse(input: {
+  systemPrompt: string;
+  userPrompt: string;
+  context?: string;
+  userLocation?: {
+    city?: string | null;
+    region?: string | null;
+    country?: string | null;
+    timezone?: string | null;
+  };
+}): Promise<{
+  text: string | null;
+  citations: Array<{ url: string; title: string }>;
+  error: string | null;
+}> {
+  let client: OpenAI;
+
+  try {
+    client = getOpenAIClient();
+  } catch (error) {
+    return {
+      text: null,
+      citations: [],
+      error: sanitizeAiError(error, input.context ?? "getOpenAIClient"),
+    };
+  }
+
+  const model = getOpenAIModel();
+  const requestContext = input.context ?? "createWebSearchResponse";
+
+  try {
+    const response = await client.responses.create({
+      model,
+      tools: [
+        {
+          type: "web_search",
+          search_context_size: "medium",
+          user_location: input.userLocation
+            ? {
+                type: "approximate",
+                city: input.userLocation.city ?? undefined,
+                region: input.userLocation.region ?? undefined,
+                country: input.userLocation.country ?? undefined,
+                timezone: input.userLocation.timezone ?? undefined,
+              }
+            : undefined,
+        },
+      ],
+      input: [
+        { role: "system", content: input.systemPrompt },
+        { role: "user", content: input.userPrompt },
+      ],
+    });
+
+    const citations: Array<{ url: string; title: string }> = [];
+    for (const item of response.output) {
+      if (item.type !== "message") continue;
+      for (const content of item.content) {
+        if (content.type !== "output_text") continue;
+        for (const annotation of content.annotations) {
+          if (annotation.type === "url_citation") {
+            citations.push({ url: annotation.url, title: annotation.title });
+          }
+        }
+      }
+    }
+
+    const text = response.output_text?.trim() || null;
+    if (!text) {
+      return {
+        text: null,
+        citations,
+        error: "Market research returned an empty response.",
+      };
+    }
+
+    return { text, citations, error: null };
+  } catch (error) {
+    return {
+      text: null,
+      citations: [],
+      error: sanitizeAiError(error, requestContext, model),
+    };
+  }
+}

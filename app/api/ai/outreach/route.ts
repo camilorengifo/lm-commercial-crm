@@ -1,14 +1,14 @@
 // Assistive only: returns draft text. No sending or automated outreach.
+import { buildCrmFacts } from "@/lib/laneIntelligence";
 import { buildOutreachCrmContext } from "@/lib/aiCrmContext";
 import {
-  OUTREACH_SYSTEM_PROMPT,
   OUTREACH_TONES,
-  OUTREACH_TYPES,
+  OUTREACH_SYSTEM_PROMPT,
   buildOutreachUserPrompt,
   normalizeOutreachDraft,
+  resolveOutreachType,
   type OutreachDraftResponse,
   type OutreachTone,
-  type OutreachType,
 } from "@/lib/aiPrompts";
 import {
   aiClientErrorResponse,
@@ -21,10 +21,11 @@ import {
   logAiSuccess,
   resolveCompanyAccess,
 } from "@/lib/aiRouteHelpers";
+import { researchFreightMarket, type MarketResearchResult } from "@/lib/marketResearch";
 import { generateJsonCompletion } from "@/lib/openaiServer";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 interface OutreachRequestBody {
   companyId?: string;
@@ -32,10 +33,6 @@ interface OutreachRequestBody {
   outreachType?: string;
   tone?: string;
   goal?: string | null;
-}
-
-function isOutreachType(value: string): value is OutreachType {
-  return (OUTREACH_TYPES as readonly string[]).includes(value);
 }
 
 function isOutreachTone(value: string): value is OutreachTone {
@@ -60,14 +57,14 @@ export async function POST(request: Request) {
   }
 
   const companyId = body.companyId?.trim();
-  const outreachType = body.outreachType?.trim() ?? "";
+  const outreachType = resolveOutreachType(body.outreachType?.trim() ?? "");
   const tone = body.tone?.trim() ?? "";
 
   if (!companyId) {
     return aiClientErrorResponse("Company ID is required.", 400);
   }
 
-  if (!isOutreachType(outreachType)) {
+  if (!outreachType) {
     return aiClientErrorResponse("A valid outreach type is required.", 400);
   }
 
@@ -113,9 +110,21 @@ export async function POST(request: Request) {
       return aiClientErrorResponse(context.outreachBlockedReason, 409);
     }
 
+    let marketResearch: MarketResearchResult | null = null;
+    if (outreachType === "Technical Follow-up") {
+      const location = [context.company.city, context.company.state, context.company.country]
+        .filter(Boolean)
+        .join(", ");
+      marketResearch = await researchFreightMarket({
+        companyName: context.company.name,
+        location: location || null,
+        lanePatterns: context.lanePatterns,
+      });
+    }
+
     const { data, error } = await generateJsonCompletion<OutreachDraftResponse>({
       systemPrompt: OUTREACH_SYSTEM_PROMPT,
-      userPrompt: buildOutreachUserPrompt(context),
+      userPrompt: buildOutreachUserPrompt(context, marketResearch),
       context: "AI_OUTREACH",
     });
 
@@ -124,12 +133,34 @@ export async function POST(request: Request) {
       return aiGenerationErrorResponse(error);
     }
 
-    const draft = normalizeOutreachDraft(data);
+    const draft = normalizeOutreachDraft(data, outreachType);
+    const intelligence = {
+      crmFacts: buildCrmFacts({
+        companyName: context.company.name,
+        city: context.company.city,
+        state: context.company.state,
+        country: context.company.country,
+        mainPhone: context.company.mainPhone,
+        salesStage: context.company.salesStage,
+        priority: context.company.priority,
+        notes: context.company.generalNotes,
+        contactCount: context.contacts.length,
+        opportunityCount: context.opportunities.length,
+        activityCount: context.commercialTimeline.length,
+        followUpCount:
+          context.pendingFollowUps.length + context.completedFollowUps.length,
+        lanePatterns: context.lanePatterns,
+      }),
+      lanePatterns: context.lanePatterns,
+      marketResearch,
+      priorDraftFeedback: context.priorDraftFeedback,
+    };
 
     logAiSuccess(logContext, { companyName: context.company.name });
 
     return aiSuccessResponse({
       draft,
+      intelligence,
       message: draft.fullDraft,
       companyName: context.company.name,
       generatedAt: new Date().toISOString(),
