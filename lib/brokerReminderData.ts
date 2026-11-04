@@ -8,7 +8,7 @@ import {
   formatPipelineValue,
   getOpportunityPipelineValue,
 } from "@/lib/brokerProductivity";
-import { getFollowUpBucket } from "@/lib/followUps";
+import { businessCalendarDate, getDayBounds, getFollowUpBucket } from "@/lib/followUps";
 import { fetchSuppressionIndex } from "@/lib/outreachSuppression";
 import {
   isCompanyOutreachSuppressed,
@@ -157,9 +157,7 @@ interface OpportunityRow {
 
 function formatDateLabel(value: string | null): string | null {
   if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString().slice(0, 10);
+  return businessCalendarDate(value);
 }
 
 function unwrapCompanyName(
@@ -167,16 +165,6 @@ function unwrapCompanyName(
 ): string {
   if (!value) return "Unknown company";
   return Array.isArray(value) ? (value[0]?.name ?? "Unknown company") : value.name;
-}
-
-function getDayBounds(reference: Date = new Date()) {
-  const start = new Date(reference);
-  start.setHours(0, 0, 0, 0);
-
-  const end = new Date(reference);
-  end.setHours(23, 59, 59, 999);
-
-  return { start, end };
 }
 
 function addDays(date: Date, days: number): Date {

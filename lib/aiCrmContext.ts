@@ -4,7 +4,7 @@ import {
   isSalesStage,
   type SalesStage,
 } from "@/lib/crmConstants";
-import { getFollowUpBucket } from "@/lib/followUps";
+import { businessCalendarDate, getFollowUpBucket } from "@/lib/followUps";
 import { fetchSuppressionIndex } from "@/lib/outreachSuppression";
 import {
   COMPANY_FOLLOW_UP_SUPPRESSED_MESSAGE,
@@ -98,9 +98,7 @@ function getRecentOpportunityCutoff(): Date {
 
 function formatDateLabel(value: string | null): string | null {
   if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString().slice(0, 10);
+  return businessCalendarDate(value);
 }
 
 function isInactive(lastActivityAt: string | null): boolean {

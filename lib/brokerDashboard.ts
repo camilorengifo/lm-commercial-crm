@@ -10,8 +10,9 @@ import {
 } from "@/lib/crmConstants";
 import {
   bucketFollowUpsWithCompanies,
+  BUSINESS_TIMEZONE,
   fetchPendingFollowUpsWithCompanies,
-  getDayBounds,
+  getDaysOverdue,
   type FollowUpWithCompany,
 } from "@/lib/followUps";
 import { isWorkingCompanyRecord } from "@/lib/accountStatus";
@@ -26,14 +27,13 @@ import { fetchSuppressionIndex } from "@/lib/outreachSuppression";
 import {
   isCompanyOutreachSuppressed,
   isContactOutreachSuppressed,
-  isFollowUpOutreachSuppressed,
 } from "@/lib/outreachSuppressionRules";
 
 const HIGH_PRIORITY_INACTIVITY_DAYS = 7;
 const RECENT_ACTIVITY_DAYS = 7;
 const LIST_LIMIT = 10;
 
-export { LIST_LIMIT };
+export { LIST_LIMIT, getDaysOverdue };
 
 export interface CompanyDashboardRow {
   id: string;
@@ -151,15 +151,6 @@ function getInactivityCutoff(days: number): Date {
   cutoff.setDate(cutoff.getDate() - days);
   cutoff.setHours(0, 0, 0, 0);
   return cutoff;
-}
-
-export function getDaysOverdue(dueAt: string): number {
-  const due = new Date(dueAt);
-  if (Number.isNaN(due.getTime())) return 0;
-
-  const { start } = getDayBounds();
-  const diffMs = start.getTime() - due.getTime();
-  return Math.max(1, Math.ceil(diffMs / (24 * 60 * 60 * 1000)));
 }
 
 function formatContactName(
@@ -473,11 +464,7 @@ export async function fetchBrokerDashboardData(
     ),
   );
   const followUps = enrichFollowUps(
-    followUpsResult.data.filter(
-      (followUp) =>
-        workingCompanyIds.has(followUp.company_id) &&
-        !isFollowUpOutreachSuppressed(suppressionIndex, followUp),
-    ),
+    followUpsResult.data,
     contactNameByCompany,
     priorityByCompany,
   );
@@ -603,6 +590,7 @@ export async function fetchBrokerDashboardData(
 
 export function getTodayHeading(): string {
   return new Date().toLocaleDateString("en-US", {
+    timeZone: BUSINESS_TIMEZONE,
     weekday: "long",
     month: "long",
     day: "numeric",

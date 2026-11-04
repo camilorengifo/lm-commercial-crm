@@ -48,13 +48,6 @@ import {
   type ScheduleNextMode,
 } from "@/lib/followUpOutcomes";
 import { getDaysOverdue } from "@/lib/brokerDashboard";
-import {
-  fetchAllProfiles,
-  fetchUserProfile,
-  getProfileDisplayName,
-  isAdminProfile,
-  type UserProfile,
-} from "@/lib/userProfile";
 import { supabase } from "@/lib/supabaseClient";
 
 type WorkcenterTab = "today" | "overdue" | "upcoming" | "completed";
@@ -624,7 +617,6 @@ function DoNotFollowUpModal({
 function FollowUpCard({
   followUp,
   variant,
-  isAdmin,
   canManage,
   actionLoading,
   onMarkComplete,
@@ -634,7 +626,6 @@ function FollowUpCard({
 }: {
   followUp: FollowUpEnriched;
   variant: FollowUpCardVariant;
-  isAdmin: boolean;
   canManage: boolean;
   actionLoading: boolean;
   onMarkComplete: (followUp: FollowUpEnriched) => void;
@@ -690,14 +681,6 @@ function FollowUpCard({
             <p className="text-sm text-zinc-700">
               <span className="font-medium text-zinc-600">Contact:</span>{" "}
               {followUp.contactName}
-            </p>
-          )}
-
-          {isAdmin && (followUp.brokerName || followUp.brokerEmail) && (
-            <p className="text-sm text-zinc-700">
-              <span className="font-medium text-zinc-600">Broker:</span>{" "}
-              {followUp.brokerName}
-              {followUp.brokerEmail ? ` (${followUp.brokerEmail})` : ""}
             </p>
           )}
 
@@ -888,8 +871,6 @@ const TAB_CONFIG: Array<{
 export function FollowUpsPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [brokers, setBrokers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [pendingFollowUps, setPendingFollowUps] = useState<FollowUpEnriched[]>(
     [],
@@ -913,7 +894,6 @@ export function FollowUpsPage() {
   const [priorityFilter, setPriorityFilter] = useState<"all" | CompanyPriority>(
     "all",
   );
-  const [brokerFilter, setBrokerFilter] = useState("all");
 
   const [actionFollowUpId, setActionFollowUpId] = useState<string | null>(null);
   const [scheduleTarget, setScheduleTarget] = useState<{
@@ -931,13 +911,11 @@ export function FollowUpsPage() {
     null,
   );
 
-  const isAdmin = isAdminProfile(profile);
-
   const loadFollowUps = useCallback(
-    async (userId: string, asAdmin: boolean) => {
+    async (userId: string) => {
       setFetchError(null);
 
-      const { data, error } = await fetchFollowUpWorkcenterData(userId, asAdmin);
+      const { data, error } = await fetchFollowUpWorkcenterData(userId);
 
       if (error || !data) {
         setFetchError(
@@ -955,11 +933,8 @@ export function FollowUpsPage() {
   );
 
   const loadDoNotFollowUp = useCallback(
-    async (userId: string, asAdmin: boolean) => {
-      const { data, error } = await fetchDoNotFollowUpFollowUps(
-        userId,
-        asAdmin,
-      );
+    async (userId: string) => {
+      const { data, error } = await fetchDoNotFollowUpFollowUps(userId);
 
       if (error) {
         setFetchError(formatSupabaseError(error));
@@ -972,8 +947,8 @@ export function FollowUpsPage() {
   );
 
   const loadCancelled = useCallback(
-    async (userId: string, asAdmin: boolean) => {
-      const { data, error } = await fetchCancelledFollowUps(userId, asAdmin);
+    async (userId: string) => {
+      const { data, error } = await fetchCancelledFollowUps(userId);
 
       if (error) {
         setFetchError(formatSupabaseError(error));
@@ -993,36 +968,20 @@ export function FollowUpsPage() {
       }
 
       setUser(session.user);
-
-      const { data: userProfile } = await fetchUserProfile(session.user.id);
-      setProfile(userProfile);
-
-      const admin = isAdminProfile(userProfile);
-      if (admin) {
-        const { data: allProfiles } = await fetchAllProfiles();
-        setBrokers(
-          (allProfiles ?? []).filter(
-            (item) =>
-              item.is_active !== false &&
-              (item.role === "broker" || item.role === "admin"),
-          ),
-        );
-      }
-
-      await loadFollowUps(session.user.id, admin);
+      await loadFollowUps(session.user.id);
       setLoading(false);
     });
   }, [router, loadFollowUps]);
 
   useEffect(() => {
     if (statusFilter !== "cancelled" || !user) return;
-    loadCancelled(user.id, isAdmin);
-  }, [statusFilter, user, isAdmin, loadCancelled]);
+    loadCancelled(user.id);
+  }, [statusFilter, user, loadCancelled]);
 
   useEffect(() => {
     if (statusFilter !== "do_not_follow_up" || !user) return;
-    loadDoNotFollowUp(user.id, isAdmin);
-  }, [statusFilter, user, isAdmin, loadDoNotFollowUp]);
+    loadDoNotFollowUp(user.id);
+  }, [statusFilter, user, loadDoNotFollowUp]);
 
   const buckets = useMemo(
     () => bucketFollowUpsWithCompanies(pendingFollowUps),
@@ -1076,13 +1035,6 @@ export function FollowUpsPage() {
 
   const filteredFollowUps = useMemo(() => {
     return baseList.filter((followUp) => {
-      if (
-        brokerFilter !== "all" &&
-        followUp.companyOwnerUserId !== brokerFilter
-      ) {
-        return false;
-      }
-
       if (priorityFilter !== "all" && followUp.companyPriority !== priorityFilter) {
         return false;
       }
@@ -1122,7 +1074,6 @@ export function FollowUpsPage() {
     });
   }, [
     baseList,
-    brokerFilter,
     priorityFilter,
     statusFilter,
     dueDateFilter,
@@ -1150,20 +1101,17 @@ export function FollowUpsPage() {
 
   function canManageFollowUp(followUp: FollowUpEnriched): boolean {
     if (!user) return false;
-    // Admins and super admins can act on any visible follow-up.
-    // Brokers can only act on follow-ups for companies they own.
-    if (isAdmin) return true;
     return followUp.companyOwnerUserId === user.id;
   }
 
   async function refreshData() {
     if (!user) return;
-    await loadFollowUps(user.id, isAdmin);
+    await loadFollowUps(user.id);
     if (statusFilter === "cancelled") {
-      await loadCancelled(user.id, isAdmin);
+      await loadCancelled(user.id);
     }
     if (statusFilter === "do_not_follow_up") {
-      await loadDoNotFollowUp(user.id, isAdmin);
+      await loadDoNotFollowUp(user.id);
     }
   }
 
@@ -1199,7 +1147,6 @@ export function FollowUpsPage() {
       actorUserId: user.id,
       newDueAt: input.newDueAt,
       scheduleMode: input.scheduleMode,
-      asAdmin: isAdmin,
     });
 
     if (error) {
@@ -1268,7 +1215,6 @@ export function FollowUpsPage() {
       companyId: followUp.company_id,
       ownerUserId: followUp.companyOwnerUserId ?? followUp.user_id,
       actorUserId: user.id,
-      asAdmin: isAdmin,
       reason: input.reason,
       notes: input.notes,
       associatedContactId: followUp.contact_id ?? followUp.contactId,
@@ -1320,11 +1266,7 @@ export function FollowUpsPage() {
     <AuthenticatedLayout maxWidthClass="max-w-[1400px]">
       <PageHeader
         title="Follow-ups Work Center"
-        description={
-          isAdmin
-            ? "Daily work center across all brokers — complete and schedule follow-ups for any visible account."
-            : "Your daily work center — see who to contact today, what is overdue, and log outcomes quickly."
-        }
+        description="Your daily work center — see who to contact today, what is overdue, and log outcomes quickly."
       />
 
       {fetchError && <CrmAlert variant="error" className="mb-4">{fetchError}</CrmAlert>}
@@ -1459,31 +1401,6 @@ export function FollowUpsPage() {
               ))}
             </select>
           </div>
-
-          {isAdmin && (
-            <div className="md:col-span-2 xl:col-span-5">
-              <label
-                htmlFor="broker-filter"
-                className="crm-label"
-              >
-                Broker
-              </label>
-              <select
-                id="broker-filter"
-                value={brokerFilter}
-                onChange={(event) => setBrokerFilter(event.target.value)}
-                className="crm-select sm:max-w-md"
-              >
-                <option value="all">All brokers</option>
-                {brokers.map((broker) => (
-                  <option key={broker.id} value={broker.id}>
-                    {getProfileDisplayName(broker)}
-                    {broker.email ? ` (${broker.email})` : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
         </div>
       </CrmCard>
 
@@ -1549,7 +1466,6 @@ export function FollowUpsPage() {
                 key={followUp.id}
                 followUp={followUp}
                 variant={cardVariant}
-                isAdmin={isAdmin}
                 canManage={canManageFollowUp(followUp)}
                 actionLoading={actionFollowUpId === followUp.id}
                 onMarkComplete={(item) =>
@@ -1568,14 +1484,6 @@ export function FollowUpsPage() {
               />
             ))}
           </ul>
-        )}
-
-        {isAdmin && (
-          <p className="mt-4 text-xs text-zinc-500">
-            Admin view: you can complete and schedule follow-ups for any broker.
-            Ownership stays with the assigned broker; your user is recorded as
-            the actor on outcome activities.
-          </p>
         )}
       </CrmCard>
 

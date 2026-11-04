@@ -8,16 +8,38 @@ import {
   type CompanyPriority,
   type FollowUpStatus,
 } from "@/lib/crmConstants";
-import { followUpCreateBlockMessage } from "@/lib/outreachSuppression";
+import {
+  fetchSuppressionIndex,
+  followUpCreateBlockMessage,
+} from "@/lib/outreachSuppression";
+import { isFollowUpOutreachSuppressed } from "@/lib/outreachSuppressionRules";
 import {
   resolveFollowUpSeasonalFields,
   type FollowUpType,
   type FollowUpTypeFormValues,
 } from "@/lib/followUpSeasonal";
 import { enforceBrokerOwnedRows, fetchOwnedCompanyIdsForViewer } from "@/lib/brokerDataAccess";
+import {
+  getWeekBounds,
+  selectFollowUpsForAssignedCompanies,
+} from "@/lib/followUpClassification";
 import { supabase } from "@/lib/supabaseClient";
 
+export {
+  BUSINESS_TIMEZONE,
+  bucketFollowUpsWithCompanies,
+  businessCalendarDate,
+  getDayBounds,
+  getDaysOverdue,
+  getFollowUpBucket,
+  getWeekBounds,
+  selectFollowUpsForAssignedCompanies,
+  type FollowUpBucket,
+} from "@/lib/followUpClassification";
+
 const IN_FILTER_CHUNK_SIZE = 80;
+/** Read size only. Pending follow-ups are paged until exhausted so a later due date is never dropped before classification. */
+const FOLLOW_UP_PAGE_SIZE = 1000;
 
 function logFollowUpsQueryError(
   context: string,
@@ -68,7 +90,6 @@ async function fetchCompanyRowsByIds(
   return { data: rows, error: null };
 }
 
-export const FOLLOW_UP_PENDING_LIMIT = 200;
 export const FOLLOW_UP_COMPLETED_LIMIT = 100;
 
 export type { FollowUpStatus };
@@ -120,67 +141,6 @@ export interface FollowUpEnriched extends FollowUpWithCompany {
 export interface FollowUpWorkcenterData {
   pending: FollowUpEnriched[];
   completed: FollowUpEnriched[];
-}
-
-export type FollowUpBucket = "overdue" | "today" | "upcoming";
-
-export function getDayBounds(reference: Date = new Date()) {
-  const start = new Date(reference);
-  start.setHours(0, 0, 0, 0);
-
-  const end = new Date(reference);
-  end.setHours(23, 59, 59, 999);
-
-  return { start, end };
-}
-
-export function getFollowUpBucket(dueAt: string): FollowUpBucket {
-  const due = new Date(dueAt);
-  if (Number.isNaN(due.getTime())) return "upcoming";
-
-  const { start, end } = getDayBounds();
-
-  if (due < start) return "overdue";
-  if (due <= end) return "today";
-  return "upcoming";
-}
-
-export function bucketFollowUpsWithCompanies<T extends FollowUpWithCompany>(
-  followUps: T[],
-): Record<FollowUpBucket, T[]> {
-  const overdue: T[] = [];
-  const today: T[] = [];
-  const upcoming: T[] = [];
-
-  for (const followUp of followUps) {
-    const bucket = getFollowUpBucket(followUp.due_at);
-    if (bucket === "overdue") overdue.push(followUp);
-    else if (bucket === "today") today.push(followUp);
-    else upcoming.push(followUp);
-  }
-
-  const byDueAsc = (a: T, b: T) =>
-    new Date(a.due_at).getTime() - new Date(b.due_at).getTime();
-
-  overdue.sort(byDueAsc);
-  today.sort(byDueAsc);
-  upcoming.sort(byDueAsc);
-
-  return { overdue, today, upcoming };
-}
-
-export function getWeekBounds(reference: Date = new Date()) {
-  const start = new Date(reference);
-  const day = start.getDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  start.setDate(start.getDate() + mondayOffset);
-  start.setHours(0, 0, 0, 0);
-
-  const end = new Date(start);
-  end.setDate(end.getDate() + 6);
-  end.setHours(23, 59, 59, 999);
-
-  return { start, end };
 }
 
 export function isDueThisWeek(dueAt: string): boolean {
@@ -270,29 +230,19 @@ function buildPrimaryContactByCompany(
   return result;
 }
 
-function filterFollowUpsToOwnedCompanies(
-  rows: FollowUpRecord[],
-  ownedCompanyIds: Set<string>,
-): FollowUpRecord[] {
-  return rows.filter((row) => ownedCompanyIds.has(row.company_id));
-}
-
-async function resolvePersonalFollowUpCompanyScope(
-  userId: string,
-  asAdmin: boolean,
-): Promise<{
-  ownedCompanyIds: Set<string> | null;
+/**
+ * Companies assigned to this user. Administrators use the same personal
+ * scope here. Cross-broker oversight stays in the dedicated admin modules.
+ */
+async function resolvePersonalFollowUpCompanyScope(userId: string): Promise<{
+  ownedCompanyIds: Set<string>;
   error: { message?: string; code?: string; details?: string } | null;
 }> {
-  if (asAdmin) {
-    return { ownedCompanyIds: null, error: null };
-  }
-
   const { data, error } = await fetchOwnedCompanyIdsForViewer(userId);
 
   if (error) {
     logFollowUpsQueryError("resolvePersonalFollowUpCompanyScope", error);
-    return { ownedCompanyIds: null, error };
+    return { ownedCompanyIds: new Set(), error };
   }
 
   return { ownedCompanyIds: new Set(data), error: null };
@@ -345,21 +295,37 @@ async function fetchContactsForCompanies(
     return { data: [], error: null };
   }
 
-  let query = supabase
-    .from("contacts")
-    .select("id, company_id, first_name, last_name, is_primary")
-    .in("company_id", companyIds);
+  const rows: ContactJoinRow[] = [];
 
-  if (!asAdmin) {
-    query = query.eq("user_id", userId);
+  for (let index = 0; index < companyIds.length; index += IN_FILTER_CHUNK_SIZE) {
+    const chunk = companyIds.slice(index, index + IN_FILTER_CHUNK_SIZE);
+    let offset = 0;
+
+    while (true) {
+      let query = supabase
+        .from("contacts")
+        .select("id, company_id, first_name, last_name, is_primary")
+        .in("company_id", chunk)
+        .order("id", { ascending: true })
+        .range(offset, offset + FOLLOW_UP_PAGE_SIZE - 1);
+
+      if (!asAdmin) {
+        query = query.eq("user_id", userId);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        return { data: [], error };
+      }
+
+      const batch = (data as ContactJoinRow[]) ?? [];
+      rows.push(...batch);
+      if (batch.length < FOLLOW_UP_PAGE_SIZE) break;
+      offset += FOLLOW_UP_PAGE_SIZE;
+    }
   }
 
-  const { data, error } = await query;
-
-  return {
-    data: (data as ContactJoinRow[]) ?? [],
-    error,
-  };
+  return { data: rows, error: null };
 }
 
 async function fetchProfilesForUsers(
@@ -623,19 +589,191 @@ export async function fetchPendingFollowUpsForCompany(
   };
 }
 
-export async function fetchPendingFollowUpsForUser(
-  userId: string,
-): Promise<{ data: FollowUpRecord[]; error: { message?: string } | null }> {
-  const { data, error } = await supabase
+async function fetchFollowUpPage(input: {
+  from: number;
+  to: number;
+  status: FollowUpStatus;
+  userId?: string;
+  companyIds?: string[];
+  completedFrom?: string;
+  completedTo?: string;
+  orderBy: "due_at" | "completed_at" | "disposition_at";
+  ascending: boolean;
+}): Promise<{
+  data: FollowUpRecord[];
+  error: { message?: string; code?: string; details?: string } | null;
+}> {
+  let query = supabase
     .from("follow_ups")
     .select(FOLLOW_UP_SELECT_FIELDS)
-    .eq("user_id", userId)
-    .eq("status", "pending")
-    .order("due_at", { ascending: true });
+    .eq("status", input.status)
+    .order(input.orderBy, { ascending: input.ascending })
+    .order("id", { ascending: true })
+    .range(input.from, input.to);
 
+  if (input.userId) {
+    query = query.eq("user_id", input.userId);
+  }
+
+  if (input.companyIds) {
+    query = query.in("company_id", input.companyIds);
+  }
+
+  if (input.completedFrom) {
+    query = query.gte("completed_at", input.completedFrom);
+  }
+
+  if (input.completedTo) {
+    query = query.lte("completed_at", input.completedTo);
+  }
+
+  const { data, error } = await query;
   return {
     data: (data as FollowUpRecord[]) ?? [],
     error,
+  };
+}
+
+/**
+ * Load every matching follow-up. Do not cap this with a global LIMIT:
+ * the oldest pending rows are overdue, so a short page hides every
+ * follow-up that is due today or upcoming.
+ */
+async function fetchAllFollowUpRows(input: {
+  status: FollowUpStatus;
+  userId?: string;
+  companyIds?: string[] | null;
+  completedFrom?: string;
+  completedTo?: string;
+  orderBy: "due_at" | "completed_at" | "disposition_at";
+  ascending: boolean;
+}): Promise<{
+  data: FollowUpRecord[];
+  error: { message?: string; code?: string; details?: string } | null;
+}> {
+  if (input.companyIds && input.companyIds.length === 0) {
+    return { data: [], error: null };
+  }
+
+  const companyChunks = input.companyIds
+    ? Array.from(
+        { length: Math.ceil(input.companyIds.length / IN_FILTER_CHUNK_SIZE) },
+        (_, index) =>
+          input.companyIds!.slice(
+            index * IN_FILTER_CHUNK_SIZE,
+            (index + 1) * IN_FILTER_CHUNK_SIZE,
+          ),
+      )
+    : [undefined];
+
+  const rows: FollowUpRecord[] = [];
+
+  for (const companyIds of companyChunks) {
+    let offset = 0;
+
+    while (true) {
+      const { data, error } = await fetchFollowUpPage({
+        from: offset,
+        to: offset + FOLLOW_UP_PAGE_SIZE - 1,
+        status: input.status,
+        userId: input.userId,
+        companyIds,
+        completedFrom: input.completedFrom,
+        completedTo: input.completedTo,
+        orderBy: input.orderBy,
+        ascending: input.ascending,
+      });
+
+      if (error) {
+        return { data: [], error };
+      }
+
+      rows.push(...data);
+      if (data.length < FOLLOW_UP_PAGE_SIZE) break;
+      offset += FOLLOW_UP_PAGE_SIZE;
+    }
+  }
+
+  return { data: rows, error: null };
+}
+
+async function fetchPersonalFollowUpsByStatus(input: {
+  userId: string;
+  status: FollowUpStatus;
+  orderBy: "due_at" | "completed_at" | "disposition_at";
+  ascending: boolean;
+  completedFrom?: string;
+  completedTo?: string;
+  limit?: number;
+}): Promise<{
+  data: FollowUpRecord[];
+  error: { message?: string; code?: string; details?: string } | null;
+}> {
+  const { ownedCompanyIds, error: scopeError } =
+    await resolvePersonalFollowUpCompanyScope(input.userId);
+
+  if (scopeError) {
+    return { data: [], error: scopeError };
+  }
+
+  const result = await fetchAllFollowUpRows({
+    status: input.status,
+    companyIds: [...ownedCompanyIds],
+    completedFrom: input.completedFrom,
+    completedTo: input.completedTo,
+    orderBy: input.orderBy,
+    ascending: input.ascending,
+  });
+
+  if (result.error) {
+    return result;
+  }
+
+  const assigned = selectFollowUpsForAssignedCompanies(
+    result.data,
+    ownedCompanyIds,
+  );
+  const sorted = [...assigned].sort((left, right) => {
+    const leftTime = new Date(left[input.orderBy] ?? left.due_at).getTime();
+    const rightTime = new Date(right[input.orderBy] ?? right.due_at).getTime();
+    return input.ascending ? leftTime - rightTime : rightTime - leftTime;
+  });
+
+  return {
+    data: input.limit ? sorted.slice(0, input.limit) : sorted,
+    error: null,
+  };
+}
+
+/**
+ * Pending follow-ups for companies assigned to this user.
+ * The company filter is part of the database query. Administrator role
+ * does not widen it. Dashboard and Follow-ups Work Center both use this.
+ */
+export async function fetchPendingFollowUpsForUser(
+  userId: string,
+): Promise<{ data: FollowUpRecord[]; error: { message?: string } | null }> {
+  const result = await fetchPersonalFollowUpsByStatus({
+    userId,
+    status: "pending",
+    orderBy: "due_at",
+    ascending: true,
+  });
+
+  if (result.error) {
+    return result;
+  }
+
+  const suppression = await fetchSuppressionIndex(supabase, { userId });
+  if (suppression.error) {
+    return { data: [], error: suppression.error };
+  }
+
+  return {
+    data: result.data.filter(
+      (followUp) => !isFollowUpOutreachSuppressed(suppression.index, followUp),
+    ),
+    error: null,
   };
 }
 
@@ -693,49 +831,22 @@ export async function fetchPendingFollowUpsWithCompanies(
 
 export async function fetchFollowUpWorkcenterData(
   userId: string,
-  asAdmin = false,
 ): Promise<{
   data: FollowUpWorkcenterData;
   error: { message?: string } | null;
 }> {
   const { start: weekStart, end: weekEnd } = getWeekBounds();
 
-  const { ownedCompanyIds, error: scopeError } =
-    await resolvePersonalFollowUpCompanyScope(userId, asAdmin);
-
-  if (scopeError) {
-    return {
-      data: { pending: [], completed: [] },
-      error: scopeError,
-    };
-  }
-
-  if (ownedCompanyIds && ownedCompanyIds.size === 0) {
-    return {
-      data: { pending: [], completed: [] },
-      error: null,
-    };
-  }
-
-  const pendingQuery = supabase
-    .from("follow_ups")
-    .select(FOLLOW_UP_SELECT_FIELDS)
-    .eq("status", "pending")
-    .order("due_at", { ascending: true })
-    .limit(FOLLOW_UP_PENDING_LIMIT);
-
-  const completedQuery = supabase
-    .from("follow_ups")
-    .select(FOLLOW_UP_SELECT_FIELDS)
-    .eq("status", "completed")
-    .gte("completed_at", weekStart.toISOString())
-    .lte("completed_at", weekEnd.toISOString())
-    .order("completed_at", { ascending: false })
-    .limit(FOLLOW_UP_COMPLETED_LIMIT);
-
   const [pendingResult, completedResult] = await Promise.all([
-    pendingQuery,
-    completedQuery,
+    fetchPendingFollowUpsForUser(userId),
+    fetchPersonalFollowUpsByStatus({
+      userId,
+      status: "completed",
+      completedFrom: weekStart.toISOString(),
+      completedTo: weekEnd.toISOString(),
+      orderBy: "completed_at",
+      ascending: false,
+    }),
   ]);
 
   if (pendingResult.error) {
@@ -754,36 +865,12 @@ export async function fetchFollowUpWorkcenterData(
     };
   }
 
-  const pendingRows = ownedCompanyIds
-    ? filterFollowUpsToOwnedCompanies(
-        (pendingResult.data as FollowUpRecord[]) ?? [],
-        ownedCompanyIds,
-      )
-    : enforceBrokerOwnedRows(
-        (pendingResult.data as FollowUpRecord[]) ?? [],
-        userId,
-        {
-          page: "fetchFollowUpWorkcenterData:pending",
-          brokerFacingRoute: !asAdmin,
-        },
-      );
-  const completedRows = ownedCompanyIds
-    ? filterFollowUpsToOwnedCompanies(
-        (completedResult.data as FollowUpRecord[]) ?? [],
-        ownedCompanyIds,
-      )
-    : enforceBrokerOwnedRows(
-        (completedResult.data as FollowUpRecord[]) ?? [],
-        userId,
-        {
-          page: "fetchFollowUpWorkcenterData:completed",
-          brokerFacingRoute: !asAdmin,
-        },
-      );
+  const pendingRows = pendingResult.data;
+  const completedRows = completedResult.data;
 
   const [pendingEnriched, completedEnriched] = await Promise.all([
-    enrichFollowUpRecords(pendingRows, userId, asAdmin),
-    enrichCompletedFollowUpRecords(completedRows, userId, asAdmin),
+    enrichFollowUpRecords(pendingRows, userId, false),
+    enrichCompletedFollowUpRecords(completedRows, userId, false),
   ]);
 
   if (pendingEnriched.error) {
@@ -811,39 +898,24 @@ export async function fetchFollowUpWorkcenterData(
 
 export async function fetchCancelledFollowUps(
   userId: string,
-  asAdmin = false,
 ): Promise<{
   data: FollowUpEnriched[];
   error: { message?: string } | null;
 }> {
-  const { ownedCompanyIds, error: scopeError } =
-    await resolvePersonalFollowUpCompanyScope(userId, asAdmin);
-
-  if (scopeError) {
-    return { data: [], error: scopeError };
-  }
-
-  if (ownedCompanyIds && ownedCompanyIds.size === 0) {
-    return { data: [], error: null };
-  }
-
-  const { data, error } = await supabase
-    .from("follow_ups")
-    .select(FOLLOW_UP_SELECT_FIELDS)
-    .eq("status", "cancelled")
-    .order("updated_at", { ascending: false })
-    .limit(FOLLOW_UP_COMPLETED_LIMIT);
+  const { data, error } = await fetchPersonalFollowUpsByStatus({
+    userId,
+    status: "cancelled",
+    orderBy: "due_at",
+    ascending: false,
+    limit: FOLLOW_UP_COMPLETED_LIMIT,
+  });
 
   if (error) {
     logFollowUpsQueryError("fetchCancelledFollowUps", error);
     return { data: [], error };
   }
 
-  const rows = ownedCompanyIds
-    ? filterFollowUpsToOwnedCompanies((data as FollowUpRecord[]) ?? [], ownedCompanyIds)
-    : ((data as FollowUpRecord[]) ?? []);
-
-  return enrichFollowUpRecords(rows, userId, asAdmin);
+  return enrichFollowUpRecords(data, userId, false);
 }
 
 async function attachDispositionActors(
@@ -876,42 +948,24 @@ async function attachDispositionActors(
 
 export async function fetchDoNotFollowUpFollowUps(
   userId: string,
-  asAdmin = false,
 ): Promise<{
   data: FollowUpEnriched[];
   error: { message?: string } | null;
 }> {
-  const { ownedCompanyIds, error: scopeError } =
-    await resolvePersonalFollowUpCompanyScope(userId, asAdmin);
-
-  if (scopeError) {
-    return { data: [], error: scopeError };
-  }
-
-  if (ownedCompanyIds && ownedCompanyIds.size === 0) {
-    return { data: [], error: null };
-  }
-
-  const { data, error } = await supabase
-    .from("follow_ups")
-    .select(FOLLOW_UP_SELECT_FIELDS)
-    .eq("status", "do_not_follow_up")
-    .order("disposition_at", { ascending: false })
-    .limit(FOLLOW_UP_COMPLETED_LIMIT);
+  const { data, error } = await fetchPersonalFollowUpsByStatus({
+    userId,
+    status: "do_not_follow_up",
+    orderBy: "disposition_at",
+    ascending: false,
+    limit: FOLLOW_UP_COMPLETED_LIMIT,
+  });
 
   if (error) {
     logFollowUpsQueryError("fetchDoNotFollowUpFollowUps", error);
     return { data: [], error };
   }
 
-  const rows = ownedCompanyIds
-    ? filterFollowUpsToOwnedCompanies(
-        (data as FollowUpRecord[]) ?? [],
-        ownedCompanyIds,
-      )
-    : ((data as FollowUpRecord[]) ?? []);
-
-  const enriched = await enrichFollowUpRecords(rows, userId, asAdmin);
+  const enriched = await enrichFollowUpRecords(data, userId, false);
   if (enriched.error) {
     return enriched;
   }
