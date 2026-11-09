@@ -18,6 +18,11 @@ import {
   type CrmOwnershipInspection,
   type CrmReassignmentCounts,
 } from "@/lib/crmOwnership";
+import {
+  detachResultIsComplete,
+  formatAuthDeleteBlockedMessage,
+  formatHistoricalDetachError,
+} from "@/lib/userDeletionGuard";
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin";
 import { assertSafeInviteRedirect } from "@/lib/appUrl";
 import { sendInvitationEmail } from "@/lib/invitationEmail";
@@ -940,6 +945,7 @@ const HISTORICAL_USER_REFERENCES = [
   ["follow_ups", "disposition_by"],
   ["outreach_suppressions", "created_by"],
   ["outreach_suppressions", "lifted_by"],
+  ["company_delete_events", "user_id"],
 ] as const;
 
 interface DetachedHistoricalReference {
@@ -1054,7 +1060,11 @@ async function detachHistoricalUserReferences(
         message: listed.error.message,
       });
       throw new UserDeleteBlockedError(
-        `This user cannot be permanently deleted because ${table}.${column} still references this account. ${listed.error.message ?? "The reference could not be read."} No companies, contacts, follow-ups, or activities were removed.`,
+        formatHistoricalDetachError(
+          table,
+          column,
+          listed.error.message ?? "The reference could not be read.",
+        ),
       );
     }
 
@@ -1063,23 +1073,32 @@ async function detachHistoricalUserReferences(
     detached.push({ table, column, ids: listed.ids });
 
     for (const ids of chunkIds(listed.ids, 100)) {
-      const { error } = await admin
+      const { data, error } = await admin
         .from(table)
         .update({ [column]: null })
-        .in("id", ids);
+        .in("id", ids)
+        .select("id");
+      const updatedIds = (data ?? [])
+        .map((row) => row.id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0);
 
-      if (!error) continue;
+      if (!error && detachResultIsComplete(ids, updatedIds)) continue;
 
       await restoreHistoricalUserReferences(admin, targetUserId, detached);
       logCrmRemoval({
         stage: "detach-history",
         targetUserId,
         table,
-        code: error.code,
-        message: error.message,
+        code: error?.code,
+        message: error?.message ?? "Updated row count did not match.",
       });
       throw new UserDeleteBlockedError(
-        `This user cannot be permanently deleted because ${table}.${column} still references this account. ${error.message} No companies, contacts, follow-ups, or activities were removed.`,
+        formatHistoricalDetachError(
+          table,
+          column,
+          error?.message ??
+            `${ids.length - updatedIds.length} of ${ids.length} rows could not be cleared.`,
+        ),
       );
     }
   }
@@ -1152,10 +1171,16 @@ async function hardDeleteAdminUser(
       return { message: USER_ACCESS_REMOVED_MESSAGE };
     }
 
+    const authDetail = [
+      authDeleteError.message,
+      authDeleteError.code ? `code ${authDeleteError.code}` : "",
+      authDeleteError.status ? `HTTP ${authDeleteError.status}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
     if (/foreign key|violates|restrict|database error/i.test(authDeleteError.message)) {
-      throw new UserDeleteBlockedError(
-        `This account was not deleted because a database reference still points at this user. ${authDeleteError.message} No companies, contacts, follow-ups, or activities were removed.`,
-      );
+      throw new UserDeleteBlockedError(formatAuthDeleteBlockedMessage(authDetail));
     }
 
     throw authDeleteError;

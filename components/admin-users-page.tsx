@@ -71,6 +71,7 @@ export function AdminUsersPage() {
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [blockRemovalRetry, setBlockRemovalRetry] = useState(false);
   const removalInFlight = useRef(false);
+  const deleteFeedbackRef = useRef<HTMLParagraphElement>(null);
   const [deleteFeedback, setDeleteFeedback] = useState<{
     type: "success" | "error";
     message: string;
@@ -99,6 +100,11 @@ export function AdminUsersPage() {
       setLoading(false);
     });
   }, [loadUsers]);
+
+  useEffect(() => {
+    if (deleteFeedback?.type !== "error") return;
+    deleteFeedbackRef.current?.scrollIntoView({ block: "center" });
+  }, [deleteFeedback]);
 
   async function handleInvite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -642,6 +648,8 @@ export function AdminUsersPage() {
 
         {deleteFeedback && (
           <p
+            ref={deleteFeedbackRef}
+            role={deleteFeedback.type === "error" ? "alert" : "status"}
             className={`mt-4 whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-sm ${
               deleteFeedback.type === "success"
                 ? "bg-emerald-50 text-emerald-800"
@@ -851,6 +859,14 @@ export function AdminUsersPage() {
         onConfirmDelete={handleConfirmDelete}
         onCheckStatus={handleCheckOwnershipStatus}
       />
+      {deleteFeedback?.type === "error" && (
+        <div
+          role="alert"
+          className="fixed bottom-4 left-1/2 z-50 w-[min(42rem,calc(100%-2rem))] -translate-x-1/2 whitespace-pre-wrap break-words rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 shadow-lg"
+        >
+          {deleteFeedback.message}
+        </div>
+      )}
     </AuthenticatedLayout>
   );
 }
