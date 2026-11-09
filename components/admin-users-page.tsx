@@ -20,7 +20,11 @@ import {
 } from "@/components/admin-delete-user-modal";
 import { compareAssignableOwners } from "@/lib/adminCompanies";
 import { formatDate, formatDateTime } from "@/lib/crmFormat";
-import { decideAfterSlowReassignment } from "@/lib/crmOwnership";
+import {
+  decideAfterSlowReassignment,
+  STILL_OWNS_CRM_RECORDS_MESSAGE,
+  USER_READY_FOR_PERMANENT_DELETION_MESSAGE,
+} from "@/lib/crmOwnership";
 import { isAssignableCompanyOwner, type UserRole } from "@/lib/userProfile";
 import {
   canManageSuperAdminRole,
@@ -188,8 +192,9 @@ export function AdminUsersPage() {
     if (removalInFlight.current) return;
 
     if (!row.ownsCrmRecords) {
+      const label = row.fullName?.trim() || row.email;
       const confirmed = window.confirm(
-        "Are you sure you want to delete this user? This cannot be undone.",
+        `${USER_READY_FOR_PERMANENT_DELETION_MESSAGE}\n\nPermanently delete ${label}? This removes the account from the user list and from sign-in. Companies, contacts, follow-ups, and commercial activities stay with their current owner.`,
       );
 
       if (!confirmed) {
@@ -773,16 +778,25 @@ export function AdminUsersPage() {
                         </p>
                       ) : (
                         <>
-                          {row.ownsCrmRecords && (
-                            <p className="mb-2 max-w-xs text-xs text-amber-800">
-                              This user owns CRM records. You can reassign,
-                              deactivate, or proceed with deletion after
-                              confirmation.
-                            </p>
-                          )}
+                          <p
+                            className={`mb-2 max-w-xs text-xs ${
+                              row.ownsCrmRecords
+                                ? "text-amber-800"
+                                : "text-emerald-800"
+                            }`}
+                          >
+                            {row.ownsCrmRecords
+                              ? STILL_OWNS_CRM_RECORDS_MESSAGE
+                              : USER_READY_FOR_PERMANENT_DELETION_MESSAGE}
+                          </p>
                           <button
                             type="button"
                             disabled={deleteLocked}
+                            title={
+                              row.ownsCrmRecords
+                                ? "Reassign CRM records before permanent deletion"
+                                : "Permanently delete this user"
+                            }
                             onClick={() => handleDeleteClick(row)}
                             className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                           >

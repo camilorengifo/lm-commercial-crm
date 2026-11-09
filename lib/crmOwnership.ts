@@ -62,6 +62,12 @@ export function deletionAllowedAfterReassignment(
   return mandatoryOwnershipRemaining(counts) === 0;
 }
 
+export const STILL_OWNS_CRM_RECORDS_MESSAGE =
+  "This user still owns CRM records. Please reassign all records before deleting.";
+
+export const USER_READY_FOR_PERMANENT_DELETION_MESSAGE =
+  "All CRM records have been reassigned. This user can now be permanently deleted.";
+
 export type SlowReassignmentDecision = {
   autoRetry: false;
   action: "wait" | "retry-allowed" | "complete";

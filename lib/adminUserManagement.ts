@@ -12,8 +12,9 @@ import {
 import {
   deletionAllowedAfterReassignment,
   formatCrmRemovalMessage,
-  mandatoryOwnershipRemaining,
   parseReassignmentCounts,
+  STILL_OWNS_CRM_RECORDS_MESSAGE,
+  USER_READY_FOR_PERMANENT_DELETION_MESSAGE,
   type CrmOwnershipInspection,
   type CrmReassignmentCounts,
 } from "@/lib/crmOwnership";
@@ -30,19 +31,6 @@ import {
 } from "@/lib/primarySuperAdmin";
 
 export { SuperAdminProtectionError };
-
-const CRM_OWNERSHIP_TABLES = [
-  "companies",
-  "contacts",
-  "activities",
-  "follow_ups",
-  "load_opportunities",
-  "company_ai_insights",
-  "outreach_suppressions",
-  "broker_reminder_logs",
-  "user_carriers",
-  "ai_broker_assistant_runs",
-] as const;
 
 const OPTIONAL_OWNERSHIP_TABLES = new Set<string>([
   "outreach_suppressions",
@@ -142,6 +130,24 @@ async function fetchDistinctUserIds(
   }
 
   return ids;
+}
+
+async function fetchOptionalOwnerIds(
+  admin: SupabaseClient,
+  table: string,
+): Promise<string[]> {
+  try {
+    return await fetchDistinctUserIds(admin, table);
+  } catch (error) {
+    const details = error as { message?: string; code?: string };
+    if (
+      OPTIONAL_OWNERSHIP_TABLES.has(table) &&
+      isMissingOwnershipTableError(details)
+    ) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 async function fetchCompanyOwnershipByUser(
@@ -260,6 +266,11 @@ export async function listAdminUsers(): Promise<AdminUserListItem[]> {
     pendingFollowUps,
     opportunityOwnerIds,
     openOpportunitiesByUser,
+    contactOwnerIds,
+    activityOwnerIds,
+    followUpOwnerIds,
+    insightOwnerIds,
+    suppressionOwnerIds,
   ] = await Promise.all([
     admin
       .from("profiles")
@@ -272,6 +283,11 @@ export async function listAdminUsers(): Promise<AdminUserListItem[]> {
     fetchAllPendingFollowUpRows(admin),
     fetchDistinctUserIds(admin, "load_opportunities"),
     fetchOpenOpportunityUserIds(admin),
+    fetchDistinctUserIds(admin, "contacts"),
+    fetchDistinctUserIds(admin, "activities"),
+    fetchDistinctUserIds(admin, "follow_ups"),
+    fetchDistinctUserIds(admin, "company_ai_insights"),
+    fetchOptionalOwnerIds(admin, "outreach_suppressions"),
   ]);
 
   if (profilesResult.error) throw profilesResult.error;
@@ -308,11 +324,15 @@ export async function listAdminUsers(): Promise<AdminUserListItem[]> {
     }
   }
 
-  // ownsCrmRecords: companies + follow_ups + opportunities already loaded; skip 6-table rescan.
+  // Active ownership only. Historical actor columns are not included.
   const usersWithCrmRecords = new Set<string>([
     ...companyOwnerIds,
-    ...pendingFollowUps.map((row) => row.user_id),
+    ...contactOwnerIds,
+    ...activityOwnerIds,
+    ...followUpOwnerIds,
     ...opportunityOwnerIds,
+    ...insightOwnerIds,
+    ...suppressionOwnerIds,
   ]);
 
   const officeNameById = new Map(
@@ -616,22 +636,8 @@ async function userOwnsCrmRecords(
   admin: SupabaseClient,
   userId: string,
 ): Promise<boolean> {
-  const counts = await Promise.all(
-    CRM_OWNERSHIP_TABLES.map(async (table) => {
-      const { count, error } = await admin
-        .from(table)
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", userId);
-
-      if (error) {
-        if (ignoreMissingOptionalTable(table, error)) return 0;
-        throw error;
-      }
-      return count ?? 0;
-    }),
-  );
-
-  return counts.some((count) => count > 0);
+  const inspection = await inspectUserCrmOwnershipAdmin(admin, userId);
+  return !deletionAllowedAfterReassignment(inspection.counts);
 }
 
 async function assertActiveReassignTarget(
@@ -917,50 +923,35 @@ async function deactivateAdminUserAccess(
   return { message: USER_ACCESS_REMOVED_MESSAGE };
 }
 
-async function countByColumn(
-  admin: SupabaseClient,
-  table: string,
-  column: string,
-  userId: string,
-): Promise<number> {
-  const { count, error } = await admin
-    .from(table)
-    .select("id", { count: "exact", head: true })
-    .eq(column, userId);
+const PERMANENT_DELETION_MIGRATION_MESSAGE =
+  "Permanent deletion is unavailable until database migration 043_allow_user_deletion_after_reassignment.sql is applied. No account was deleted.";
 
-  if (error) {
-    logCrmRemoval({
-      stage: "restrict-check",
-      targetUserId: userId,
-      table,
-      code: error.code,
-      message: error.message,
-    });
-    throw error;
-  }
-
-  return count ?? 0;
-}
-
-async function assertNoRestrictingCarrierReferences(
+async function preparePermanentDeletion(
   admin: SupabaseClient,
   targetUserId: string,
-  crmReassigned: boolean,
 ): Promise<void> {
-  const [carriers, carrierContacts] = await Promise.all([
-    countByColumn(admin, "carriers", "created_by", targetUserId),
-    countByColumn(admin, "carrier_contacts", "created_by", targetUserId),
-  ]);
+  const { error } = await admin.rpc("prepare_user_permanent_deletion", {
+    p_user_id: targetUserId,
+  });
 
-  if (carriers === 0 && carrierContacts === 0) return;
+  if (!error) return;
 
-  const ownershipSentence = crmReassigned
-    ? "CRM records were reassigned, and the account is still active."
-    : "No CRM ownership was changed.";
+  logCrmRemoval({
+    stage: "prepare-delete",
+    targetUserId,
+    code: errorCode(error),
+    message: errorMessage(error),
+  });
 
-  throw new UserDeleteBlockedError(
-    `This account was not deleted because carrier directory records list this user as their creator. ${ownershipSentence} Reassign those carrier records before deleting the account.`,
-  );
+  if (isMissingRpcError(error)) {
+    throw new UserDeleteBlockedError(PERMANENT_DELETION_MIGRATION_MESSAGE);
+  }
+
+  if (errorMessage(error).includes("still owns CRM records")) {
+    throw new UserDeleteBlockedError(STILL_OWNS_CRM_RECORDS_MESSAGE);
+  }
+
+  throw new UserDeleteBlockedError(errorMessage(error));
 }
 
 async function hardDeleteAdminUser(
@@ -983,10 +974,16 @@ async function hardDeleteAdminUser(
       return { message: USER_ACCESS_REMOVED_MESSAGE };
     }
 
+    if (/foreign key|violates|restrict/i.test(authDeleteError.message)) {
+      throw new UserDeleteBlockedError(
+        "This account was not deleted because a database reference still points at this user. No companies, contacts, follow-ups, or activities were removed.",
+      );
+    }
+
     throw authDeleteError;
   }
 
-  return { message: USER_ACCESS_REMOVED_MESSAGE };
+  return { message: "User permanently deleted." };
 }
 
 export interface AdminUserRemovalResult {
@@ -1016,9 +1013,7 @@ async function reassignAndVerify(
       counts: inspection.counts,
       message: "Required CRM records remained after reassignment.",
     });
-    throw new UserDeleteBlockedError(
-      `${mandatoryOwnershipRemaining(inspection.counts)} required CRM records are still assigned to this user. The account was not deleted.`,
-    );
+    throw new UserDeleteBlockedError(STILL_OWNS_CRM_RECORDS_MESSAGE);
   }
 
   return counts;
@@ -1051,7 +1046,7 @@ export async function removeAdminUser(input: {
 
   if (input.mode === "reassign" && !ownsRecords) {
     return {
-      message: "This user has no CRM records to reassign.",
+      message: USER_READY_FOR_PERMANENT_DELETION_MESSAGE,
       accountDeleted: false,
       reassignedCompanies: 0,
     };
@@ -1062,7 +1057,11 @@ export async function removeAdminUser(input: {
     return { ...result, accountDeleted: false };
   }
 
-  if (input.mode === "reassign" || ownsRecords) {
+  if (input.mode === "delete" && ownsRecords && !reassignToUserId) {
+    throw new UserDeleteBlockedError(STILL_OWNS_CRM_RECORDS_MESSAGE);
+  }
+
+  if (input.mode === "reassign" || (ownsRecords && reassignToUserId)) {
     if (!reassignToUserId) {
       throw new UserDeleteBlockedError(
         "Select an owner to receive the records.",
@@ -1087,18 +1086,18 @@ export async function removeAdminUser(input: {
 
     if (input.mode === "reassign") {
       return {
-        message: formatCrmRemovalMessage({
+        message: `${formatCrmRemovalMessage({
           counts,
           accountDeleted: false,
           destinationName,
-        }),
+        })} ${USER_READY_FOR_PERMANENT_DELETION_MESSAGE}`,
         reassignedCompanies: counts.companies,
         counts,
         accountDeleted: false,
       };
     }
 
-    await assertNoRestrictingCarrierReferences(admin, targetUserId, true);
+    await preparePermanentDeletion(admin, targetUserId);
 
     logCrmRemoval({
       stage: "delete-auth",
@@ -1121,7 +1120,7 @@ export async function removeAdminUser(input: {
     };
   }
 
-  await assertNoRestrictingCarrierReferences(admin, targetUserId, false);
+  await preparePermanentDeletion(admin, targetUserId);
   logCrmRemoval({ stage: "delete-auth", targetUserId });
   const result = await hardDeleteAdminUser(admin, targetUserId);
   return { ...result, accountDeleted: true };

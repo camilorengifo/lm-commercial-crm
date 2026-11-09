@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo } from "react";
 import type { AdminUserListItem } from "@/lib/adminUserManagement";
+import { STILL_OWNS_CRM_RECORDS_MESSAGE } from "@/lib/crmOwnership";
 import { formatAssignableOwnerLabel } from "@/lib/adminCompanies";
 import type { UserRole } from "@/lib/userProfile";
 
@@ -105,8 +106,7 @@ export function AdminDeleteUserModal({
             </p>
 
             <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              This user owns CRM records. You can reassign, deactivate, or
-              proceed with deletion after confirmation.
+              {STILL_OWNS_CRM_RECORDS_MESSAGE}
             </p>
 
             <div className="mt-4">

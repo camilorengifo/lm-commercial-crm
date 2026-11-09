@@ -6,6 +6,8 @@ import {
   formatCrmRemovalMessage,
   mandatoryOwnershipRemaining,
   parseReassignmentCounts,
+  STILL_OWNS_CRM_RECORDS_MESSAGE,
+  USER_READY_FOR_PERMANENT_DELETION_MESSAGE,
   type CrmReassignmentCounts,
 } from "./crmOwnership";
 
@@ -88,6 +90,14 @@ assert.equal(parseReassignmentCounts({ companies: -1 }), null);
 assert.deepEqual(
   parseReassignmentCounts({ ...EMPTY_REASSIGNMENT_COUNTS, companies: 4 }),
   counts({ companies: 4 }),
+);
+assert.equal(
+  STILL_OWNS_CRM_RECORDS_MESSAGE,
+  "This user still owns CRM records. Please reassign all records before deleting.",
+);
+assert.equal(
+  USER_READY_FOR_PERMANENT_DELETION_MESSAGE,
+  "All CRM records have been reassigned. This user can now be permanently deleted.",
 );
 
 console.log("crm ownership checks passed");
