@@ -230,8 +230,8 @@ export function getWeekBounds(
 }
 
 /**
- * Pending follow-ups only. Callers must exclude completed, cancelled, and
- * do-not-follow-up rows before bucketing.
+ * Calendar bucket for one due instant. This does not look at status.
+ * Open-list membership is applied in bucketFollowUpsWithCompanies.
  *
  * Overdue: due calendar date is before today.
  * Due today: due calendar date is today.
@@ -278,7 +278,15 @@ export function selectFollowUpsForAssignedCompanies<
   );
 }
 
-export function bucketFollowUpsWithCompanies<T extends { due_at: string }>(
+/**
+ * Overdue, due today, and upcoming contain pending follow-ups only.
+ * Completed, cancelled, and do-not-follow-up rows are omitted even when
+ * their due date is in the past or the future. Rows without a status stay
+ * classified by date so date-only callers keep working.
+ */
+export function bucketFollowUpsWithCompanies<
+  T extends { due_at: string; status?: string | null },
+>(
   followUps: T[],
   reference: Date = new Date(),
   timeZone: string = BUSINESS_TIMEZONE,
@@ -288,6 +296,13 @@ export function bucketFollowUpsWithCompanies<T extends { due_at: string }>(
   const upcoming: T[] = [];
 
   for (const followUp of followUps) {
+    if (
+      followUp.status != null &&
+      !isPendingFollowUpStatus(followUp.status)
+    ) {
+      continue;
+    }
+
     const bucket = getFollowUpBucket(followUp.due_at, reference, timeZone);
     if (bucket === "overdue") overdue.push(followUp);
     else if (bucket === "today") today.push(followUp);

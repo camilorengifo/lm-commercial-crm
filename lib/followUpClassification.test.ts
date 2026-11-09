@@ -86,6 +86,41 @@ assert.deepEqual(
   ["later"],
 );
 
+const closedOutOfOpenLists = bucketFollowUpsWithCompanies(
+  [
+    {
+      id: "completed-overdue-date",
+      status: "completed",
+      due_at: "2026-10-06T15:00:00.000Z",
+    },
+    {
+      id: "pending-overdue",
+      status: "pending",
+      due_at: "2026-10-13T15:00:00.000Z",
+    },
+    {
+      id: "completed-future-date",
+      status: "completed",
+      due_at: "2026-11-20T15:00:00.000Z",
+    },
+    {
+      id: "pending-upcoming",
+      status: "pending",
+      due_at: "2026-11-16T15:00:00.000Z",
+    },
+  ],
+  reference,
+);
+assert.deepEqual(
+  closedOutOfOpenLists.overdue.map((row) => row.id),
+  ["pending-overdue"],
+);
+assert.deepEqual(closedOutOfOpenLists.today.map((row) => row.id), []);
+assert.deepEqual(
+  closedOutOfOpenLists.upcoming.map((row) => row.id),
+  ["pending-upcoming"],
+);
+
 // The Work Center used to keep only the oldest 200 pending rows before
 // applying the viewer. Those rows are overdue, so due-today records disappear.
 const pending = [

@@ -34,6 +34,7 @@ import {
   fetchCancelledFollowUps,
   fetchDoNotFollowUpFollowUps,
   fetchFollowUpWorkcenterData,
+  type FollowUpWorkcenterData,
   fromDatetimeLocalValue,
   getFollowUpBucket,
   isCompletedThisWeek,
@@ -936,7 +937,7 @@ export function FollowUpsPage() {
   );
 
   const loadFollowUps = useCallback(
-    async (userId: string) => {
+    async (userId: string): Promise<FollowUpWorkcenterData | null> => {
       setFetchError(null);
 
       const { data, error } = await fetchFollowUpWorkcenterData(userId);
@@ -945,11 +946,12 @@ export function FollowUpsPage() {
         setFetchError(
           formatSupabaseError(error ?? { message: "Unable to load follow-ups." }),
         );
-        return;
+        return null;
       }
 
       setPendingFollowUps(data.pending);
       setCompletedFollowUps(data.completed);
+      return data;
     },
     [],
   );
@@ -1156,52 +1158,6 @@ export function FollowUpsPage() {
     setScheduleTarget({ followUp, outcome });
   }
 
-  function applyConfirmedCompletion(
-    followUp: FollowUpEnriched,
-    completedAt: string,
-    outcome: FollowUpCompletionOutcome,
-    next: { id: string; dueAt: string } | null,
-  ) {
-    const completed: FollowUpEnriched = {
-      ...followUp,
-      status: "completed",
-      due_at: followUp.due_at,
-      completed_at: completedAt,
-      completionOutcome:
-        outcome === "no_response" ? "no_response" : "successful_contact",
-      nextFollowUpDueAt: next?.dueAt ?? null,
-    };
-
-    const scheduled: FollowUpEnriched | null = next
-      ? {
-          ...followUp,
-          id: next.id,
-          status: "pending",
-          due_at: next.dueAt,
-          completed_at: null,
-          created_at: completedAt,
-          disposition_reason: null,
-          disposition_notes: null,
-          disposition_at: null,
-          disposition_by: null,
-          dispositionByName: null,
-          completionOutcome: null,
-          nextFollowUpDueAt: null,
-        }
-      : null;
-
-    setPendingFollowUps((current) => {
-      const remaining = current.filter(
-        (item) => item.id !== followUp.id && item.id !== scheduled?.id,
-      );
-      return scheduled ? [...remaining, scheduled] : remaining;
-    });
-    setCompletedFollowUps((current) => [
-      completed,
-      ...current.filter((item) => item.id !== followUp.id),
-    ]);
-  }
-
   async function handleScheduleConfirm(input: {
     scheduleMode: ScheduleNextMode;
     newDueAt: string;
@@ -1226,22 +1182,35 @@ export function FollowUpsPage() {
       });
 
       if (result.completedAt && result.completedFollowUpId === followUp.id) {
-        const completedFollowUp =
-          result.originalDueAt &&
-          new Date(result.originalDueAt).getTime() ===
-            new Date(followUp.due_at).getTime()
-            ? followUp
-            : { ...followUp, due_at: result.originalDueAt ?? followUp.due_at };
+        const loaded = await loadFollowUps(user.id);
+        if (!loaded) {
+          setScheduleTarget(null);
+          setFetchError(
+            "Follow-up was saved, but the list could not be refreshed. Reload the page.",
+          );
+          return;
+        }
 
-        applyConfirmedCompletion(
-          completedFollowUp,
-          result.completedAt,
-          outcome,
-          result.nextFollowUpId
-            ? { id: result.nextFollowUpId, dueAt: result.newDueAt }
-            : null,
+        const oldStillPending = loaded.pending.some(
+          (item) => item.id === followUp.id,
         );
-        await refreshData();
+        const nextIsPending = result.nextFollowUpId
+          ? loaded.pending.some((item) => item.id === result.nextFollowUpId)
+          : false;
+        const oldIsCompleted = loaded.completed.some(
+          (item) =>
+            item.id === followUp.id && item.status === "completed",
+        );
+
+        if (oldStillPending || !nextIsPending || !oldIsCompleted) {
+          setScheduleTarget(null);
+          setFetchError(
+            result.error
+              ? formatSupabaseError(result.error)
+              : "Saved follow-ups do not match the Follow-up Center lists. Reload the page before trying again.",
+          );
+          return;
+        }
       }
 
       if (result.error) {

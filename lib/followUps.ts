@@ -1014,6 +1014,8 @@ export async function createFollowUp(
 ): Promise<{
   error: { message?: string; code?: string } | null;
   followUpId: string | null;
+  /** Due date stored on the new row. A database trigger may correct a past date. */
+  dueAt: string | null;
 }> {
   const { data: company, error: companyError } = await supabase
     .from("companies")
@@ -1022,11 +1024,11 @@ export async function createFollowUp(
     .maybeSingle();
 
   if (companyError) {
-    return { error: companyError, followUpId: null };
+    return { error: companyError, followUpId: null, dueAt: null };
   }
 
   if (!company?.user_id) {
-    return { error: { message: "Company not found." }, followUpId: null };
+    return { error: { message: "Company not found." }, followUpId: null, dueAt: null };
   }
 
   const ownerUserId = company.user_id as string;
@@ -1041,13 +1043,14 @@ export async function createFollowUp(
       .maybeSingle();
 
     if (contactError) {
-      return { error: contactError, followUpId: null };
+      return { error: contactError, followUpId: null, dueAt: null };
     }
 
     if (!contact) {
       return {
         error: { message: "Contact does not belong to this company." },
         followUpId: null,
+        dueAt: null,
       };
     }
   }
@@ -1058,11 +1061,11 @@ export async function createFollowUp(
   });
 
   if (block.error) {
-    return { error: block.error, followUpId: null };
+    return { error: block.error, followUpId: null, dueAt: null };
   }
 
   if (block.message) {
-    return { error: { message: block.message }, followUpId: null };
+    return { error: { message: block.message }, followUpId: null, dueAt: null };
   }
 
   const seasonalFields = input.typeFields
@@ -1085,11 +1088,11 @@ export async function createFollowUp(
       source_follow_up_id: input.sourceFollowUpId ?? null,
       ...seasonalFields,
     })
-    .select("id")
+    .select("id, due_at")
     .maybeSingle();
 
   if (error) {
-    return { error, followUpId: null };
+    return { error, followUpId: null, dueAt: null };
   }
 
   const syncResult = await syncCompanyNextFollowUpAt(
@@ -1098,10 +1101,18 @@ export async function createFollowUp(
   );
 
   if (syncResult.error) {
-    return { error: syncResult.error, followUpId: data?.id ?? null };
+    return {
+      error: syncResult.error,
+      followUpId: data?.id ?? null,
+      dueAt: (data?.due_at as string | undefined) ?? null,
+    };
   }
 
-  return { error: null, followUpId: data?.id ?? null };
+  return {
+    error: null,
+    followUpId: data?.id ?? null,
+    dueAt: (data?.due_at as string | undefined) ?? null,
+  };
 }
 
 export async function syncCompanyNextFollowUpAt(
