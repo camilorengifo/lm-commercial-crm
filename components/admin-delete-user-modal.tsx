@@ -26,6 +26,7 @@ export function AdminDeleteUserModal({
   progress,
   blockRetry,
   error,
+  blockingMessage,
   onReassignToUserIdChange,
   onConfirmTextChange,
   onCancel,
@@ -45,6 +46,7 @@ export function AdminDeleteUserModal({
   progress: string | null;
   blockRetry: boolean;
   error: string | null;
+  blockingMessage: string | null;
   onReassignToUserIdChange: (userId: string) => void;
   onConfirmTextChange: (text: string) => void;
   onCancel: () => void;
@@ -105,8 +107,8 @@ export function AdminDeleteUserModal({
               records. Are you sure you want to proceed?
             </p>
 
-            <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              {STILL_OWNS_CRM_RECORDS_MESSAGE}
+            <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {blockingMessage || STILL_OWNS_CRM_RECORDS_MESSAGE}
             </p>
 
             <div className="mt-4">
@@ -144,7 +146,7 @@ export function AdminDeleteUserModal({
             )}
 
             {error && (
-              <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
                 {error}
               </p>
             )}
@@ -267,7 +269,7 @@ export function AdminDeleteUserModal({
             )}
 
             {error && (
-              <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
                 {error}
               </p>
             )}

@@ -68,6 +68,31 @@ export const STILL_OWNS_CRM_RECORDS_MESSAGE =
 export const USER_READY_FOR_PERMANENT_DELETION_MESSAGE =
   "All CRM records have been reassigned. This user can now be permanently deleted.";
 
+const OWNERSHIP_BLOCK_LABELS: Array<
+  [keyof CrmReassignmentCounts, string, string]
+> = [
+  ["companies", "company", "companies"],
+  ["contacts", "contact", "contacts"],
+  ["activities", "activity", "activities"],
+  ["followUps", "follow-up", "follow-ups"],
+  ["loadOpportunities", "opportunity", "opportunities"],
+  ["companyAiInsights", "insight", "insights"],
+  ["outreachSuppressions", "suppression", "suppressions"],
+];
+
+export function formatOwnershipBlockMessage(
+  counts: CrmReassignmentCounts,
+): string {
+  const parts = OWNERSHIP_BLOCK_LABELS.flatMap(([key, singular, plural]) => {
+    const count = counts[key];
+    if (count <= 0) return [];
+    return [`${count} ${count === 1 ? singular : plural}`];
+  });
+
+  if (parts.length === 0) return STILL_OWNS_CRM_RECORDS_MESSAGE;
+  return `${STILL_OWNS_CRM_RECORDS_MESSAGE} Still assigned: ${parts.join(", ")}.`;
+}
+
 export type SlowReassignmentDecision = {
   autoRetry: false;
   action: "wait" | "retry-allowed" | "complete";

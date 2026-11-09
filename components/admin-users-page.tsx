@@ -22,6 +22,7 @@ import { compareAssignableOwners } from "@/lib/adminCompanies";
 import { formatDate, formatDateTime } from "@/lib/crmFormat";
 import {
   decideAfterSlowReassignment,
+  formatOwnershipBlockMessage,
   STILL_OWNS_CRM_RECORDS_MESSAGE,
   USER_READY_FOR_PERMANENT_DELETION_MESSAGE,
 } from "@/lib/crmOwnership";
@@ -63,6 +64,9 @@ export function AdminUsersPage() {
   const [deleteReassignToUserId, setDeleteReassignToUserId] = useState("");
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deleteModalError, setDeleteModalError] = useState<string | null>(null);
+  const [ownershipBlockMessage, setOwnershipBlockMessage] = useState<
+    string | null
+  >(null);
   const [removalProgress, setRemovalProgress] = useState<string | null>(null);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [blockRemovalRetry, setBlockRemovalRetry] = useState(false);
@@ -183,6 +187,7 @@ export function AdminUsersPage() {
     setDeleteReassignToUserId("");
     setDeleteConfirmText("");
     setDeleteModalError(null);
+    setOwnershipBlockMessage(null);
     setRemovalProgress(null);
     setStatusNotice(null);
     setBlockRemovalRetry(false);
@@ -240,9 +245,17 @@ export function AdminUsersPage() {
     setDeleteReassignToUserId("");
     setDeleteConfirmText("");
     setDeleteModalError(null);
+    setOwnershipBlockMessage(null);
     setRemovalProgress(null);
     setStatusNotice(null);
     setBlockRemovalRetry(false);
+
+    const status = await fetchUserCrmOwnership(row.id);
+    if (status.data) {
+      setOwnershipBlockMessage(
+        formatOwnershipBlockMessage(status.data.counts),
+      );
+    }
   }
 
   function closeDeleteModal() {
@@ -287,6 +300,10 @@ export function AdminUsersPage() {
       );
       return;
     }
+
+    setOwnershipBlockMessage(
+      formatOwnershipBlockMessage(status.data.counts),
+    );
 
     const decision = decideAfterSlowReassignment({
       inProgress: status.data.inProgress,
@@ -625,7 +642,7 @@ export function AdminUsersPage() {
 
         {deleteFeedback && (
           <p
-            className={`mt-4 rounded-lg px-3 py-2 text-sm ${
+            className={`mt-4 whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-sm ${
               deleteFeedback.type === "success"
                 ? "bg-emerald-50 text-emerald-800"
                 : "bg-red-50 text-red-700"
@@ -824,6 +841,7 @@ export function AdminUsersPage() {
         progress={removalProgress ?? statusNotice}
         blockRetry={blockRemovalRetry}
         error={deleteModalError}
+        blockingMessage={ownershipBlockMessage}
         onReassignToUserIdChange={setDeleteReassignToUserId}
         onConfirmTextChange={setDeleteConfirmText}
         onCancel={closeDeleteModal}

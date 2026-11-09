@@ -12,8 +12,8 @@ import {
 import {
   deletionAllowedAfterReassignment,
   formatCrmRemovalMessage,
+  formatOwnershipBlockMessage,
   parseReassignmentCounts,
-  STILL_OWNS_CRM_RECORDS_MESSAGE,
   USER_READY_FOR_PERMANENT_DELETION_MESSAGE,
   type CrmOwnershipInspection,
   type CrmReassignmentCounts,
@@ -926,6 +926,181 @@ async function deactivateAdminUserAccess(
 const PERMANENT_DELETION_MIGRATION_MESSAGE =
   "Permanent deletion is unavailable until database migration 043_allow_user_deletion_after_reassignment.sql is applied. No account was deleted.";
 
+const HISTORICAL_USER_REFERENCES = [
+  ["broker_reminder_logs", "user_id"],
+  ["user_invitations", "auth_user_id"],
+  ["carriers", "created_by"],
+  ["carriers", "updated_by"],
+  ["carrier_contacts", "created_by"],
+  ["outreach_draft_feedback", "user_id"],
+  ["activities", "updated_by"],
+  ["activity_edit_audits", "editor_user_id"],
+  ["companies", "deleted_by"],
+  ["companies", "archived_by"],
+  ["follow_ups", "disposition_by"],
+  ["outreach_suppressions", "created_by"],
+  ["outreach_suppressions", "lifted_by"],
+] as const;
+
+interface DetachedHistoricalReference {
+  table: string;
+  column: string;
+  ids: string[];
+}
+
+function isMissingHistoricalColumnError(error: {
+  message?: string;
+  code?: string;
+}): boolean {
+  const message = (error.message ?? "").toLowerCase();
+  return (
+    isMissingOwnershipTableError(error) ||
+    error.code === "42703" ||
+    error.code === "PGRST204" ||
+    (message.includes("could not find the") && message.includes("column"))
+  );
+}
+
+function chunkIds(ids: string[], size: number): string[][] {
+  const chunks: string[][] = [];
+  for (let index = 0; index < ids.length; index += size) {
+    chunks.push(ids.slice(index, index + size));
+  }
+  return chunks;
+}
+
+async function listHistoricalReferenceIds(
+  admin: SupabaseClient,
+  table: string,
+  column: string,
+  targetUserId: string,
+): Promise<{ ids: string[]; missing: boolean; error: { message?: string; code?: string } | null }> {
+  const ids: string[] = [];
+  const pageSize = 1000;
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await admin
+      .from(table)
+      .select("id")
+      .eq(column, targetUserId)
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      return {
+        ids: [],
+        missing: isMissingHistoricalColumnError(error),
+        error,
+      };
+    }
+
+    const page = (data ?? [])
+      .map((row) => row.id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
+    ids.push(...page);
+    if (page.length < pageSize) break;
+  }
+
+  return { ids, missing: false, error: null };
+}
+
+async function restoreHistoricalUserReferences(
+  admin: SupabaseClient,
+  targetUserId: string,
+  detached: DetachedHistoricalReference[],
+): Promise<void> {
+  for (const item of [...detached].reverse()) {
+    for (const ids of chunkIds(item.ids, 100)) {
+      const { error } = await admin
+        .from(item.table)
+        .update({ [item.column]: targetUserId })
+        .in("id", ids);
+
+      if (error) {
+        logCrmRemoval({
+          stage: "restore-history",
+          targetUserId,
+          table: item.table,
+          code: error.code,
+          message: error.message,
+        });
+      }
+    }
+  }
+}
+
+async function detachHistoricalUserReferences(
+  admin: SupabaseClient,
+  targetUserId: string,
+): Promise<DetachedHistoricalReference[]> {
+  const detached: DetachedHistoricalReference[] = [];
+
+  for (const [table, column] of HISTORICAL_USER_REFERENCES) {
+    const listed = await listHistoricalReferenceIds(
+      admin,
+      table,
+      column,
+      targetUserId,
+    );
+
+    if (listed.missing) continue;
+
+    if (listed.error) {
+      await restoreHistoricalUserReferences(admin, targetUserId, detached);
+      logCrmRemoval({
+        stage: "detach-history",
+        targetUserId,
+        table,
+        code: listed.error.code,
+        message: listed.error.message,
+      });
+      throw new UserDeleteBlockedError(
+        `This user cannot be permanently deleted because ${table}.${column} still references this account. ${listed.error.message ?? "The reference could not be read."} No companies, contacts, follow-ups, or activities were removed.`,
+      );
+    }
+
+    if (listed.ids.length === 0) continue;
+
+    detached.push({ table, column, ids: listed.ids });
+
+    for (const ids of chunkIds(listed.ids, 100)) {
+      const { error } = await admin
+        .from(table)
+        .update({ [column]: null })
+        .in("id", ids);
+
+      if (!error) continue;
+
+      await restoreHistoricalUserReferences(admin, targetUserId, detached);
+      logCrmRemoval({
+        stage: "detach-history",
+        targetUserId,
+        table,
+        code: error.code,
+        message: error.message,
+      });
+      throw new UserDeleteBlockedError(
+        `This user cannot be permanently deleted because ${table}.${column} still references this account. ${error.message} No companies, contacts, follow-ups, or activities were removed.`,
+      );
+    }
+  }
+
+  return detached;
+}
+
+async function deletePreparedAdminUser(
+  admin: SupabaseClient,
+  targetUserId: string,
+): Promise<{ message: string }> {
+  const detached = await detachHistoricalUserReferences(admin, targetUserId);
+
+  try {
+    return await hardDeleteAdminUser(admin, targetUserId);
+  } catch (error) {
+    await restoreHistoricalUserReferences(admin, targetUserId, detached);
+    throw error;
+  }
+}
+
 async function preparePermanentDeletion(
   admin: SupabaseClient,
   targetUserId: string,
@@ -948,7 +1123,10 @@ async function preparePermanentDeletion(
   }
 
   if (errorMessage(error).includes("still owns CRM records")) {
-    throw new UserDeleteBlockedError(STILL_OWNS_CRM_RECORDS_MESSAGE);
+    const inspection = await inspectUserCrmOwnershipAdmin(admin, targetUserId);
+    throw new UserDeleteBlockedError(
+      formatOwnershipBlockMessage(inspection.counts),
+    );
   }
 
   throw new UserDeleteBlockedError(errorMessage(error));
@@ -974,9 +1152,9 @@ async function hardDeleteAdminUser(
       return { message: USER_ACCESS_REMOVED_MESSAGE };
     }
 
-    if (/foreign key|violates|restrict/i.test(authDeleteError.message)) {
+    if (/foreign key|violates|restrict|database error/i.test(authDeleteError.message)) {
       throw new UserDeleteBlockedError(
-        "This account was not deleted because a database reference still points at this user. No companies, contacts, follow-ups, or activities were removed.",
+        `This account was not deleted because a database reference still points at this user. ${authDeleteError.message} No companies, contacts, follow-ups, or activities were removed.`,
       );
     }
 
@@ -1013,7 +1191,9 @@ async function reassignAndVerify(
       counts: inspection.counts,
       message: "Required CRM records remained after reassignment.",
     });
-    throw new UserDeleteBlockedError(STILL_OWNS_CRM_RECORDS_MESSAGE);
+    throw new UserDeleteBlockedError(
+      formatOwnershipBlockMessage(inspection.counts),
+    );
   }
 
   return counts;
@@ -1058,7 +1238,10 @@ export async function removeAdminUser(input: {
   }
 
   if (input.mode === "delete" && ownsRecords && !reassignToUserId) {
-    throw new UserDeleteBlockedError(STILL_OWNS_CRM_RECORDS_MESSAGE);
+    const inspection = await inspectUserCrmOwnershipAdmin(admin, targetUserId);
+    throw new UserDeleteBlockedError(
+      formatOwnershipBlockMessage(inspection.counts),
+    );
   }
 
   if (input.mode === "reassign" || (ownsRecords && reassignToUserId)) {
@@ -1106,7 +1289,7 @@ export async function removeAdminUser(input: {
       counts,
     });
 
-    await hardDeleteAdminUser(admin, targetUserId);
+    await deletePreparedAdminUser(admin, targetUserId);
 
     return {
       message: formatCrmRemovalMessage({
@@ -1122,7 +1305,7 @@ export async function removeAdminUser(input: {
 
   await preparePermanentDeletion(admin, targetUserId);
   logCrmRemoval({ stage: "delete-auth", targetUserId });
-  const result = await hardDeleteAdminUser(admin, targetUserId);
+  const result = await deletePreparedAdminUser(admin, targetUserId);
   return { ...result, accountDeleted: true };
 }
 
