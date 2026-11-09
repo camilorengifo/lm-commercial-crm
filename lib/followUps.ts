@@ -24,6 +24,7 @@ import {
   isPendingFollowUpStatus,
   selectFollowUpsForAssignedCompanies,
 } from "@/lib/followUpClassification";
+import { followUpCompletionPatch } from "@/lib/followUpScheduling";
 import { supabase } from "@/lib/supabaseClient";
 
 export {
@@ -1219,10 +1220,7 @@ export async function markFollowUpCompleted(input: {
   const completedAt = new Date().toISOString();
   let updateQuery = supabase
     .from("follow_ups")
-    .update({
-      status: "completed" as FollowUpStatus,
-      completed_at: completedAt,
-    })
+    .update(followUpCompletionPatch(completedAt))
     .eq("id", input.followUpId)
     .eq("company_id", input.companyId)
     .eq("status", "pending");

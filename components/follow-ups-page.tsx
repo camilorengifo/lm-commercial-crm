@@ -52,6 +52,7 @@ import {
   automaticNextFollowUpDueAt,
   completeFollowUpAndScheduleNext,
   isFutureDueAt,
+  nextFollowUpDueAtFromCompletion,
   type FollowUpCompletionOutcome,
   type ScheduleNextMode,
 } from "@/lib/followUpOutcomes";
@@ -133,13 +134,17 @@ function ScheduleNextFollowUpModal({
 }) {
   const [scheduleMode, setScheduleMode] =
     useState<ScheduleNextMode>("automatic_week");
+  const isNoResponse = outcome === "no_response";
   const automaticDueAt = useMemo(() => {
     try {
-      return automaticNextFollowUpDueAt(followUp.due_at);
+      if (isNoResponse) {
+        return automaticNextFollowUpDueAt(followUp.due_at);
+      }
+      return nextFollowUpDueAtFromCompletion(new Date());
     } catch {
       return null;
     }
-  }, [followUp.due_at]);
+  }, [followUp.due_at, isNoResponse]);
   const [dueAt, setDueAt] = useState(() =>
     automaticDueAt
       ? toDatetimeLocalValue(automaticDueAt)
@@ -150,17 +155,19 @@ function ScheduleNextFollowUpModal({
   useEffect(() => {
     setScheduleMode("automatic_week");
     try {
-      setDueAt(toDatetimeLocalValue(automaticNextFollowUpDueAt(followUp.due_at)));
+      const nextDueAt = isNoResponse
+        ? automaticNextFollowUpDueAt(followUp.due_at)
+        : nextFollowUpDueAtFromCompletion(new Date());
+      setDueAt(toDatetimeLocalValue(nextDueAt));
     } catch {
       setDueAt(toDatetimeLocalValue(followUp.due_at));
     }
     setLocalError(null);
-  }, [followUp]);
+  }, [followUp, isNoResponse]);
 
-  const isNoResponse = outcome === "no_response";
   const description = isNoResponse
     ? "This follow-up will be completed as no response and a new pending follow-up will be created. Cancel keeps the current follow-up open."
-    : "This follow-up will be completed as a successful contact and a new pending follow-up will be created. Cancel keeps the current follow-up open.";
+    : "This closes the current follow-up and keeps its original due date. A separate pending follow-up is created for the same company, contact, and broker. Cancel keeps the current follow-up open.";
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -218,9 +225,9 @@ function ScheduleNextFollowUpModal({
                   Automatic – 1 Week
                 </span>
                 <span className="block text-xs text-zinc-500">
-                  Seven calendar days after the current due date, at the same
-                  local time. If that time has already passed, the next
-                  follow-up is seven days from today.
+                  {isNoResponse
+                    ? "Seven calendar days after the current due date, at the same local time. If that time has already passed, the next follow-up is seven days from today."
+                    : "Seven calendar days after the completion date, at the same local time. The original due date stays on the completed follow-up."}
                   {automaticDueAt
                     ? ` Next follow-up: ${formatDateTime(automaticDueAt)}.`
                     : ""}
@@ -778,9 +785,18 @@ function FollowUpCard({
             </>
           )}
 
+          {variant === "completed" && (followUp.brokerName || followUp.brokerEmail) && (
+            <p className="text-sm text-zinc-700">
+              <span className="font-medium text-zinc-600">Broker:</span>{" "}
+              {followUp.brokerName ?? followUp.brokerEmail}
+            </p>
+          )}
+
           {variant === "completed" && followUpNote && (
             <p className="text-sm text-zinc-700">
-              <span className="font-medium text-zinc-600">Notes:</span>{" "}
+              <span className="font-medium text-zinc-600">
+                Original next step:
+              </span>{" "}
               {followUpNote}
             </p>
           )}
@@ -929,8 +945,6 @@ export function FollowUpsPage() {
         setFetchError(
           formatSupabaseError(error ?? { message: "Unable to load follow-ups." }),
         );
-        setPendingFollowUps([]);
-        setCompletedFollowUps([]);
         return;
       }
 
@@ -1146,20 +1160,42 @@ export function FollowUpsPage() {
     followUp: FollowUpEnriched,
     completedAt: string,
     outcome: FollowUpCompletionOutcome,
-    nextDueAt: string | null,
+    next: { id: string; dueAt: string } | null,
   ) {
     const completed: FollowUpEnriched = {
       ...followUp,
       status: "completed",
+      due_at: followUp.due_at,
       completed_at: completedAt,
       completionOutcome:
         outcome === "no_response" ? "no_response" : "successful_contact",
-      nextFollowUpDueAt: nextDueAt,
+      nextFollowUpDueAt: next?.dueAt ?? null,
     };
 
-    setPendingFollowUps((current) =>
-      current.filter((item) => item.id !== followUp.id),
-    );
+    const scheduled: FollowUpEnriched | null = next
+      ? {
+          ...followUp,
+          id: next.id,
+          status: "pending",
+          due_at: next.dueAt,
+          completed_at: null,
+          created_at: completedAt,
+          disposition_reason: null,
+          disposition_notes: null,
+          disposition_at: null,
+          disposition_by: null,
+          dispositionByName: null,
+          completionOutcome: null,
+          nextFollowUpDueAt: null,
+        }
+      : null;
+
+    setPendingFollowUps((current) => {
+      const remaining = current.filter(
+        (item) => item.id !== followUp.id && item.id !== scheduled?.id,
+      );
+      return scheduled ? [...remaining, scheduled] : remaining;
+    });
     setCompletedFollowUps((current) => [
       completed,
       ...current.filter((item) => item.id !== followUp.id),
@@ -1190,11 +1226,20 @@ export function FollowUpsPage() {
       });
 
       if (result.completedAt && result.completedFollowUpId === followUp.id) {
+        const completedFollowUp =
+          result.originalDueAt &&
+          new Date(result.originalDueAt).getTime() ===
+            new Date(followUp.due_at).getTime()
+            ? followUp
+            : { ...followUp, due_at: result.originalDueAt ?? followUp.due_at };
+
         applyConfirmedCompletion(
-          followUp,
+          completedFollowUp,
           result.completedAt,
           outcome,
-          result.nextFollowUpId ? result.newDueAt : null,
+          result.nextFollowUpId
+            ? { id: result.nextFollowUpId, dueAt: result.newDueAt }
+            : null,
         );
         await refreshData();
       }
@@ -1217,7 +1262,7 @@ export function FollowUpsPage() {
       showSuccess(
         outcome === "no_response"
           ? `No response recorded. Next follow-up scheduled for ${formatDateTime(result.newDueAt)}.`
-          : `Follow-up completed. Next follow-up scheduled for ${formatDateTime(result.newDueAt)}.`,
+          : `${followUp.companyName} follow-up completed. Original due date kept. Next follow-up scheduled for ${formatDateTime(result.newDueAt)}.`,
       );
     } finally {
       completionInFlight.current = false;

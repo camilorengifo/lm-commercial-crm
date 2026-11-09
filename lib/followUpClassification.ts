@@ -115,6 +115,39 @@ export function businessCalendarDate(
   return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`;
 }
 
+/**
+ * Add calendar days on the business calendar, keeping the wall-clock time
+ * in that timezone. Colombia has no daylight-saving shift, so this is a
+ * whole number of local days rather than a raw 168-hour bump that depends
+ * on the machine timezone.
+ */
+export function addCalendarDaysInTimeZone(
+  iso: string,
+  days: number,
+  timeZone: string = BUSINESS_TIMEZONE,
+): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Invalid follow-up date.");
+  }
+
+  const parts = zonedParts(date, timeZone);
+  const shifted = new Date(
+    Date.UTC(parts.year, parts.month - 1, parts.day) + days * 86_400_000,
+  );
+
+  return zonedWallTimeToUtc(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth() + 1,
+    shifted.getUTCDate(),
+    parts.hour,
+    parts.minute,
+    parts.second,
+    date.getUTCMilliseconds(),
+    timeZone,
+  ).toISOString();
+}
+
 export function getDayBounds(
   reference: Date = new Date(),
   timeZone: string = BUSINESS_TIMEZONE,

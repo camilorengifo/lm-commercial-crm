@@ -18,6 +18,7 @@ import {
 import {
   automaticNextFollowUpDueAt,
   isFutureDueAt,
+  nextFollowUpDueAtFromCompletion,
 } from "@/lib/followUpScheduling";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -25,6 +26,8 @@ export {
   addCalendarDaysPreservingLocalTime,
   automaticNextFollowUpDueAt,
   isFutureDueAt,
+  nextFollowUpDueAtFromCompletion,
+  planMarkCompleteFollowUp,
 } from "@/lib/followUpScheduling";
 
 export type FollowUpCompletionOutcome = "completed_contact" | "no_response";
@@ -88,7 +91,9 @@ function buildOutcomeNotes(input: {
     : "";
   const schedulePart =
     input.scheduleMode === "automatic_week"
-      ? " Next follow-up was scheduled automatically for one week later (same local time)."
+      ? input.outcome === "completed_contact"
+        ? " Next follow-up was scheduled automatically for seven calendar days after completion. The original due date was not changed."
+        : " Next follow-up was scheduled automatically for one week later (same local time)."
       : " Next follow-up was scheduled manually.";
 
   if (input.outcome === "no_response") {
@@ -233,6 +238,8 @@ export interface CompleteAndScheduleNextResult {
   /** Set only after the database row is status completed with completed_at. */
   completedAt: string | null;
   completedFollowUpId: string | null;
+  /** Original due date confirmed on the closed row. Never rewritten by Mark Complete. */
+  originalDueAt: string | null;
 }
 
 function unfinishedResult(
@@ -245,6 +252,118 @@ function unfinishedResult(
     nextFollowUpId: null,
     completedAt: null,
     completedFollowUpId: null,
+    originalDueAt: null,
+  };
+}
+
+function sameInstant(left: string | null | undefined, right: string): boolean {
+  if (!left) return false;
+  const leftTime = new Date(left).getTime();
+  const rightTime = new Date(right).getTime();
+  return (
+    !Number.isNaN(leftTime) &&
+    !Number.isNaN(rightTime) &&
+    leftTime === rightTime
+  );
+}
+
+function missingScheduleNextRpc(error: {
+  code?: string;
+  message?: string;
+}): boolean {
+  if (error.code === "PGRST202") return true;
+  const message = error.message?.toLowerCase() ?? "";
+  return (
+    message.includes("complete_follow_up_and_schedule_next") &&
+    (message.includes("could not find") ||
+      message.includes("does not exist") ||
+      message.includes("schema cache"))
+  );
+}
+
+interface ScheduleNextRpcPayload {
+  status?: string;
+  completedAt?: string | null;
+  dueAt?: string | null;
+  nextFollowUpId?: string | null;
+  nextDueAt?: string | null;
+}
+
+/**
+ * Close the current follow-up and insert its successor in one transaction.
+ * Returns null when the database function is not deployed yet.
+ */
+async function completeAndScheduleInDatabase(input: {
+  followUpId: string;
+  companyId: string;
+  outcome: FollowUpCompletionOutcome;
+  scheduleMode: ScheduleNextMode;
+  newDueAt: string | null;
+  originalDueAt: string;
+}): Promise<CompleteAndScheduleNextResult | null> {
+  const { data, error } = await supabase.rpc(
+    "complete_follow_up_and_schedule_next",
+    {
+      p_follow_up_id: input.followUpId,
+      p_company_id: input.companyId,
+      p_outcome: input.outcome,
+      p_schedule_mode: input.scheduleMode,
+      p_new_due_at: input.newDueAt,
+    },
+  );
+
+  if (error) {
+    if (missingScheduleNextRpc(error)) return null;
+    return unfinishedResult(error, input.newDueAt ?? "");
+  }
+
+  let parsed: unknown = data;
+  if (typeof data === "string") {
+    try {
+      parsed = JSON.parse(data);
+    } catch {
+      parsed = null;
+    }
+  }
+
+  const payload = (parsed ?? null) as ScheduleNextRpcPayload | null;
+  if (
+    !payload ||
+    payload.status !== "completed" ||
+    !payload.completedAt ||
+    !payload.nextFollowUpId ||
+    !payload.nextDueAt
+  ) {
+    return unfinishedResult(
+      {
+        message:
+          "Follow-up could not be marked complete and the next follow-up was not created.",
+      },
+      payload?.nextDueAt ?? input.newDueAt ?? "",
+    );
+  }
+
+  if (payload.dueAt && !sameInstant(payload.dueAt, input.originalDueAt)) {
+    return {
+      error: {
+        message:
+          "The original due date changed during completion. Refresh and review this follow-up before trying again.",
+      },
+      newDueAt: payload.nextDueAt,
+      nextFollowUpId: payload.nextFollowUpId,
+      completedAt: payload.completedAt,
+      completedFollowUpId: input.followUpId,
+      originalDueAt: payload.dueAt,
+    };
+  }
+
+  return {
+    error: null,
+    newDueAt: payload.nextDueAt,
+    nextFollowUpId: payload.nextFollowUpId,
+    completedAt: payload.completedAt,
+    completedFollowUpId: input.followUpId,
+    originalDueAt: payload.dueAt ?? input.originalDueAt,
   };
 }
 
@@ -257,9 +376,15 @@ export async function completeFollowUpAndScheduleNext(
   input: CompleteAndScheduleNextInput,
 ): Promise<CompleteAndScheduleNextResult> {
   const previousDueAt = input.followUp.due_at;
+  const markCompleteAutomatic =
+    input.scheduleMode === "automatic_week" &&
+    input.outcome === "completed_contact";
   let newDueAt = input.newDueAt;
 
-  if (input.scheduleMode === "automatic_week") {
+  if (markCompleteAutomatic) {
+    // The next due date is seven days after the saved completion timestamp.
+    newDueAt = "";
+  } else if (input.scheduleMode === "automatic_week") {
     try {
       newDueAt = automaticNextFollowUpDueAt(previousDueAt);
     } catch {
@@ -312,6 +437,30 @@ export async function completeFollowUpAndScheduleNext(
     return syncResult.error;
   }
 
+  const scheduled = await completeAndScheduleInDatabase({
+    followUpId: completedFollowUpId,
+    companyId: input.followUp.company_id,
+    outcome: input.outcome,
+    scheduleMode: input.scheduleMode,
+    newDueAt: markCompleteAutomatic ? null : newDueAt,
+    originalDueAt: previousDueAt,
+  });
+
+  if (scheduled) {
+    if (scheduled.completedAt && scheduled.nextFollowUpId) {
+      const followOnError = await recordOutcome(
+        scheduled.nextFollowUpId,
+        scheduled.newDueAt,
+      );
+      return {
+        ...scheduled,
+        error: scheduled.error ?? followOnError,
+      };
+    }
+
+    return scheduled;
+  }
+
   const completeResult = await completeSourceFollowUp({
     followUpId: completedFollowUpId,
     companyId: input.followUp.company_id,
@@ -330,6 +479,7 @@ export async function completeFollowUpAndScheduleNext(
   const confirmed = {
     completedAt: completeResult.completedAt,
     completedFollowUpId,
+    originalDueAt: previousDueAt,
   };
 
   const successor = await findSuccessorFollowUp(completedFollowUpId);
@@ -341,6 +491,21 @@ export async function completeFollowUpAndScheduleNext(
       nextFollowUpId: successor.id,
       ...confirmed,
     };
+  }
+
+  if (markCompleteAutomatic) {
+    try {
+      newDueAt = nextFollowUpDueAtFromCompletion(completeResult.completedAt);
+    } catch {
+      return {
+        error: {
+          message: "Unable to calculate the next follow-up from the completion date.",
+        },
+        newDueAt: "",
+        nextFollowUpId: null,
+        ...confirmed,
+      };
+    }
   }
 
   const createResult = await createFollowUp({
