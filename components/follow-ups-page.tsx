@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { User } from "@supabase/supabase-js";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { CrmAlert, CrmCard, PageHeader, StatCard, StatGrid } from "@/components/crm-ui";
@@ -31,6 +38,7 @@ import {
   getFollowUpBucket,
   isCompletedThisWeek,
   isDueThisWeek,
+  isPendingFollowUpStatus,
   toDatetimeLocalValue,
   type FollowUpEnriched,
 } from "@/lib/followUps";
@@ -41,7 +49,7 @@ import {
   type FollowUpSuppressionChoice,
 } from "@/lib/outreachSuppressionRules";
 import {
-  addCalendarDaysPreservingLocalTime,
+  automaticNextFollowUpDueAt,
   completeFollowUpAndScheduleNext,
   isFutureDueAt,
   type FollowUpCompletionOutcome,
@@ -125,25 +133,24 @@ function ScheduleNextFollowUpModal({
 }) {
   const [scheduleMode, setScheduleMode] =
     useState<ScheduleNextMode>("automatic_week");
-  const [dueAt, setDueAt] = useState(() => {
+  const automaticDueAt = useMemo(() => {
     try {
-      return toDatetimeLocalValue(
-        addCalendarDaysPreservingLocalTime(followUp.due_at, 7),
-      );
+      return automaticNextFollowUpDueAt(followUp.due_at);
     } catch {
-      return toDatetimeLocalValue(followUp.due_at);
+      return null;
     }
-  });
+  }, [followUp.due_at]);
+  const [dueAt, setDueAt] = useState(() =>
+    automaticDueAt
+      ? toDatetimeLocalValue(automaticDueAt)
+      : toDatetimeLocalValue(followUp.due_at),
+  );
   const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
     setScheduleMode("automatic_week");
     try {
-      setDueAt(
-        toDatetimeLocalValue(
-          addCalendarDaysPreservingLocalTime(followUp.due_at, 7),
-        ),
-      );
+      setDueAt(toDatetimeLocalValue(automaticNextFollowUpDueAt(followUp.due_at)));
     } catch {
       setDueAt(toDatetimeLocalValue(followUp.due_at));
     }
@@ -160,15 +167,11 @@ function ScheduleNextFollowUpModal({
     setLocalError(null);
 
     if (scheduleMode === "automatic_week") {
-      try {
-        const automaticDueAt = addCalendarDaysPreservingLocalTime(
-          followUp.due_at,
-          7,
-        );
-        onConfirm({ scheduleMode, newDueAt: automaticDueAt });
-      } catch {
+      if (!automaticDueAt) {
         setLocalError("Unable to calculate the automatic next follow-up date.");
+        return;
       }
+      onConfirm({ scheduleMode, newDueAt: automaticDueAt });
       return;
     }
 
@@ -215,8 +218,12 @@ function ScheduleNextFollowUpModal({
                   Automatic – 1 Week
                 </span>
                 <span className="block text-xs text-zinc-500">
-                  Exactly 7 calendar days after the current due date, same local
-                  time.
+                  Seven calendar days after the current due date, at the same
+                  local time. If that time has already passed, the next
+                  follow-up is seven days from today.
+                  {automaticDueAt
+                    ? ` Next follow-up: ${formatDateTime(automaticDueAt)}.`
+                    : ""}
                 </span>
               </span>
             </label>
@@ -896,6 +903,7 @@ export function FollowUpsPage() {
   );
 
   const [actionFollowUpId, setActionFollowUpId] = useState<string | null>(null);
+  const completionInFlight = useRef(false);
   const [scheduleTarget, setScheduleTarget] = useState<{
     followUp: FollowUpEnriched;
     outcome: FollowUpCompletionOutcome;
@@ -983,9 +991,14 @@ export function FollowUpsPage() {
     loadDoNotFollowUp(user.id);
   }, [statusFilter, user, loadDoNotFollowUp]);
 
-  const buckets = useMemo(
-    () => bucketFollowUpsWithCompanies(pendingFollowUps),
+  const openFollowUps = useMemo(
+    () => pendingFollowUps.filter((followUp) => isPendingFollowUpStatus(followUp.status)),
     [pendingFollowUps],
+  );
+
+  const buckets = useMemo(
+    () => bucketFollowUpsWithCompanies(openFollowUps),
+    [openFollowUps],
   );
 
   const completedThisWeekFollowUps = useMemo(
@@ -1002,9 +1015,9 @@ export function FollowUpsPage() {
       overdue: buckets.overdue.length,
       upcoming: buckets.upcoming.length,
       completedThisWeek: completedThisWeekFollowUps.length,
-      totalOpen: pendingFollowUps.length,
+      totalOpen: openFollowUps.length,
     };
-  }, [buckets, completedThisWeekFollowUps.length, pendingFollowUps.length]);
+  }, [buckets, completedThisWeekFollowUps.length, openFollowUps.length]);
 
   const viewingCompleted =
     activeTab === "completed" || statusFilter === "completed";
@@ -1129,40 +1142,87 @@ export function FollowUpsPage() {
     setScheduleTarget({ followUp, outcome });
   }
 
+  function applyConfirmedCompletion(
+    followUp: FollowUpEnriched,
+    completedAt: string,
+    outcome: FollowUpCompletionOutcome,
+    nextDueAt: string | null,
+  ) {
+    const completed: FollowUpEnriched = {
+      ...followUp,
+      status: "completed",
+      completed_at: completedAt,
+      completionOutcome:
+        outcome === "no_response" ? "no_response" : "successful_contact",
+      nextFollowUpDueAt: nextDueAt,
+    };
+
+    setPendingFollowUps((current) =>
+      current.filter((item) => item.id !== followUp.id),
+    );
+    setCompletedFollowUps((current) => [
+      completed,
+      ...current.filter((item) => item.id !== followUp.id),
+    ]);
+  }
+
   async function handleScheduleConfirm(input: {
     scheduleMode: ScheduleNextMode;
     newDueAt: string;
   }) {
     if (!scheduleTarget || !user) return;
     if (!canManageFollowUp(scheduleTarget.followUp)) return;
+    if (completionInFlight.current) return;
 
     const followUp = scheduleTarget.followUp;
     const outcome = scheduleTarget.outcome;
+    completionInFlight.current = true;
     setActionFollowUpId(followUp.id);
     setScheduleError(null);
 
-    const { error, newDueAt } = await completeFollowUpAndScheduleNext({
-      followUp,
-      outcome,
-      actorUserId: user.id,
-      newDueAt: input.newDueAt,
-      scheduleMode: input.scheduleMode,
-    });
+    try {
+      const result = await completeFollowUpAndScheduleNext({
+        followUp,
+        outcome,
+        actorUserId: user.id,
+        newDueAt: input.newDueAt,
+        scheduleMode: input.scheduleMode,
+      });
 
-    if (error) {
-      setScheduleError(formatSupabaseError(error));
+      if (result.completedAt && result.completedFollowUpId === followUp.id) {
+        applyConfirmedCompletion(
+          followUp,
+          result.completedAt,
+          outcome,
+          result.nextFollowUpId ? result.newDueAt : null,
+        );
+        await refreshData();
+      }
+
+      if (result.error) {
+        const message = formatSupabaseError(result.error);
+        if (result.completedAt) {
+          setScheduleTarget(null);
+          setFetchError(
+            `Follow-up was marked complete, but a following step failed: ${message}`,
+          );
+        } else {
+          setScheduleError(message);
+        }
+        return;
+      }
+
+      setScheduleTarget(null);
+      setFetchError(null);
+      showSuccess(
+        outcome === "no_response"
+          ? `No response recorded. Next follow-up scheduled for ${formatDateTime(result.newDueAt)}.`
+          : `Follow-up completed. Next follow-up scheduled for ${formatDateTime(result.newDueAt)}.`,
+      );
+    } finally {
+      completionInFlight.current = false;
       setActionFollowUpId(null);
-      return;
     }
-
-    setScheduleTarget(null);
-    await refreshData();
-    setActionFollowUpId(null);
-    showSuccess(
-      outcome === "no_response"
-        ? `No response recorded. Next follow-up scheduled for ${formatDateTime(newDueAt)}.`
-        : `Follow-up completed. Next follow-up scheduled for ${formatDateTime(newDueAt)}.`,
-    );
   }
 
   async function handleActivitySave(input: {

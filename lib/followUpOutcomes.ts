@@ -6,6 +6,7 @@ import {
 import { formatDateTime } from "@/lib/crmFormat";
 import {
   createFollowUp,
+  markFollowUpCompleted,
   syncCompanyCommercialDates,
   type FollowUpEnriched,
   type FollowUpRecord,
@@ -14,7 +15,17 @@ import {
   followUpTypeFormFromRecord,
   type FollowUpTypeFormValues,
 } from "@/lib/followUpSeasonal";
+import {
+  automaticNextFollowUpDueAt,
+  isFutureDueAt,
+} from "@/lib/followUpScheduling";
 import { supabase } from "@/lib/supabaseClient";
+
+export {
+  addCalendarDaysPreservingLocalTime,
+  automaticNextFollowUpDueAt,
+  isFutureDueAt,
+} from "@/lib/followUpScheduling";
 
 export type FollowUpCompletionOutcome = "completed_contact" | "no_response";
 
@@ -99,29 +110,6 @@ function buildOutcomeNotes(input: {
   );
 }
 
-/** Add calendar days in local time, preserving the scheduled hour/minute. */
-export function addCalendarDaysPreservingLocalTime(
-  isoDueAt: string,
-  days: number,
-): string {
-  const date = new Date(isoDueAt);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid follow-up due date.");
-  }
-
-  date.setDate(date.getDate() + days);
-  return date.toISOString();
-}
-
-export function isFutureDueAt(
-  isoDueAt: string,
-  reference: Date = new Date(),
-): boolean {
-  const date = new Date(isoDueAt);
-  if (Number.isNaN(date.getTime())) return false;
-  return date.getTime() > reference.getTime();
-}
-
 async function findSuccessorFollowUp(
   sourceFollowUpId: string,
 ): Promise<{ id: string; due_at: string } | null> {
@@ -158,62 +146,19 @@ async function findOutcomeActivity(input: {
 
 async function completeSourceFollowUp(input: {
   followUpId: string;
-  ownerUserId: string;
   companyId: string;
   asAdmin?: boolean;
-}): Promise<{ error: { message?: string } | null; alreadyCompleted: boolean }> {
-  const { data: current, error: fetchError } = await supabase
-    .from("follow_ups")
-    .select("id, status")
-    .eq("id", input.followUpId)
-    .eq("company_id", input.companyId)
-    .maybeSingle();
-
-  if (fetchError) {
-    return { error: fetchError, alreadyCompleted: false };
-  }
-
-  if (!current) {
-    return { error: { message: "Follow-up not found." }, alreadyCompleted: false };
-  }
-
-  if (current.status === "completed") {
-    return { error: null, alreadyCompleted: true };
-  }
-
-  if (current.status !== "pending") {
-    return {
-      error: { message: "Only pending follow-ups can be completed." },
-      alreadyCompleted: false,
-    };
-  }
-
-  let query = supabase
-    .from("follow_ups")
-    .update({
-      status: "completed",
-      completed_at: new Date().toISOString(),
-    })
-    .eq("id", input.followUpId)
-    .eq("company_id", input.companyId)
-    .eq("status", "pending");
-
-  if (!input.asAdmin) {
-    query = query.eq("user_id", input.ownerUserId);
-  }
-
-  const { data, error } = await query.select("id").maybeSingle();
-
-  if (error) {
-    return { error, alreadyCompleted: false };
-  }
-
-  if (!data) {
-    // Concurrent completion
-    return { error: null, alreadyCompleted: true };
-  }
-
-  return { error: null, alreadyCompleted: false };
+}): Promise<{
+  error: { message?: string } | null;
+  alreadyCompleted: boolean;
+  completedAt: string | null;
+  assigneeUserId: string | null;
+}> {
+  return markFollowUpCompleted({
+    followUpId: input.followUpId,
+    companyId: input.companyId,
+    asAdmin: input.asAdmin,
+  });
 }
 
 async function insertOutcomeActivity(input: {
@@ -281,44 +226,69 @@ function buildCarriedTypeFields(
   });
 }
 
-/**
- * Completes the current follow-up, logs the outcome activity, and creates a
- * new pending follow-up. Cancel/close before confirm leaves the original open.
- */
-export async function completeFollowUpAndScheduleNext(
-  input: CompleteAndScheduleNextInput,
-): Promise<{
+export interface CompleteAndScheduleNextResult {
   error: { message?: string } | null;
   newDueAt: string;
   nextFollowUpId: string | null;
-}> {
-  if (!input.newDueAt.trim()) {
-    return {
-      error: { message: "A next follow-up date is required." },
-      newDueAt: "",
-      nextFollowUpId: null,
-    };
-  }
+  /** Set only after the database row is status completed with completed_at. */
+  completedAt: string | null;
+  completedFollowUpId: string | null;
+}
 
-  if (
-    input.scheduleMode === "choose_datetime" &&
-    !isFutureDueAt(input.newDueAt)
-  ) {
-    return {
-      error: { message: "Choose a future date and time." },
-      newDueAt: input.newDueAt,
-      nextFollowUpId: null,
-    };
+function unfinishedResult(
+  error: { message?: string } | null,
+  newDueAt: string,
+): CompleteAndScheduleNextResult {
+  return {
+    error,
+    newDueAt,
+    nextFollowUpId: null,
+    completedAt: null,
+    completedFollowUpId: null,
+  };
+}
+
+/**
+ * Completes the current follow-up, logs the outcome activity, and creates a
+ * new pending follow-up. Cancel/close before confirm leaves the original open.
+ * Success is returned only when the source row is confirmed completed.
+ */
+export async function completeFollowUpAndScheduleNext(
+  input: CompleteAndScheduleNextInput,
+): Promise<CompleteAndScheduleNextResult> {
+  const previousDueAt = input.followUp.due_at;
+  let newDueAt = input.newDueAt;
+
+  if (input.scheduleMode === "automatic_week") {
+    try {
+      newDueAt = automaticNextFollowUpDueAt(previousDueAt);
+    } catch {
+      return unfinishedResult(
+        { message: "Unable to calculate the automatic next follow-up date." },
+        input.newDueAt,
+      );
+    }
+  } else if (!newDueAt.trim()) {
+    return unfinishedResult(
+      { message: "A next follow-up date is required." },
+      "",
+    );
+  } else if (!isFutureDueAt(newDueAt)) {
+    return unfinishedResult(
+      { message: "Choose a future date and time." },
+      newDueAt,
+    );
   }
 
   const ownerUserId =
     input.followUp.companyOwnerUserId ?? input.followUp.user_id;
   const completedFollowUpId = input.followUp.id;
-  const previousDueAt = input.followUp.due_at;
-  const newDueAt = input.newDueAt;
 
-  async function ensureOutcomeActivity(nextFollowUpId: string, dueAtForNotes: string) {
-    await insertOutcomeActivity({
+  async function recordOutcome(
+    nextFollowUpId: string,
+    dueAtForNotes: string,
+  ): Promise<{ message?: string } | null> {
+    const activityResult = await insertOutcomeActivity({
       outcome: input.outcome,
       actorUserId: input.actorUserId,
       companyId: input.followUp.company_id,
@@ -331,47 +301,45 @@ export async function completeFollowUpAndScheduleNext(
       contactName: input.followUp.contactName,
       companyName: input.followUp.companyName,
     });
-  }
+    if (activityResult.error) {
+      return activityResult.error;
+    }
 
-  const existingSuccessor = await findSuccessorFollowUp(completedFollowUpId);
-  if (existingSuccessor) {
-    await ensureOutcomeActivity(existingSuccessor.id, existingSuccessor.due_at);
-    await syncCompanyCommercialDates(input.followUp.company_id, ownerUserId);
-    return {
-      error: null,
-      newDueAt: existingSuccessor.due_at,
-      nextFollowUpId: existingSuccessor.id,
-    };
+    const syncResult = await syncCompanyCommercialDates(
+      input.followUp.company_id,
+      ownerUserId,
+    );
+    return syncResult.error;
   }
 
   const completeResult = await completeSourceFollowUp({
     followUpId: completedFollowUpId,
-    ownerUserId,
     companyId: input.followUp.company_id,
     asAdmin: input.asAdmin,
   });
 
-  if (completeResult.error) {
-    return {
-      error: completeResult.error,
+  if (completeResult.error || !completeResult.completedAt) {
+    return unfinishedResult(
+      completeResult.error ?? {
+        message: "Follow-up could not be marked complete. It is still open.",
+      },
       newDueAt,
-      nextFollowUpId: null,
-    };
+    );
   }
 
-  // Re-check successor after completion (retry / race).
-  const successorAfterComplete = await findSuccessorFollowUp(completedFollowUpId);
-  if (successorAfterComplete) {
-    await ensureOutcomeActivity(
-      successorAfterComplete.id,
-      successorAfterComplete.due_at,
-    );
-    await syncCompanyCommercialDates(input.followUp.company_id, ownerUserId);
+  const confirmed = {
+    completedAt: completeResult.completedAt,
+    completedFollowUpId,
+  };
 
+  const successor = await findSuccessorFollowUp(completedFollowUpId);
+  if (successor) {
+    const followOnError = await recordOutcome(successor.id, successor.due_at);
     return {
-      error: null,
-      newDueAt: successorAfterComplete.due_at,
-      nextFollowUpId: successorAfterComplete.id,
+      error: followOnError,
+      newDueAt: successor.due_at,
+      nextFollowUpId: successor.id,
+      ...confirmed,
     };
   }
 
@@ -387,27 +355,27 @@ export async function completeFollowUpAndScheduleNext(
   });
 
   if (createResult.error && !createResult.followUpId) {
-    // Unique source race: load successor if another request created it.
     if (
       createResult.error.message?.includes("follow_ups_one_successor") ||
       createResult.error.code === "23505"
     ) {
       const racedSuccessor = await findSuccessorFollowUp(completedFollowUpId);
       if (racedSuccessor) {
-        await ensureOutcomeActivity(racedSuccessor.id, racedSuccessor.due_at);
-        await syncCompanyCommercialDates(
-          input.followUp.company_id,
-          ownerUserId,
+        const followOnError = await recordOutcome(
+          racedSuccessor.id,
+          racedSuccessor.due_at,
         );
         return {
-          error: null,
+          error: followOnError,
           newDueAt: racedSuccessor.due_at,
           nextFollowUpId: racedSuccessor.id,
+          ...confirmed,
         };
       }
     }
 
-    // Reopen the source follow-up if we completed it but could not schedule next.
+    // Scheduling failed. Put a just-completed row back to pending so the
+    // broker is not left with a completed follow-up and no next one.
     if (!completeResult.alreadyCompleted) {
       let reopenQuery = supabase
         .from("follow_ups")
@@ -416,18 +384,23 @@ export async function completeFollowUpAndScheduleNext(
         .eq("company_id", input.followUp.company_id)
         .eq("status", "completed");
 
-      if (!input.asAdmin) {
-        reopenQuery = reopenQuery.eq("user_id", ownerUserId);
+      if (!input.asAdmin && completeResult.assigneeUserId) {
+        reopenQuery = reopenQuery.eq("user_id", completeResult.assigneeUserId);
       }
 
-      await reopenQuery;
+      const { data: reopened } = await reopenQuery.select("id, status").maybeSingle();
       await syncCompanyCommercialDates(input.followUp.company_id, ownerUserId);
+
+      if (reopened?.status === "pending") {
+        return unfinishedResult(createResult.error, newDueAt);
+      }
     }
 
     return {
       error: createResult.error,
       newDueAt,
       nextFollowUpId: null,
+      ...confirmed,
     };
   }
 
@@ -441,45 +414,17 @@ export async function completeFollowUpAndScheduleNext(
       },
       newDueAt,
       nextFollowUpId: null,
+      ...confirmed,
     };
   }
 
-  const activityResult = await insertOutcomeActivity({
-    outcome: input.outcome,
-    actorUserId: input.actorUserId,
-    companyId: input.followUp.company_id,
-    completedFollowUpId,
-    nextFollowUpId,
-    previousDueAt,
+  const followOnError = await recordOutcome(nextFollowUpId, newDueAt);
+  return {
+    error: followOnError,
     newDueAt,
-    scheduleMode: input.scheduleMode,
-    contactId: input.followUp.contactId,
-    contactName: input.followUp.contactName,
-    companyName: input.followUp.companyName,
-  });
-
-  if (activityResult.error) {
-    return {
-      error: activityResult.error,
-      newDueAt,
-      nextFollowUpId,
-    };
-  }
-
-  const syncResult = await syncCompanyCommercialDates(
-    input.followUp.company_id,
-    ownerUserId,
-  );
-
-  if (syncResult.error) {
-    return {
-      error: syncResult.error,
-      newDueAt,
-      nextFollowUpId,
-    };
-  }
-
-  return { error: null, newDueAt, nextFollowUpId };
+    nextFollowUpId,
+    ...confirmed,
+  };
 }
 
 export function describeFollowUpOutcomeActivityType(type: ActivityType): string {

@@ -12,6 +12,13 @@ export const BUSINESS_TIMEZONE = "America/Bogota";
 
 export type FollowUpBucket = "overdue" | "today" | "upcoming";
 
+/** Open work-center rows. Completed, cancelled, and do-not-follow-up are not overdue. */
+export function isPendingFollowUpStatus(
+  status: string | null | undefined,
+): boolean {
+  return status === "pending";
+}
+
 const WEEKDAY_INDEX: Record<string, number> = {
   Sun: 0,
   Mon: 1,

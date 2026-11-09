@@ -21,6 +21,7 @@ import {
 import { enforceBrokerOwnedRows, fetchOwnedCompanyIdsForViewer } from "@/lib/brokerDataAccess";
 import {
   getWeekBounds,
+  isPendingFollowUpStatus,
   selectFollowUpsForAssignedCompanies,
 } from "@/lib/followUpClassification";
 import { supabase } from "@/lib/supabaseClient";
@@ -33,6 +34,7 @@ export {
   getDaysOverdue,
   getFollowUpBucket,
   getWeekBounds,
+  isPendingFollowUpStatus,
   selectFollowUpsForAssignedCompanies,
   type FollowUpBucket,
 } from "@/lib/followUpClassification";
@@ -771,7 +773,9 @@ export async function fetchPendingFollowUpsForUser(
 
   return {
     data: result.data.filter(
-      (followUp) => !isFollowUpOutreachSuppressed(suppression.index, followUp),
+      (followUp) =>
+        isPendingFollowUpStatus(followUp.status) &&
+        !isFollowUpOutreachSuppressed(suppression.index, followUp),
     ),
     error: null,
   };
@@ -1125,29 +1129,198 @@ export async function syncCompanyNextFollowUpAt(
   return { error };
 }
 
+export interface MarkFollowUpCompletedResult {
+  error: { message?: string; code?: string } | null;
+  alreadyCompleted: boolean;
+  completedAt: string | null;
+  /** Assignee stored on the row. Completion does not change it. */
+  assigneeUserId: string | null;
+}
+
+interface CompletionRow {
+  id: string;
+  status: string;
+  completed_at: string | null;
+  user_id: string;
+}
+
+function completionSaved(
+  row: Pick<CompletionRow, "status" | "completed_at"> | null,
+): boolean {
+  return row?.status === "completed" && Boolean(row.completed_at);
+}
+
+function missingCompleteFollowUpRpc(error: {
+  code?: string;
+  message?: string;
+}): boolean {
+  if (error.code === "PGRST202") return true;
+  const message = error.message?.toLowerCase() ?? "";
+  return (
+    message.includes("complete_follow_up") &&
+    (message.includes("could not find") ||
+      message.includes("does not exist") ||
+      message.includes("schema cache"))
+  );
+}
+
+/**
+ * Sets status to completed and writes completed_at for one follow-up.
+ * A zero-row update is not success: the row is re-read, and company owners
+ * can finish the write through complete_follow_up when follow_ups.user_id
+ * does not match the broker who can already see the row.
+ */
+export async function markFollowUpCompleted(input: {
+  followUpId: string;
+  companyId: string;
+  asAdmin?: boolean;
+}): Promise<MarkFollowUpCompletedResult> {
+  const empty: MarkFollowUpCompletedResult = {
+    error: null,
+    alreadyCompleted: false,
+    completedAt: null,
+    assigneeUserId: null,
+  };
+
+  const { data: current, error: fetchError } = await supabase
+    .from("follow_ups")
+    .select("id, status, completed_at, user_id")
+    .eq("id", input.followUpId)
+    .eq("company_id", input.companyId)
+    .maybeSingle();
+
+  if (fetchError) {
+    return { ...empty, error: fetchError };
+  }
+
+  if (!current) {
+    return { ...empty, error: { message: "Follow-up not found." } };
+  }
+
+  const row = current as CompletionRow;
+
+  if (row.status === "completed" && row.completed_at) {
+    return {
+      error: null,
+      alreadyCompleted: true,
+      completedAt: row.completed_at,
+      assigneeUserId: row.user_id,
+    };
+  }
+
+  if (!isPendingFollowUpStatus(row.status) && row.status !== "completed") {
+    return {
+      ...empty,
+      assigneeUserId: row.user_id,
+      error: { message: "Only pending follow-ups can be completed." },
+    };
+  }
+
+  const completedAt = new Date().toISOString();
+  let updateQuery = supabase
+    .from("follow_ups")
+    .update({
+      status: "completed" as FollowUpStatus,
+      completed_at: completedAt,
+    })
+    .eq("id", input.followUpId)
+    .eq("company_id", input.companyId)
+    .eq("status", "pending");
+
+  if (!input.asAdmin) {
+    updateQuery = updateQuery.eq("user_id", row.user_id);
+  }
+
+  const { data: updated, error: updateError } = await updateQuery
+    .select("id, status, completed_at, user_id")
+    .maybeSingle();
+
+  if (updateError) {
+    return { ...empty, assigneeUserId: row.user_id, error: updateError };
+  }
+
+  if (completionSaved(updated as CompletionRow | null)) {
+    const saved = updated as CompletionRow;
+    return {
+      error: null,
+      alreadyCompleted: false,
+      completedAt: saved.completed_at,
+      assigneeUserId: saved.user_id,
+    };
+  }
+
+  const { data: reread, error: rereadError } = await supabase
+    .from("follow_ups")
+    .select("id, status, completed_at, user_id")
+    .eq("id", input.followUpId)
+    .eq("company_id", input.companyId)
+    .maybeSingle();
+
+  if (rereadError) {
+    return { ...empty, assigneeUserId: row.user_id, error: rereadError };
+  }
+
+  if (completionSaved(reread as CompletionRow | null)) {
+    const saved = reread as CompletionRow;
+    return {
+      error: null,
+      alreadyCompleted: true,
+      completedAt: saved.completed_at,
+      assigneeUserId: saved.user_id,
+    };
+  }
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    "complete_follow_up",
+    {
+      p_follow_up_id: input.followUpId,
+      p_company_id: input.companyId,
+    },
+  );
+
+  if (!rpcError && rpcData && typeof rpcData === "object") {
+    const payload = rpcData as {
+      status?: string;
+      completedAt?: string | null;
+      alreadyCompleted?: boolean;
+    };
+    if (payload.status === "completed" && payload.completedAt) {
+      return {
+        error: null,
+        alreadyCompleted: Boolean(payload.alreadyCompleted),
+        completedAt: payload.completedAt,
+        assigneeUserId: row.user_id,
+      };
+    }
+  }
+
+  if (rpcError && !missingCompleteFollowUpRpc(rpcError)) {
+    return { ...empty, assigneeUserId: row.user_id, error: rpcError };
+  }
+
+  return {
+    ...empty,
+    assigneeUserId: row.user_id,
+    error: {
+      message: "Follow-up could not be marked complete. It is still open.",
+    },
+  };
+}
+
 export async function completeFollowUp(
   followUpId: string,
   ownerUserId: string,
   companyId: string,
   asAdmin = false,
 ): Promise<{ error: { message?: string } | null }> {
-  let query = supabase
-    .from("follow_ups")
-    .update({
-      status: "completed" as FollowUpStatus,
-      completed_at: new Date().toISOString(),
-    })
-    .eq("id", followUpId)
-    .eq("company_id", companyId);
+  const marked = await markFollowUpCompleted({
+    followUpId,
+    companyId,
+    asAdmin,
+  });
 
-  if (!asAdmin) {
-    query = query.eq("user_id", ownerUserId);
-  }
-
-  const { error } = await query.eq("status", "pending");
-
-  if (error) {
-    return { error };
+  if (marked.error) {
+    return { error: marked.error };
   }
 
   return syncCompanyNextFollowUpAt(companyId, ownerUserId);
