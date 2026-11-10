@@ -22,6 +22,12 @@ import {
 import { formatDate, formatDateTime, formatSupabaseError } from "@/lib/crmFormat";
 import { stopFollowUp } from "@/lib/doNotFollowUp";
 import {
+  companyFollowUpTimelinePath,
+  fetchFollowUpActivityCounts,
+  followUpCountBadgeClass,
+  followUpCountLabel,
+} from "@/lib/followUpActivityCount";
+import {
   bucketFollowUpsWithCompanies,
   createActivityNote,
   fetchCancelledFollowUps,
@@ -614,11 +620,44 @@ function DoNotFollowUpModal({
   );
 }
 
+function FollowUpCountBadge({
+  companyId,
+  companyName,
+  count,
+}: {
+  companyId: string;
+  companyName: string;
+  count: number | null;
+}) {
+  if (count === null) {
+    return (
+      <span
+        className="inline-flex h-5 w-28 animate-pulse rounded-full bg-slate-100"
+        aria-hidden
+      />
+    );
+  }
+
+  const label = followUpCountLabel(count);
+
+  return (
+    <Link
+      href={companyFollowUpTimelinePath(companyId)}
+      title="View completed follow-up activities"
+      aria-label={`${label} for ${companyName}. Open the commercial timeline.`}
+      className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset transition hover:brightness-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 ${followUpCountBadgeClass(count)}`}
+    >
+      {label}
+    </Link>
+  );
+}
+
 function FollowUpCard({
   followUp,
   variant,
   canManage,
   actionLoading,
+  followUpCount,
   onMarkComplete,
   onNoResponse,
   onDoNotFollowUp,
@@ -628,6 +667,7 @@ function FollowUpCard({
   variant: FollowUpCardVariant;
   canManage: boolean;
   actionLoading: boolean;
+  followUpCount: number | null;
   onMarkComplete: (followUp: FollowUpEnriched) => void;
   onNoResponse: (followUp: FollowUpEnriched) => void;
   onDoNotFollowUp: (followUp: FollowUpEnriched) => void;
@@ -659,6 +699,11 @@ function FollowUpCard({
                 {followUp.companyName}
               </Link>
             </h3>
+            <FollowUpCountBadge
+              companyId={followUp.company_id}
+              companyName={followUp.companyName}
+              count={followUpCount}
+            />
             <span
               className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${priorityBadgeClass(followUp.companyPriority)}`}
             >
@@ -910,6 +955,13 @@ export function FollowUpsPage() {
   const [doNotFollowUpError, setDoNotFollowUpError] = useState<string | null>(
     null,
   );
+  const [followUpCounts, setFollowUpCounts] = useState<Record<string, number>>(
+    {},
+  );
+  const [followUpCountsKey, setFollowUpCountsKey] = useState<string | null>(
+    null,
+  );
+  const [countRefreshKey, setCountRefreshKey] = useState(0);
 
   const loadFollowUps = useCallback(
     async (userId: string) => {
@@ -982,6 +1034,53 @@ export function FollowUpsPage() {
     if (statusFilter !== "do_not_follow_up" || !user) return;
     loadDoNotFollowUp(user.id);
   }, [statusFilter, user, loadDoNotFollowUp]);
+
+  const countedCompanyKey = useMemo(() => {
+    const ids = new Set<string>();
+    for (const followUp of [
+      ...pendingFollowUps,
+      ...completedFollowUps,
+      ...cancelledFollowUps,
+      ...doNotFollowUpFollowUps,
+    ]) {
+      if (followUp.company_id) ids.add(followUp.company_id);
+    }
+    return [...ids].sort().join(",");
+  }, [
+    pendingFollowUps,
+    completedFollowUps,
+    cancelledFollowUps,
+    doNotFollowUpFollowUps,
+  ]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const requestKey = `${countedCompanyKey}#${countRefreshKey}`;
+    if (!countedCompanyKey) {
+      setFollowUpCounts({});
+      setFollowUpCountsKey(requestKey);
+      return;
+    }
+
+    let active = true;
+    const companyIds = countedCompanyKey.split(",");
+
+    fetchFollowUpActivityCounts(companyIds).then((result) => {
+      if (!active) return;
+      if (result.error) {
+        setFollowUpCounts({});
+        setFollowUpCountsKey(requestKey);
+        return;
+      }
+      setFollowUpCounts(result.counts);
+      setFollowUpCountsKey(requestKey);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [user, countedCompanyKey, countRefreshKey]);
 
   const buckets = useMemo(
     () => bucketFollowUpsWithCompanies(pendingFollowUps),
@@ -1113,6 +1212,7 @@ export function FollowUpsPage() {
     if (statusFilter === "do_not_follow_up") {
       await loadDoNotFollowUp(user.id);
     }
+    setCountRefreshKey((key) => key + 1);
   }
 
   function showSuccess(message: string) {
@@ -1195,6 +1295,7 @@ export function FollowUpsPage() {
 
     setActivityTarget(null);
     setActionFollowUpId(null);
+    setCountRefreshKey((key) => key + 1);
     showSuccess("Activity note saved to the company timeline.");
   }
 
@@ -1468,6 +1569,11 @@ export function FollowUpsPage() {
                 variant={cardVariant}
                 canManage={canManageFollowUp(followUp)}
                 actionLoading={actionFollowUpId === followUp.id}
+                followUpCount={
+                  followUpCountsKey === `${countedCompanyKey}#${countRefreshKey}`
+                    ? (followUpCounts[followUp.company_id] ?? 0)
+                    : null
+                }
                 onMarkComplete={(item) =>
                   openScheduleModal(item, "completed_contact")
                 }

@@ -61,6 +61,7 @@ import {
   createCompanyContactsWarningMessage,
   createCompanySuccessMessage,
 } from "@/lib/companyCreateContacts";
+import { isFollowUpTimelineFilter } from "@/lib/followUpActivityCount";
 import {
   companyDraftKey,
   readCompanyDraft,
@@ -530,6 +531,9 @@ export function CompanyDetailPage() {
       } else {
         nextParams.set("tab", section);
       }
+      if (section !== "timeline") {
+        nextParams.delete("timeline");
+      }
 
       const query = nextParams.toString();
       router.replace(
@@ -549,6 +553,17 @@ export function CompanyDetailPage() {
     },
     [companyId, router, searchParams],
   );
+
+  const showFullTimeline = useCallback(() => {
+    if (!companyId) return;
+
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.set("tab", "timeline");
+    nextParams.delete("timeline");
+    router.replace(`/companies/${companyId}?${nextParams.toString()}`, {
+      scroll: false,
+    });
+  }, [companyId, router, searchParams]);
 
   useEffect(() => {
     if (!companyId || !companyAccessVerified || !company) return;
@@ -1024,6 +1039,10 @@ export function CompanyDetailPage() {
                 isAdmin={isAdmin}
                 canManage={canManageFollowUps}
                 externalRefreshKey={chronologyRefreshKey}
+                followUpsOnly={isFollowUpTimelineFilter(
+                  searchParams.get("timeline"),
+                )}
+                onShowAllActivities={showFullTimeline}
                 onCompanyUpdated={() => {
                   if (user && companyId && profile) {
                     return fetchCompany(user.id, companyId, profile, {

@@ -11,6 +11,7 @@ import {
   fetchCommercialTimelineActivities,
   type CommercialTimelineActivity,
 } from "@/lib/commercialTimeline";
+import { isCompletedFollowUpActivity } from "@/lib/followUpActivityCount";
 import { formatDate, formatDateTime, formatSupabaseError } from "@/lib/crmFormat";
 import {
   ACTIVITY_DELETED_MESSAGE,
@@ -34,6 +35,8 @@ export function CompanyChronologySection({
   externalRefreshKey,
   canManage = false,
   isAdmin = false,
+  followUpsOnly = false,
+  onShowAllActivities,
   onCompanyUpdated,
 }: {
   companyId: string;
@@ -43,6 +46,8 @@ export function CompanyChronologySection({
   externalRefreshKey?: number;
   canManage?: boolean;
   isAdmin?: boolean;
+  followUpsOnly?: boolean;
+  onShowAllActivities?: () => void;
 }) {
   const [activities, setActivities] = useState<CommercialTimelineActivity[]>(
     [],
@@ -264,13 +269,25 @@ export function CompanyChronologySection({
   return (
     <section className="crm-card crm-card-padded">
       <div className="mb-6">
-        <h2 className="crm-section-title">Commercial Timeline</h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Commercial history is generated automatically from completed
-          activities and follow-ups. Use Edit to correct a comment without
-          adding a duplicate activity. Use Delete to remove one entry after
-          you confirm. Follow-ups and other history stay in place.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="crm-section-title">Commercial Timeline</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              {followUpsOnly
+                ? "Completed follow-up activities for this company. Each entry shows the date, type, contact, and notes. Scheduled follow-ups that have not been performed are hidden."
+                : "Commercial history is generated automatically from completed activities and follow-ups. Use Edit to correct a comment without adding a duplicate activity. Use Delete to remove one entry after you confirm. Follow-ups and other history stay in place."}
+            </p>
+          </div>
+          {followUpsOnly && onShowAllActivities && (
+            <button
+              type="button"
+              onClick={onShowAllActivities}
+              className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+            >
+              Show full timeline
+            </button>
+          )}
+        </div>
       </div>
 
       {fetchError && (
@@ -295,9 +312,20 @@ export function CompanyChronologySection({
           No commercial activity has been recorded for this company yet. Log
           activity from the Follow-ups section above.
         </p>
+      ) : followUpsOnly &&
+        activities.filter((activity) => isCompletedFollowUpActivity(activity))
+          .length === 0 ? (
+        <p className="text-sm text-zinc-500">
+          No completed follow-up activities have been recorded for this company
+          yet.
+        </p>
       ) : (
         <ol className="relative space-y-0 border-l border-zinc-200 pl-6">
-          {activities.map((activity) => {
+          {activities
+            .filter((activity) =>
+              followUpsOnly ? isCompletedFollowUpActivity(activity) : true,
+            )
+            .map((activity) => {
             const isEditing = editingId === activity.id && draft !== null;
             const editable = canEditCommercialActivity({
               canManage,
@@ -335,6 +363,7 @@ export function CompanyChronologySection({
                       editable={editable}
                       deletable={deletable}
                       disabled={saving || deleting || pendingDelete !== null}
+                      showFollowUpFields={followUpsOnly}
                       onEdit={() => startEditing(activity)}
                       onDelete={() => requestDelete(activity)}
                     />
@@ -365,6 +394,7 @@ function ActivitySummary({
   editable,
   deletable,
   disabled,
+  showFollowUpFields = false,
   onEdit,
   onDelete,
 }: {
@@ -372,6 +402,7 @@ function ActivitySummary({
   editable: boolean;
   deletable: boolean;
   disabled: boolean;
+  showFollowUpFields?: boolean;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -427,15 +458,34 @@ function ActivitySummary({
           </p>
         )}
 
-      {activity.notes && (
+      {showFollowUpFields && (
+        <p className="text-sm text-zinc-700">
+          <span className="font-medium text-zinc-600">Contact:</span>{" "}
+          {activity.contactName ?? "Not recorded"}
+        </p>
+      )}
+
+      {activity.notes ? (
         <p className="break-words whitespace-pre-wrap text-sm text-zinc-600">
+          {showFollowUpFields && (
+            <span className="font-medium text-zinc-700">Notes: </span>
+          )}
           {activity.notes}
         </p>
+      ) : (
+        showFollowUpFields && (
+          <p className="text-sm text-zinc-600">
+            <span className="font-medium text-zinc-700">Notes:</span> No notes
+            recorded.
+          </p>
+        )
       )}
 
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500">
         {activity.brokerEmail && <span>Broker: {activity.brokerEmail}</span>}
-        {activity.contactName && <span>Contact: {activity.contactName}</span>}
+        {!showFollowUpFields && activity.contactName && (
+          <span>Contact: {activity.contactName}</span>
+        )}
       </div>
 
       {activity.scheduled_follow_up_at && (
