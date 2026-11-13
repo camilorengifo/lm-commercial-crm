@@ -4,10 +4,23 @@ import {
   createAiErrorRef,
   formatAiClientError,
 } from "@/lib/aiConstants";
-import { OPENAI_MODEL } from "@/lib/openai-config";
+import { OPENAI_MODEL, OPENAI_OUTREACH_MODEL } from "@/lib/openai-config";
+import {
+  buildOutreachResponseBody,
+  extractResponsesOutputText,
+  isRetryableOutreachError,
+  nextOutreachAttempt,
+  OUTREACH_MAX_OUTPUT_TOKEN_CEILING,
+  OUTREACH_MAX_OUTPUT_TOKENS,
+  OUTREACH_RESEARCH_PROMPT_CACHE_KEY,
+  modelSupportsCustomTemperature,
+  parseModelJson,
+  readResponseUsage,
+  type OutreachTokenUsage,
+} from "@/lib/outreachModel";
 
 export { AI_CLIENT_ERROR_MESSAGE };
-export { OPENAI_MODEL };
+export { OPENAI_MODEL, OPENAI_OUTREACH_MODEL };
 
 export class OpenAIConfigurationError extends Error {
   constructor(message: string) {
@@ -38,6 +51,10 @@ export function getOpenAIModel(): string {
   return OPENAI_MODEL;
 }
 
+export function getOutreachModel(): string {
+  return OPENAI_OUTREACH_MODEL;
+}
+
 function redactSecrets(value: string): string {
   return value
     .replace(/sk-[A-Za-z0-9_-]+/g, "[REDACTED_OPENAI_KEY]")
@@ -47,26 +64,7 @@ function redactSecrets(value: string): string {
     .replace(/RESEND_API_KEY=\S+/gi, "RESEND_API_KEY=[REDACTED]");
 }
 
-/**
- * GPT-5 / o-series reasoning models only accept the default temperature (1).
- * Custom values like 0.3 cause HTTP 400 unsupported_value.
- * gpt-4o-mini and similar chat models still support custom temperature.
- */
-export function modelSupportsCustomTemperature(model: string): boolean {
-  const normalized = model.trim().toLowerCase();
-  if (!normalized) return true;
-
-  if (
-    normalized.startsWith("gpt-5") ||
-    normalized.startsWith("o1") ||
-    normalized.startsWith("o3") ||
-    normalized.startsWith("o4")
-  ) {
-    return false;
-  }
-
-  return true;
-}
+export { modelSupportsCustomTemperature };
 
 interface OpenAiSafeDiagnostics {
   ref: string;
@@ -253,10 +251,177 @@ export async function generateJsonCompletion<T>(input: {
   }
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function logOutreachUsage(
+  context: string,
+  details: {
+    model: string;
+    latencyMs: number;
+    status: string | null;
+    attempt: number;
+    usage: OutreachTokenUsage;
+  },
+): void {
+  console.info(`[openai] outreach usage (${context})`, {
+    model: details.model,
+    latencyMs: details.latencyMs,
+    status: details.status,
+    attempt: details.attempt,
+    inputTokens: details.usage.inputTokens,
+    outputTokens: details.usage.outputTokens,
+    reasoningTokens: details.usage.reasoningTokens,
+    cachedInputTokens: details.usage.cachedInputTokens,
+    cacheWriteTokens: details.usage.cacheWriteTokens,
+    totalTokens: details.usage.totalTokens,
+  });
+}
+
+/**
+ * Outreach Assistant generation. Uses the Responses API, medium reasoning,
+ * and the outreach model only. Draft generation does not write CRM records
+ * or contact customers, so one transient retry and one output-token increase
+ * are safe. Sampling parameters are omitted because reasoning effort is set.
+ */
+export async function generateOutreachJson<T>(input: {
+  systemPrompt: string;
+  userPrompt: string;
+  schemaName: string;
+  schema: Record<string, unknown>;
+  promptCacheKey: string;
+  context?: string;
+  timeoutMs?: number;
+  maxOutputTokens?: number;
+  maxOutputTokenCeiling?: number;
+}): Promise<{ data: T | null; error: string | null }> {
+  const model = getOutreachModel();
+  const requestContext = input.context ?? "generateOutreachJson";
+
+  let client: OpenAI;
+  try {
+    client = getOpenAIClient();
+  } catch (error) {
+    return {
+      data: null,
+      error: sanitizeAiError(error, requestContext, model),
+    };
+  }
+
+  const timeoutMs = input.timeoutMs ?? 70_000;
+  let maxOutputTokens = input.maxOutputTokens ?? OUTREACH_MAX_OUTPUT_TOKENS;
+  const ceiling = Math.max(
+    maxOutputTokens,
+    input.maxOutputTokenCeiling ?? OUTREACH_MAX_OUTPUT_TOKEN_CEILING,
+  );
+  let tokenBumped = false;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const started = Date.now();
+    try {
+      const response = await client.responses.create(
+        buildOutreachResponseBody({
+          model,
+          systemPrompt: input.systemPrompt,
+          userPrompt: input.userPrompt,
+          schemaName: input.schemaName,
+          schema: input.schema,
+          maxOutputTokens,
+          promptCacheKey: input.promptCacheKey,
+        }),
+        { timeout: timeoutMs, maxRetries: 0 },
+      );
+
+      const extracted = extractResponsesOutputText(response);
+      logOutreachUsage(requestContext, {
+        model: response.model || model,
+        latencyMs: Date.now() - started,
+        status: extracted.status,
+        attempt,
+        usage: readResponseUsage(response.usage),
+      });
+
+      let parsed: unknown = null;
+      let parsedOk = false;
+      if (extracted.text) {
+        try {
+          parsed = parseModelJson(extracted.text);
+          parsedOk = true;
+        } catch {
+          parsedOk = false;
+        }
+      }
+
+      const decision = nextOutreachAttempt({
+        status: extracted.status,
+        incompleteReason: extracted.incompleteReason,
+        parsed: parsedOk,
+        tokenBumped,
+        maxOutputTokens,
+        ceiling,
+      });
+
+      if (decision === "bump_tokens" && attempt < 2) {
+        tokenBumped = true;
+        maxOutputTokens = ceiling;
+        continue;
+      }
+
+      if (decision === "accept" && parsedOk) {
+        return { data: parsed as T, error: null };
+      }
+
+      const ref = createAiErrorRef();
+      const responseError = response.error;
+      logOpenAiFailure(
+        {
+          ref,
+          selectedModel: response.model || model,
+          httpStatus: 200,
+          errorCode:
+            extracted.incompleteReason ?? responseError?.code ?? "incomplete_response",
+          errorType: extracted.status ?? "incomplete_response",
+          errorMessage: redactSecrets(
+            responseError?.message ||
+              "Outreach model did not return a completed draft.",
+          ).slice(0, 500),
+          requestId: response.id ?? null,
+        },
+        requestContext,
+      );
+      return { data: null, error: formatAiClientError(ref) };
+    } catch (error) {
+      if (attempt === 1 && isRetryableOutreachError(error)) {
+        await wait(600);
+        continue;
+      }
+      return {
+        data: null,
+        error: sanitizeAiError(error, requestContext, model),
+      };
+    }
+  }
+
+  return {
+    data: null,
+    error: sanitizeAiError(
+      new Error("Outreach generation did not complete."),
+      requestContext,
+      model,
+    ),
+  };
+}
+
 export async function createWebSearchResponse(input: {
   systemPrompt: string;
   userPrompt: string;
   context?: string;
+  model?: string;
+  reasoningEffort?: "low" | "medium" | "high";
+  timeoutMs?: number;
   userLocation?: {
     city?: string | null;
     region?: string | null;
@@ -280,31 +445,50 @@ export async function createWebSearchResponse(input: {
     };
   }
 
-  const model = getOpenAIModel();
+  const model = input.model?.trim() || getOpenAIModel();
   const requestContext = input.context ?? "createWebSearchResponse";
+  const started = Date.now();
 
   try {
-    const response = await client.responses.create({
-      model,
-      tools: [
-        {
-          type: "web_search",
-          search_context_size: "medium",
-          user_location: input.userLocation
-            ? {
-                type: "approximate",
-                city: input.userLocation.city ?? undefined,
-                region: input.userLocation.region ?? undefined,
-                country: input.userLocation.country ?? undefined,
-                timezone: input.userLocation.timezone ?? undefined,
-              }
-            : undefined,
-        },
-      ],
-      input: [
-        { role: "system", content: input.systemPrompt },
-        { role: "user", content: input.userPrompt },
-      ],
+    const response = await client.responses.create(
+      {
+        model,
+        store: false,
+        prompt_cache_key: OUTREACH_RESEARCH_PROMPT_CACHE_KEY,
+        max_output_tokens: 2000,
+        ...(input.reasoningEffort
+          ? { reasoning: { effort: input.reasoningEffort } }
+          : {}),
+        tools: [
+          {
+            type: "web_search",
+            search_context_size: "medium",
+            user_location: input.userLocation
+              ? {
+                  type: "approximate",
+                  city: input.userLocation.city ?? undefined,
+                  region: input.userLocation.region ?? undefined,
+                  country: input.userLocation.country ?? undefined,
+                  timezone: input.userLocation.timezone ?? undefined,
+                }
+              : undefined,
+          },
+        ],
+        input: [
+          { role: "system", content: input.systemPrompt },
+          { role: "user", content: input.userPrompt },
+        ],
+      },
+      { timeout: input.timeoutMs ?? 40_000, maxRetries: 1 },
+    );
+
+    const extracted = extractResponsesOutputText(response);
+    logOutreachUsage(requestContext, {
+      model: response.model || model,
+      latencyMs: Date.now() - started,
+      status: extracted.status,
+      attempt: 1,
+      usage: readResponseUsage(response.usage),
     });
 
     const citations: Array<{ url: string; title: string }> = [];
@@ -320,8 +504,7 @@ export async function createWebSearchResponse(input: {
       }
     }
 
-    const text = response.output_text?.trim() || null;
-    if (!text) {
+    if (!extracted.text || extracted.status === "failed") {
       return {
         text: null,
         citations,
@@ -329,7 +512,7 @@ export async function createWebSearchResponse(input: {
       };
     }
 
-    return { text, citations, error: null };
+    return { text: extracted.text, citations, error: null };
   } catch (error) {
     return {
       text: null,

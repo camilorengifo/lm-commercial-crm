@@ -6,6 +6,7 @@ import {
   OUTREACH_SYSTEM_PROMPT,
   buildOutreachUserPrompt,
   normalizeOutreachDraft,
+  OUTREACH_DRAFT_JSON_SCHEMA,
   resolveOutreachType,
   type OutreachDraftResponse,
   type OutreachTone,
@@ -22,7 +23,8 @@ import {
   resolveCompanyAccess,
 } from "@/lib/aiRouteHelpers";
 import { researchFreightMarket, type MarketResearchResult } from "@/lib/marketResearch";
-import { generateJsonCompletion } from "@/lib/openaiServer";
+import { generateOutreachJson, getOutreachModel } from "@/lib/openaiServer";
+import { OUTREACH_PROMPT_CACHE_KEY, OUTREACH_REASONING_EFFORT } from "@/lib/outreachModel";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -119,13 +121,19 @@ export async function POST(request: Request) {
         companyName: context.company.name,
         location: location || null,
         lanePatterns: context.lanePatterns,
+        model: getOutreachModel(),
+        reasoningEffort: OUTREACH_REASONING_EFFORT,
       });
     }
 
-    const { data, error } = await generateJsonCompletion<OutreachDraftResponse>({
+    const { data, error } = await generateOutreachJson<OutreachDraftResponse>({
       systemPrompt: OUTREACH_SYSTEM_PROMPT,
       userPrompt: buildOutreachUserPrompt(context, marketResearch),
+      schemaName: "outreach_draft",
+      schema: OUTREACH_DRAFT_JSON_SCHEMA,
+      promptCacheKey: OUTREACH_PROMPT_CACHE_KEY,
       context: "AI_OUTREACH",
+      timeoutMs: marketResearch ? 60_000 : 80_000,
     });
 
     if (error || !data) {
@@ -156,7 +164,10 @@ export async function POST(request: Request) {
       priorDraftFeedback: context.priorDraftFeedback,
     };
 
-    logAiSuccess(logContext, { companyName: context.company.name });
+    logAiSuccess(logContext, {
+      companyName: context.company.name,
+      model: getOutreachModel(),
+    });
 
     return aiSuccessResponse({
       draft,

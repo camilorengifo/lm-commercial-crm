@@ -1,6 +1,7 @@
 import { buildOutreachCrmContext } from "@/lib/aiCrmContext";
 import {
   ACCOUNT_OUTREACH_QUICK_SYSTEM_PROMPT,
+  ACCOUNT_OUTREACH_QUICK_JSON_SCHEMA,
   buildAccountOutreachQuickUserPrompt,
   normalizeAccountOutreachQuick,
   type AccountOutreachQuickResponse,
@@ -16,7 +17,12 @@ import {
   logAiSuccess,
   resolveCompanyAccess,
 } from "@/lib/aiRouteHelpers";
-import { generateJsonCompletion } from "@/lib/openaiServer";
+import { generateOutreachJson, getOutreachModel } from "@/lib/openaiServer";
+import {
+  OUTREACH_QUICK_MAX_OUTPUT_TOKEN_CEILING,
+  OUTREACH_QUICK_MAX_OUTPUT_TOKENS,
+  OUTREACH_QUICK_PROMPT_CACHE_KEY,
+} from "@/lib/outreachModel";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -86,10 +92,16 @@ export async function POST(request: Request) {
     }
 
     const { data, error } =
-      await generateJsonCompletion<AccountOutreachQuickResponse>({
+      await generateOutreachJson<AccountOutreachQuickResponse>({
         systemPrompt: ACCOUNT_OUTREACH_QUICK_SYSTEM_PROMPT,
         userPrompt: buildAccountOutreachQuickUserPrompt(context),
+        schemaName: "account_outreach_quick",
+        schema: ACCOUNT_OUTREACH_QUICK_JSON_SCHEMA,
+        promptCacheKey: OUTREACH_QUICK_PROMPT_CACHE_KEY,
         context: "AI_ACCOUNT_OUTREACH",
+        timeoutMs: 45_000,
+        maxOutputTokens: OUTREACH_QUICK_MAX_OUTPUT_TOKENS,
+        maxOutputTokenCeiling: OUTREACH_QUICK_MAX_OUTPUT_TOKEN_CEILING,
       });
 
     if (error || !data) {
@@ -99,7 +111,10 @@ export async function POST(request: Request) {
 
     const draft = normalizeAccountOutreachQuick(data);
 
-    logAiSuccess(logContext, { companyName: context.company.name });
+    logAiSuccess(logContext, {
+      companyName: context.company.name,
+      model: getOutreachModel(),
+    });
 
     return aiSuccessResponse({
       draft,

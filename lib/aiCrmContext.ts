@@ -756,20 +756,20 @@ export async function buildOutreachCrmContext(
       .eq("company_id", companyId)
       .eq("user_id", dataOwnerUserId)
       .order("due_at", { ascending: false })
-      .limit(40),
+      .limit(16),
     supabase
       .from("activities")
       .select("activity_type, subject, notes, activity_at")
       .eq("company_id", companyId)
       .eq("user_id", dataOwnerUserId)
       .order("activity_at", { ascending: false })
-      .limit(40),
+      .limit(12),
     supabase
       .from("outreach_draft_feedback")
       .select("rating, outreach_type, created_at")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false })
-      .limit(12),
+      .limit(8),
   ]);
 
   if (followUpsResult.error) throw followUpsResult.error;

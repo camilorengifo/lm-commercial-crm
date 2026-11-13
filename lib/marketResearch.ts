@@ -51,6 +51,8 @@ export async function researchFreightMarket(input: {
   companyName: string;
   location: string | null;
   lanePatterns: LanePattern[];
+  model?: string;
+  reasoningEffort?: "low" | "medium" | "high";
 }): Promise<MarketResearchResult> {
   const searchedAt = new Date().toISOString();
   const lanes = input.lanePatterns.slice(0, 8).map((lane) => ({
@@ -89,6 +91,9 @@ Today is ${searchedAt.slice(0, 10)}.
 Ignore articles older than 45 days when deciding what is current.
 If the only available material is older or national, say that in limitation and do not present it as a current lane condition.`,
     context: "AI_MARKET_RESEARCH",
+    model: input.model,
+    reasoningEffort: input.reasoningEffort,
+    timeoutMs: 35_000,
     userLocation: {
       city: locationParts[0] ?? null,
       region: locationParts[1] ?? null,
