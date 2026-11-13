@@ -14,6 +14,13 @@ import {
 } from "@/lib/outreachSuppression";
 import { isFollowUpOutreachSuppressed } from "@/lib/outreachSuppressionRules";
 import {
+  followUpCreationKey,
+  activityCreationKey,
+  isMissingColumnError,
+  isUniqueViolation,
+} from "@/lib/followUpIdempotency";
+import { insertActivityOnce } from "@/lib/idempotentActivityInsert";
+import {
   resolveFollowUpSeasonalFields,
   type FollowUpType,
   type FollowUpTypeFormValues,
@@ -563,6 +570,17 @@ export interface CreateFollowUpInput {
   typeFields?: FollowUpTypeFormValues;
   sourceFollowUpId?: string | null;
   contactId?: string | null;
+  /**
+   * Stable id for this save attempt. Retries of the same save must reuse it.
+   * A new follow-up for the same company uses a new id.
+   * Ignored when sourceFollowUpId is set: that successor key is the idempotency key.
+   */
+  clientRequestId?: string | null;
+}
+
+interface FollowUpIdentityRow {
+  id: string;
+  due_at: string;
 }
 
 export async function fetchPendingFollowUpsForCompany(
@@ -1004,11 +1022,81 @@ export async function fetchDoNotFollowUpFollowUpsForCompany(
   };
 }
 
+async function findSuccessorFollowUpRow(
+  sourceFollowUpId: string,
+): Promise<{
+  row: FollowUpIdentityRow | null;
+  error: { message?: string; code?: string } | null;
+}> {
+  const { data, error } = await supabase
+    .from("follow_ups")
+    .select("id, due_at")
+    .eq("source_follow_up_id", sourceFollowUpId)
+    .order("created_at", { ascending: true })
+    .limit(1);
+
+  if (error) {
+    if (isMissingColumnError(error, "source_follow_up_id")) {
+      return { row: null, error: null };
+    }
+    return { row: null, error };
+  }
+
+  return { row: (data?.[0] as FollowUpIdentityRow | undefined) ?? null, error: null };
+}
+
+async function findFollowUpByCreationKey(creationKey: string): Promise<{
+  row: FollowUpIdentityRow | null;
+  unsupported: boolean;
+  error: { message?: string; code?: string } | null;
+}> {
+  const { data, error } = await supabase
+    .from("follow_ups")
+    .select("id, due_at")
+    .eq("creation_key", creationKey)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingColumnError(error, "creation_key")) {
+      return { row: null, unsupported: true, error: null };
+    }
+    return { row: null, unsupported: false, error };
+  }
+
+  return {
+    row: (data as FollowUpIdentityRow | null) ?? null,
+    unsupported: false,
+    error: null,
+  };
+}
+
+async function returnExistingFollowUp(
+  companyId: string,
+  ownerUserId: string,
+  row: FollowUpIdentityRow,
+): Promise<{
+  error: { message?: string; code?: string } | null;
+  followUpId: string | null;
+  dueAt: string | null;
+}> {
+  const syncResult = await syncCompanyNextFollowUpAt(companyId, ownerUserId);
+  if (syncResult.error) {
+    return {
+      error: syncResult.error,
+      followUpId: row.id,
+      dueAt: row.due_at,
+    };
+  }
+
+  return { error: null, followUpId: row.id, dueAt: row.due_at };
+}
+
 export async function createFollowUp(
   input: CreateFollowUpInput,
 ): Promise<{
   error: { message?: string; code?: string } | null;
   followUpId: string | null;
+  dueAt: string | null;
 }> {
   const { data: company, error: companyError } = await supabase
     .from("companies")
@@ -1017,11 +1105,15 @@ export async function createFollowUp(
     .maybeSingle();
 
   if (companyError) {
-    return { error: companyError, followUpId: null };
+    return { error: companyError, followUpId: null, dueAt: null };
   }
 
   if (!company?.user_id) {
-    return { error: { message: "Company not found." }, followUpId: null };
+    return {
+      error: { message: "Company not found." },
+      followUpId: null,
+      dueAt: null,
+    };
   }
 
   const ownerUserId = company.user_id as string;
@@ -1036,13 +1128,14 @@ export async function createFollowUp(
       .maybeSingle();
 
     if (contactError) {
-      return { error: contactError, followUpId: null };
+      return { error: contactError, followUpId: null, dueAt: null };
     }
 
     if (!contact) {
       return {
         error: { message: "Contact does not belong to this company." },
         followUpId: null,
+        dueAt: null,
       };
     }
   }
@@ -1053,11 +1146,47 @@ export async function createFollowUp(
   });
 
   if (block.error) {
-    return { error: block.error, followUpId: null };
+    return { error: block.error, followUpId: null, dueAt: null };
   }
 
   if (block.message) {
-    return { error: { message: block.message }, followUpId: null };
+    return { error: { message: block.message }, followUpId: null, dueAt: null };
+  }
+
+  const creationKey = followUpCreationKey({
+    clientRequestId: input.clientRequestId,
+    sourceFollowUpId: input.sourceFollowUpId,
+  });
+
+  if (input.sourceFollowUpId) {
+    const existingSource = await findSuccessorFollowUpRow(input.sourceFollowUpId);
+    if (existingSource.error) {
+      return { error: existingSource.error, followUpId: null, dueAt: null };
+    }
+    if (existingSource.row) {
+      return returnExistingFollowUp(
+        input.companyId,
+        ownerUserId,
+        existingSource.row,
+      );
+    }
+  }
+
+  let includeCreationKey = Boolean(creationKey);
+  if (creationKey) {
+    const existingKey = await findFollowUpByCreationKey(creationKey);
+    if (existingKey.error) {
+      return { error: existingKey.error, followUpId: null, dueAt: null };
+    }
+    if (existingKey.unsupported) {
+      includeCreationKey = false;
+    } else if (existingKey.row) {
+      return returnExistingFollowUp(
+        input.companyId,
+        ownerUserId,
+        existingKey.row,
+      );
+    }
   }
 
   const seasonalFields = input.typeFields
@@ -1067,36 +1196,86 @@ export async function createFollowUp(
         input.dueAt,
       );
 
-  const { data, error } = await supabase
-    .from("follow_ups")
-    .insert({
-      user_id: ownerUserId,
-      company_id: input.companyId,
-      contact_id: contactId,
-      title: input.title,
-      notes: input.notes ?? null,
-      due_at: input.dueAt,
-      status: "pending" as FollowUpStatus,
-      source_follow_up_id: input.sourceFollowUpId ?? null,
-      ...seasonalFields,
-    })
-    .select("id")
-    .maybeSingle();
+  const insertValues: Record<string, unknown> = {
+    user_id: ownerUserId,
+    company_id: input.companyId,
+    contact_id: contactId,
+    title: input.title,
+    notes: input.notes ?? null,
+    due_at: input.dueAt,
+    status: "pending" as FollowUpStatus,
+    source_follow_up_id: input.sourceFollowUpId ?? null,
+    ...seasonalFields,
+  };
 
-  if (error) {
-    return { error, followUpId: null };
+  if (includeCreationKey && creationKey) {
+    insertValues.creation_key = creationKey;
   }
 
+  let { data, error } = await supabase
+    .from("follow_ups")
+    .insert(insertValues)
+    .select("id, due_at")
+    .maybeSingle();
+
+  if (error && includeCreationKey && isMissingColumnError(error, "creation_key")) {
+    delete insertValues.creation_key;
+    const retry = await supabase
+      .from("follow_ups")
+      .insert(insertValues)
+      .select("id, due_at")
+      .maybeSingle();
+    data = retry.data;
+    error = retry.error;
+  }
+
+  if (error && isUniqueViolation(error)) {
+    if (creationKey) {
+      const racedKey = await findFollowUpByCreationKey(creationKey);
+      if (racedKey.row) {
+        return returnExistingFollowUp(
+          input.companyId,
+          ownerUserId,
+          racedKey.row,
+        );
+      }
+    }
+
+    if (input.sourceFollowUpId) {
+      const racedSource = await findSuccessorFollowUpRow(input.sourceFollowUpId);
+      if (racedSource.row) {
+        return returnExistingFollowUp(
+          input.companyId,
+          ownerUserId,
+          racedSource.row,
+        );
+      }
+    }
+  }
+
+  if (error) {
+    return { error, followUpId: null, dueAt: null };
+  }
+
+  const created = data as FollowUpIdentityRow | null;
   const syncResult = await syncCompanyNextFollowUpAt(
     input.companyId,
     ownerUserId,
   );
 
   if (syncResult.error) {
-    return { error: syncResult.error, followUpId: data?.id ?? null };
+    return {
+      error: syncResult.error,
+      followUpId: created?.id ?? null,
+      dueAt: created?.due_at ?? null,
+    };
   }
 
-  return { error: null, followUpId: data?.id ?? null };
+  return {
+    error: null,
+    followUpId: created?.id ?? null,
+    dueAt: created?.due_at ?? null,
+  };
 }
 
 export async function syncCompanyNextFollowUpAt(
@@ -1238,6 +1417,8 @@ export interface CreateActivityNoteInput {
   notes: string;
   subject?: string | null;
   activityType?: ActivityType;
+  /** Stable id for this save. A retry must reuse it so the note is stored once. */
+  clientRequestId?: string | null;
 }
 
 export async function createActivityNote(
@@ -1248,13 +1429,19 @@ export async function createActivityNote(
     return { error: { message: "Activity notes are required." } };
   }
 
-  const { error } = await supabase.from("activities").insert({
-    user_id: input.userId,
-    company_id: input.companyId,
-    activity_type: input.activityType ?? "note",
-    subject: input.subject?.trim() || "Follow-up contact",
-    notes: trimmedNotes,
-    activity_at: new Date().toISOString(),
+  const { error } = await insertActivityOnce({
+    creationKey: activityCreationKey({
+      purpose: "note",
+      clientRequestId: input.clientRequestId,
+    }),
+    values: {
+      user_id: input.userId,
+      company_id: input.companyId,
+      activity_type: input.activityType ?? "note",
+      subject: input.subject?.trim() || "Follow-up contact",
+      notes: trimmedNotes,
+      activity_at: new Date().toISOString(),
+    },
   });
 
   if (error) {

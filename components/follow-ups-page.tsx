@@ -54,6 +54,7 @@ import {
   type ScheduleNextMode,
 } from "@/lib/followUpOutcomes";
 import { getDaysOverdue } from "@/lib/brokerDashboard";
+import { useSingleFlightGate } from "@/lib/singleFlight";
 import { supabase } from "@/lib/supabaseClient";
 
 type WorkcenterTab = "today" | "overdue" | "upcoming" | "completed";
@@ -163,6 +164,7 @@ function ScheduleNextFollowUpModal({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     setLocalError(null);
 
     if (scheduleMode === "automatic_week") {
@@ -281,6 +283,7 @@ function ScheduleNextFollowUpModal({
             <button
               type="submit"
               disabled={saving}
+              aria-busy={saving}
               className="crm-btn-primary disabled:opacity-60"
             >
               {saving
@@ -319,6 +322,7 @@ function ActivityNoteModal({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     if (!notes.trim()) return;
 
     onSave({
@@ -412,6 +416,7 @@ function ActivityNoteModal({
             <button
               type="submit"
               disabled={saving}
+              aria-busy={saving}
               className="crm-btn-primary disabled:opacity-60"
             >
               {saving ? "Saving..." : "Save activity"}
@@ -460,6 +465,7 @@ function DoNotFollowUpModal({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     setLocalError(null);
 
     if (!reason) {
@@ -609,6 +615,7 @@ function DoNotFollowUpModal({
             <button
               type="submit"
               disabled={saving}
+              aria-busy={saving}
               className="inline-flex items-center justify-center rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-800 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving ? "Saving..." : "Confirm Do Not Follow Up"}
@@ -941,6 +948,9 @@ export function FollowUpsPage() {
   );
 
   const [actionFollowUpId, setActionFollowUpId] = useState<string | null>(null);
+  const scheduleFlight = useSingleFlightGate();
+  const activityFlight = useSingleFlightGate();
+  const doNotFollowUpFlight = useSingleFlightGate();
   const [scheduleTarget, setScheduleTarget] = useState<{
     followUp: FollowUpEnriched;
     outcome: FollowUpCompletionOutcome;
@@ -1238,31 +1248,50 @@ export function FollowUpsPage() {
 
     const followUp = scheduleTarget.followUp;
     const outcome = scheduleTarget.outcome;
+    const begun = scheduleFlight.tryBegin(
+      JSON.stringify({
+        followUpId: followUp.id,
+        outcome,
+        scheduleMode: input.scheduleMode,
+        newDueAt: input.newDueAt,
+      }),
+    );
+    if (!begun.ok) return;
+
     setActionFollowUpId(followUp.id);
     setScheduleError(null);
+    let committed = false;
 
-    const { error, newDueAt } = await completeFollowUpAndScheduleNext({
-      followUp,
-      outcome,
-      actorUserId: user.id,
-      newDueAt: input.newDueAt,
-      scheduleMode: input.scheduleMode,
-    });
+    try {
+      const { error, newDueAt } = await completeFollowUpAndScheduleNext({
+        followUp,
+        outcome,
+        actorUserId: user.id,
+        newDueAt: input.newDueAt,
+        scheduleMode: input.scheduleMode,
+      });
 
-    if (error) {
-      setScheduleError(formatSupabaseError(error));
+      if (error) {
+        setScheduleError(formatSupabaseError(error));
+        return;
+      }
+
+      committed = true;
+      setScheduleTarget(null);
+      showSuccess(
+        outcome === "no_response"
+          ? `No response recorded. Next follow-up scheduled for ${formatDateTime(newDueAt)}.`
+          : `Follow-up completed. Next follow-up scheduled for ${formatDateTime(newDueAt)}.`,
+      );
+      await refreshData();
+    } catch (error) {
+      if (!committed) {
+        setScheduleError(formatSupabaseError(error as { message?: string }));
+      }
+    } finally {
+      scheduleFlight.finish(committed ? "committed" : "rejected");
       setActionFollowUpId(null);
-      return;
     }
-
-    setScheduleTarget(null);
-    await refreshData();
-    setActionFollowUpId(null);
-    showSuccess(
-      outcome === "no_response"
-        ? `No response recorded. Next follow-up scheduled for ${formatDateTime(newDueAt)}.`
-        : `Follow-up completed. Next follow-up scheduled for ${formatDateTime(newDueAt)}.`,
-    );
   }
 
   async function handleActivitySave(input: {
@@ -1272,31 +1301,51 @@ export function FollowUpsPage() {
   }) {
     if (!activityTarget || !user) return;
 
-    setActionFollowUpId(activityTarget.id);
+    const followUp = activityTarget;
+    const begun = activityFlight.tryBegin(
+      JSON.stringify({
+        followUpId: followUp.id,
+        notes: input.notes.trim(),
+        subject: input.subject.trim(),
+        activityType: input.activityType,
+      }),
+    );
+    if (!begun.ok) return;
+
+    setActionFollowUpId(followUp.id);
     setActivityError(null);
+    let committed = false;
 
-    const ownerUserId =
-      activityTarget.companyOwnerUserId ?? activityTarget.user_id;
+    const ownerUserId = followUp.companyOwnerUserId ?? followUp.user_id;
 
-    const { error } = await createActivityNote({
-      userId: user.id,
-      companyId: activityTarget.company_id,
-      ownerUserId,
-      notes: input.notes,
-      subject: input.subject,
-      activityType: input.activityType,
-    });
+    try {
+      const { error } = await createActivityNote({
+        userId: user.id,
+        companyId: followUp.company_id,
+        ownerUserId,
+        notes: input.notes,
+        subject: input.subject,
+        activityType: input.activityType,
+        clientRequestId: begun.clientRequestId,
+      });
 
-    if (error) {
-      setActivityError(formatSupabaseError(error));
+      if (error) {
+        setActivityError(formatSupabaseError(error));
+        return;
+      }
+
+      committed = true;
+      setActivityTarget(null);
+      setCountRefreshKey((key) => key + 1);
+      showSuccess("Activity note saved to the company timeline.");
+    } catch (error) {
+      if (!committed) {
+        setActivityError(formatSupabaseError(error as { message?: string }));
+      }
+    } finally {
+      activityFlight.finish(committed ? "committed" : "rejected");
       setActionFollowUpId(null);
-      return;
     }
-
-    setActivityTarget(null);
-    setActionFollowUpId(null);
-    setCountRefreshKey((key) => key + 1);
-    showSuccess("Activity note saved to the company timeline.");
   }
 
   async function handleDoNotFollowUpConfirm(input: {
@@ -1308,38 +1357,57 @@ export function FollowUpsPage() {
     if (!canManageFollowUp(doNotFollowUpTarget)) return;
 
     const followUp = doNotFollowUpTarget;
+    const begun = doNotFollowUpFlight.tryBegin(
+      JSON.stringify({
+        followUpId: followUp.id,
+        reason: input.reason,
+        notes: input.notes.trim(),
+        suppression: input.suppression,
+      }),
+    );
+    if (!begun.ok) return;
+
     setActionFollowUpId(followUp.id);
     setDoNotFollowUpError(null);
+    let committed = false;
 
-    const { error } = await stopFollowUp({
-      followUpId: followUp.id,
-      companyId: followUp.company_id,
-      ownerUserId: followUp.companyOwnerUserId ?? followUp.user_id,
-      actorUserId: user.id,
-      reason: input.reason,
-      notes: input.notes,
-      associatedContactId: followUp.contact_id ?? followUp.contactId,
-      associatedContactName: followUp.contactName,
-      companyName: followUp.companyName,
-      suppression: input.suppression,
-    });
+    try {
+      const { error } = await stopFollowUp({
+        followUpId: followUp.id,
+        companyId: followUp.company_id,
+        ownerUserId: followUp.companyOwnerUserId ?? followUp.user_id,
+        actorUserId: user.id,
+        reason: input.reason,
+        notes: input.notes,
+        associatedContactId: followUp.contact_id ?? followUp.contactId,
+        associatedContactName: followUp.contactName,
+        companyName: followUp.companyName,
+        suppression: input.suppression,
+      });
 
-    if (error) {
-      setDoNotFollowUpError(formatSupabaseError(error));
+      if (error) {
+        setDoNotFollowUpError(formatSupabaseError(error));
+        return;
+      }
+
+      committed = true;
+      setDoNotFollowUpTarget(null);
+      showSuccess(
+        input.suppression === "company"
+          ? "Follow-up closed. Future follow-ups are suppressed for this company."
+          : input.suppression === "contact"
+            ? "Follow-up closed. Future follow-ups are suppressed for this contact only."
+            : "Follow-up closed. It was removed from the active agenda.",
+      );
+      await refreshData();
+    } catch (error) {
+      if (!committed) {
+        setDoNotFollowUpError(formatSupabaseError(error as { message?: string }));
+      }
+    } finally {
+      doNotFollowUpFlight.finish(committed ? "committed" : "rejected");
       setActionFollowUpId(null);
-      return;
     }
-
-    setDoNotFollowUpTarget(null);
-    await refreshData();
-    setActionFollowUpId(null);
-    showSuccess(
-      input.suppression === "company"
-        ? "Follow-up closed. Future follow-ups are suppressed for this company."
-        : input.suppression === "contact"
-          ? "Follow-up closed. Future follow-ups are suppressed for this contact only."
-          : "Follow-up closed. It was removed from the active agenda.",
-    );
   }
 
   if (loading) {

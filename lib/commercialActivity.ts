@@ -1,11 +1,16 @@
 import type { ActivityType } from "@/lib/crmConstants";
 import { ACTIVITY_TYPE_LABELS } from "@/lib/crmConstants";
 import {
+  activityCreationKey,
+  completionActivityCreationKey,
+} from "@/lib/followUpIdempotency";
+import {
   createFollowUp,
   syncCompanyCommercialDates,
   type CreateFollowUpInput,
 } from "@/lib/followUps";
 import type { FollowUpTypeFormValues } from "@/lib/followUpSeasonal";
+import { insertActivityOnce } from "@/lib/idempotentActivityInsert";
 import { supabase } from "@/lib/supabaseClient";
 
 export interface NextFollowUpInput {
@@ -23,6 +28,8 @@ export interface LogCommercialActivityInput {
   notes: string;
   contactId?: string | null;
   nextFollowUp?: NextFollowUpInput | null;
+  /** Stable id for this save. Retries must reuse it. */
+  clientRequestId?: string | null;
 }
 
 export interface CompleteFollowUpWithActivityInput {
@@ -35,6 +42,8 @@ export interface CompleteFollowUpWithActivityInput {
   notes: string;
   contactId?: string | null;
   nextFollowUp?: NextFollowUpInput | null;
+  /** Stable id for this save. Retries must reuse it. */
+  clientRequestId?: string | null;
 }
 
 function buildFollowUpTitle(channelType: ActivityType): string {
@@ -50,34 +59,36 @@ async function insertCommercialActivity(input: {
   contactId?: string | null;
   scheduledFollowUpAt?: string | null;
   subject?: string | null;
+  creationKey?: string | null;
 }) {
   const trimmedNotes = input.notes.trim();
   if (!trimmedNotes) {
     return { error: { message: "Outcome / notes are required." } };
   }
 
-  const { error } = await supabase.from("activities").insert({
-    user_id: input.userId,
-    company_id: input.companyId,
-    contact_id: input.contactId?.trim() || null,
-    activity_type: input.activityType,
-    subject:
-      input.subject?.trim() || ACTIVITY_TYPE_LABELS[input.activityType],
-    notes: trimmedNotes,
-    activity_at: input.activityAt,
-    scheduled_follow_up_at: input.scheduledFollowUpAt ?? null,
+  return insertActivityOnce({
+    creationKey: input.creationKey ?? null,
+    values: {
+      user_id: input.userId,
+      company_id: input.companyId,
+      contact_id: input.contactId?.trim() || null,
+      activity_type: input.activityType,
+      subject:
+        input.subject?.trim() || ACTIVITY_TYPE_LABELS[input.activityType],
+      notes: trimmedNotes,
+      activity_at: input.activityAt,
+      scheduled_follow_up_at: input.scheduledFollowUpAt ?? null,
+    },
   });
-
-  if (error) {
-    return { error };
-  }
-
-  return { error: null };
 }
 
 async function createNextFollowUp(
   input: LogCommercialActivityInput | CompleteFollowUpWithActivityInput,
   nextFollowUp: NextFollowUpInput,
+  link?: {
+    sourceFollowUpId?: string | null;
+    clientRequestId?: string | null;
+  },
 ) {
   const followUpInput: CreateFollowUpInput = {
     userId: input.userId,
@@ -87,6 +98,8 @@ async function createNextFollowUp(
     dueAt: nextFollowUp.dueAt,
     typeFields: nextFollowUp.typeFields,
     contactId: input.contactId,
+    sourceFollowUpId: link?.sourceFollowUpId,
+    clientRequestId: link?.clientRequestId ?? input.clientRequestId,
   };
 
   const result = await createFollowUp(followUpInput);
@@ -111,6 +124,10 @@ export async function logCommercialActivity(
     notes: trimmedNotes,
     contactId: input.contactId,
     scheduledFollowUpAt: nextDueAt,
+    creationKey: activityCreationKey({
+      purpose: "log",
+      clientRequestId: input.clientRequestId,
+    }),
   });
 
   if (activityResult.error) {
@@ -118,7 +135,9 @@ export async function logCommercialActivity(
   }
 
   if (input.nextFollowUp?.dueAt) {
-    const followUpResult = await createNextFollowUp(input, input.nextFollowUp);
+    const followUpResult = await createNextFollowUp(input, input.nextFollowUp, {
+      clientRequestId: input.clientRequestId,
+    });
     if (followUpResult.error) {
       return followUpResult;
     }
@@ -158,6 +177,35 @@ export async function completeFollowUpWithActivity(
   }
 
   if (!completedRow) {
+    const { data: current, error: readError } = await supabase
+      .from("follow_ups")
+      .select("id, status")
+      .eq("id", input.followUpId)
+      .eq("company_id", input.companyId)
+      .maybeSingle();
+
+    if (readError) {
+      return { error: readError };
+    }
+
+    if (current?.status === "completed") {
+      if (input.nextFollowUp?.dueAt) {
+        const followUpResult = await createNextFollowUp(
+          input,
+          input.nextFollowUp,
+          {
+            sourceFollowUpId: input.followUpId,
+            clientRequestId: input.clientRequestId,
+          },
+        );
+        if (followUpResult.error) {
+          return followUpResult;
+        }
+      }
+
+      return syncCompanyCommercialDates(input.companyId, input.userId);
+    }
+
     return {
       error: { message: "Only open follow-ups can be completed." },
     };
@@ -174,6 +222,7 @@ export async function completeFollowUpWithActivity(
     contactId: input.contactId,
     scheduledFollowUpAt: nextDueAt,
     subject: `Completed follow-up: ${ACTIVITY_TYPE_LABELS[input.activityType]}`,
+    creationKey: completionActivityCreationKey(input.followUpId),
   });
 
   if (activityResult.error) {
@@ -181,7 +230,10 @@ export async function completeFollowUpWithActivity(
   }
 
   if (input.nextFollowUp?.dueAt) {
-    const followUpResult = await createNextFollowUp(input, input.nextFollowUp);
+    const followUpResult = await createNextFollowUp(input, input.nextFollowUp, {
+      sourceFollowUpId: input.followUpId,
+      clientRequestId: input.clientRequestId,
+    });
     if (followUpResult.error) {
       return followUpResult;
     }

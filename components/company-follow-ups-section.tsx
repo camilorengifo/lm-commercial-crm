@@ -52,7 +52,26 @@ import {
   type ContactOption,
 } from "@/lib/loadOpportunities";
 import { supabase } from "@/lib/supabaseClient";
+import { useSingleFlightGate } from "@/lib/singleFlight";
 import { companyDraftKey, usePersistentDraft } from "@/lib/usePersistentDraft";
+
+function logActivityFingerprint(
+  companyId: string,
+  form: CommercialActivityFormValues,
+): string {
+  return JSON.stringify({
+    companyId,
+    activityType: form.activity_type,
+    activityAt: form.activity_at,
+    notes: form.notes.trim(),
+    contactId: form.contact_id,
+    schedule: form.schedule_next_follow_up,
+    nextAt: form.next_follow_up_at,
+    nextType: form.next_follow_up_type,
+    nextNotes: form.next_follow_up_notes.trim(),
+    followUpType: form.followUpTypeFields,
+  });
+}
 
 function isLogFormEmpty(form: CommercialActivityFormValues): boolean {
   return (
@@ -120,6 +139,7 @@ function EditFollowUpModal({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
 
     const parsedDueAt = followUpFromDatetimeLocalValue(dueAt);
     if (!parsedDueAt || !title.trim()) return;
@@ -248,6 +268,7 @@ function CompleteFollowUpModal({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     onComplete(form);
   }
 
@@ -291,6 +312,7 @@ function CompleteFollowUpModal({
             <button
               type="submit"
               disabled={saving}
+              aria-busy={saving}
               className="crm-btn-primary disabled:opacity-60"
             >
               {saving ? "Saving..." : "Complete follow-up"}
@@ -341,6 +363,8 @@ export function CompanyFollowUpsSection({
       isEmpty: isLogFormEmpty,
     });
   const [logSubmitting, setLogSubmitting] = useState(false);
+  const logFlight = useSingleFlightGate();
+  const completeFlight = useSingleFlightGate();
   const [logError, setLogError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -441,126 +465,160 @@ export function CompanyFollowUpsSection({
 
   async function handleLogActivity(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const begun = logFlight.tryBegin(logActivityFingerprint(companyId, logForm));
+    if (!begun.ok) return;
+
     setLogError(null);
     setSuccessMessage(null);
     setLogSubmitting(true);
+    let committed = false;
 
-    const activityAt = fromDatetimeLocalValue(logForm.activity_at);
-    const validationError = validateCommercialActivityForm(logForm, activityAt);
+    try {
+      const activityAt = fromDatetimeLocalValue(logForm.activity_at);
+      const validationError = validateCommercialActivityForm(logForm, activityAt);
 
-    if (validationError) {
-      setLogError(validationError);
-      setLogSubmitting(false);
-      return;
-    }
-
-    const nextDueAt = logForm.schedule_next_follow_up
-      ? fromDatetimeLocalValue(logForm.next_follow_up_at)
-      : null;
-
-    if (logForm.schedule_next_follow_up && !nextDueAt) {
-      setLogError("Next follow-up date is not valid.");
-      setLogSubmitting(false);
-      return;
-    }
-
-    if (logForm.schedule_next_follow_up) {
-      const schedulingWarning = schedulingWarningFor(logForm.contact_id);
-      if (schedulingWarning) {
-        setLogError(schedulingWarning);
-        setLogSubmitting(false);
+      if (validationError) {
+        setLogError(validationError);
         return;
       }
-    }
 
-    const { error } = await logCommercialActivity({
-      userId,
-      companyId,
-      activityType: logForm.activity_type,
-      activityAt: activityAt!,
-      notes: logForm.notes,
-      contactId: logForm.contact_id || null,
-      nextFollowUp:
-        nextDueAt && logForm.schedule_next_follow_up
-          ? commercialActivityFormToNextFollowUp(logForm, nextDueAt)
-          : null,
-    });
+      const nextDueAt = logForm.schedule_next_follow_up
+        ? fromDatetimeLocalValue(logForm.next_follow_up_at)
+        : null;
 
-    if (error) {
-      setLogError(formatSupabaseError(error));
+      if (logForm.schedule_next_follow_up && !nextDueAt) {
+        setLogError("Next follow-up date is not valid.");
+        return;
+      }
+
+      if (logForm.schedule_next_follow_up) {
+        const schedulingWarning = schedulingWarningFor(logForm.contact_id);
+        if (schedulingWarning) {
+          setLogError(schedulingWarning);
+          return;
+        }
+      }
+
+      const { error } = await logCommercialActivity({
+        userId,
+        companyId,
+        activityType: logForm.activity_type,
+        activityAt: activityAt!,
+        notes: logForm.notes,
+        contactId: logForm.contact_id || null,
+        clientRequestId: begun.clientRequestId,
+        nextFollowUp:
+          nextDueAt && logForm.schedule_next_follow_up
+            ? commercialActivityFormToNextFollowUp(logForm, nextDueAt)
+            : null,
+      });
+
+      if (error) {
+        setLogError(formatSupabaseError(error));
+        return;
+      }
+
+      committed = true;
+      clearLogForm();
+      setSuccessMessage("Activity logged successfully.");
+      await refreshAll();
+      onCompanyUpdated?.();
+    } catch (error) {
+      if (!committed) {
+        setLogError(formatSupabaseError(error as { message?: string }));
+      }
+    } finally {
+      logFlight.finish(committed ? "committed" : "rejected");
       setLogSubmitting(false);
-      return;
     }
-
-    clearLogForm();
-    setSuccessMessage("Activity logged successfully.");
-    await refreshAll();
-    onCompanyUpdated?.();
-    setLogSubmitting(false);
   }
 
   async function handleCompleteFollowUp(form: CommercialActivityFormValues) {
     if (!completeTarget) return;
 
+    const followUpId = completeTarget.id;
+    const begun = completeFlight.tryBegin(
+      JSON.stringify({
+        followUpId,
+        activityType: form.activity_type,
+        activityAt: form.activity_at,
+        notes: form.notes.trim(),
+        contactId: form.contact_id,
+        schedule: form.schedule_next_follow_up,
+        nextAt: form.next_follow_up_at,
+        nextType: form.next_follow_up_type,
+        nextNotes: form.next_follow_up_notes.trim(),
+        followUpType: form.followUpTypeFields,
+      }),
+    );
+    if (!begun.ok) return;
+
     setCompleteError(null);
-    setCompletingId(completeTarget.id);
+    setCompletingId(followUpId);
+    let committed = false;
 
-    const activityAt = fromDatetimeLocalValue(form.activity_at);
-    const validationError = validateCommercialActivityForm(form, activityAt);
+    try {
+      const activityAt = fromDatetimeLocalValue(form.activity_at);
+      const validationError = validateCommercialActivityForm(form, activityAt);
 
-    if (validationError) {
-      setCompleteError(validationError);
-      setCompletingId(null);
-      return;
-    }
-
-    const nextDueAt = form.schedule_next_follow_up
-      ? fromDatetimeLocalValue(form.next_follow_up_at)
-      : null;
-
-    if (form.schedule_next_follow_up && !nextDueAt) {
-      setCompleteError("Next follow-up date is not valid.");
-      setCompletingId(null);
-      return;
-    }
-
-    if (form.schedule_next_follow_up) {
-      const schedulingWarning = schedulingWarningFor(
-        form.contact_id || completeTarget.contact_id || "",
-      );
-      if (schedulingWarning) {
-        setCompleteError(schedulingWarning);
-        setCompletingId(null);
+      if (validationError) {
+        setCompleteError(validationError);
         return;
       }
-    }
 
-    const { error } = await completeFollowUpWithActivity({
-      followUpId: completeTarget.id,
-      userId,
-      companyId,
-      asAdmin: isAdmin,
-      activityType: form.activity_type,
-      activityAt: activityAt!,
-      notes: form.notes,
-      contactId: form.contact_id || completeTarget.contact_id || null,
-      nextFollowUp:
-        nextDueAt && form.schedule_next_follow_up
-          ? commercialActivityFormToNextFollowUp(form, nextDueAt)
-          : null,
-    });
+      const nextDueAt = form.schedule_next_follow_up
+        ? fromDatetimeLocalValue(form.next_follow_up_at)
+        : null;
 
-    if (error) {
-      setCompleteError(formatSupabaseError(error));
+      if (form.schedule_next_follow_up && !nextDueAt) {
+        setCompleteError("Next follow-up date is not valid.");
+        return;
+      }
+
+      if (form.schedule_next_follow_up) {
+        const schedulingWarning = schedulingWarningFor(
+          form.contact_id || completeTarget.contact_id || "",
+        );
+        if (schedulingWarning) {
+          setCompleteError(schedulingWarning);
+          return;
+        }
+      }
+
+      const { error } = await completeFollowUpWithActivity({
+        followUpId,
+        userId,
+        companyId,
+        asAdmin: isAdmin,
+        activityType: form.activity_type,
+        activityAt: activityAt!,
+        notes: form.notes,
+        contactId: form.contact_id || completeTarget.contact_id || null,
+        clientRequestId: begun.clientRequestId,
+        nextFollowUp:
+          nextDueAt && form.schedule_next_follow_up
+            ? commercialActivityFormToNextFollowUp(form, nextDueAt)
+            : null,
+      });
+
+      if (error) {
+        setCompleteError(formatSupabaseError(error));
+        return;
+      }
+
+      committed = true;
+      setCompleteTarget(null);
+      setSuccessMessage("Follow-up completed and activity logged.");
+      await refreshAll();
+      onCompanyUpdated?.();
+    } catch (error) {
+      if (!committed) {
+        setCompleteError(formatSupabaseError(error as { message?: string }));
+      }
+    } finally {
+      completeFlight.finish(committed ? "committed" : "rejected");
       setCompletingId(null);
-      return;
     }
-
-    setCompleteTarget(null);
-    setSuccessMessage("Follow-up completed and activity logged.");
-    await refreshAll();
-    onCompanyUpdated?.();
-    setCompletingId(null);
   }
 
   async function handleEditFollowUpSave(input: {
@@ -696,6 +754,7 @@ export function CompanyFollowUpsSection({
               <button
                 type="submit"
                 disabled={logSubmitting}
+                aria-busy={logSubmitting}
                 className="crm-btn-primary disabled:opacity-60"
               >
                 {logSubmitting ? "Saving..." : "Save activity"}

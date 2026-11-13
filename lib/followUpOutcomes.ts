@@ -129,13 +129,15 @@ async function findSuccessorFollowUp(
     .from("follow_ups")
     .select("id, due_at")
     .eq("source_follow_up_id", sourceFollowUpId)
-    .maybeSingle();
+    .order("created_at", { ascending: true })
+    .limit(1);
 
-  if (error || !data) {
+  const row = data?.[0];
+  if (error || !row) {
     return null;
   }
 
-  return data as { id: string; due_at: string };
+  return row as { id: string; due_at: string };
 }
 
 async function findOutcomeActivity(input: {
@@ -444,6 +446,8 @@ export async function completeFollowUpAndScheduleNext(
     };
   }
 
+  const scheduledDueAt = createResult.dueAt ?? newDueAt;
+
   const activityResult = await insertOutcomeActivity({
     outcome: input.outcome,
     actorUserId: input.actorUserId,
@@ -451,7 +455,7 @@ export async function completeFollowUpAndScheduleNext(
     completedFollowUpId,
     nextFollowUpId,
     previousDueAt,
-    newDueAt,
+    newDueAt: scheduledDueAt,
     scheduleMode: input.scheduleMode,
     contactId: input.followUp.contactId,
     contactName: input.followUp.contactName,
@@ -461,7 +465,7 @@ export async function completeFollowUpAndScheduleNext(
   if (activityResult.error) {
     return {
       error: activityResult.error,
-      newDueAt,
+      newDueAt: scheduledDueAt,
       nextFollowUpId,
     };
   }
@@ -474,12 +478,12 @@ export async function completeFollowUpAndScheduleNext(
   if (syncResult.error) {
     return {
       error: syncResult.error,
-      newDueAt,
+      newDueAt: scheduledDueAt,
       nextFollowUpId,
     };
   }
 
-  return { error: null, newDueAt, nextFollowUpId };
+  return { error: null, newDueAt: scheduledDueAt, nextFollowUpId };
 }
 
 export function describeFollowUpOutcomeActivityType(type: ActivityType): string {
