@@ -6,10 +6,12 @@ import {
 } from "@/lib/aiConstants";
 import { OPENAI_MODEL, OPENAI_OUTREACH_MODEL } from "@/lib/openai-config";
 import {
+  buildJsonCompletionParams,
   buildOutreachResponseBody,
   extractResponsesOutputText,
   isRetryableOutreachError,
   nextOutreachAttempt,
+  responseUsesRequestedModel,
   OUTREACH_MAX_OUTPUT_TOKEN_CEILING,
   OUTREACH_MAX_OUTPUT_TOKENS,
   OUTREACH_RESEARCH_PROMPT_CACHE_KEY,
@@ -179,23 +181,42 @@ export async function generateJsonCompletion<T>(input: {
 
   const model = input.model ?? getOpenAIModel();
   const requestContext = input.context ?? "generateJsonCompletion";
-
-  const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming =
-    {
-      model,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: input.systemPrompt },
-        { role: "user", content: input.userPrompt },
-      ],
-    };
-
-  if (modelSupportsCustomTemperature(model)) {
-    params.temperature = 0.3;
-  }
+  const params = buildJsonCompletionParams({
+    model,
+    systemPrompt: input.systemPrompt,
+    userPrompt: input.userPrompt,
+  });
+  const started = Date.now();
 
   try {
     const response = await client.chat.completions.create(params);
+    const usage = response.usage;
+    console.info(`[openai] usage (${requestContext})`, {
+      model: response.model || model,
+      latencyMs: Date.now() - started,
+      inputTokens: usage?.prompt_tokens ?? null,
+      outputTokens: usage?.completion_tokens ?? null,
+      reasoningTokens: usage?.completion_tokens_details?.reasoning_tokens ?? null,
+      cachedInputTokens: usage?.prompt_tokens_details?.cached_tokens ?? null,
+      totalTokens: usage?.total_tokens ?? null,
+    });
+
+    if (!responseUsesRequestedModel(model, response.model)) {
+      const ref = createAiErrorRef();
+      logOpenAiFailure(
+        {
+          ref,
+          selectedModel: model,
+          httpStatus: 200,
+          errorCode: "unexpected_model",
+          errorType: "model_mismatch",
+          errorMessage: `Response model did not match the requested model (${response.model || "missing"}).`,
+          requestId: response.id ?? null,
+        },
+        requestContext,
+      );
+      return { data: null, error: formatAiClientError(ref) };
+    }
 
     const content = response.choices[0]?.message?.content?.trim();
     if (!content) {
@@ -371,6 +392,22 @@ export async function generateOutreachJson<T>(input: {
       }
 
       if (decision === "accept" && parsedOk) {
+        if (!responseUsesRequestedModel(model, response.model)) {
+          const ref = createAiErrorRef();
+          logOpenAiFailure(
+            {
+              ref,
+              selectedModel: model,
+              httpStatus: 200,
+              errorCode: "unexpected_model",
+              errorType: "model_mismatch",
+              errorMessage: `Response model did not match the requested model (${response.model || "missing"}).`,
+              requestId: response.id ?? null,
+            },
+            requestContext,
+          );
+          return { data: null, error: formatAiClientError(ref) };
+        }
         return { data: parsed as T, error: null };
       }
 
@@ -447,6 +484,9 @@ export async function createWebSearchResponse(input: {
 
   const model = input.model?.trim() || getOpenAIModel();
   const requestContext = input.context ?? "createWebSearchResponse";
+  const reasoningEffort =
+    input.reasoningEffort ??
+    (modelSupportsCustomTemperature(model) ? undefined : "medium");
   const started = Date.now();
 
   try {
@@ -456,9 +496,7 @@ export async function createWebSearchResponse(input: {
         store: false,
         prompt_cache_key: OUTREACH_RESEARCH_PROMPT_CACHE_KEY,
         max_output_tokens: 2000,
-        ...(input.reasoningEffort
-          ? { reasoning: { effort: input.reasoningEffort } }
-          : {}),
+        ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
         tools: [
           {
             type: "web_search",
@@ -502,6 +540,14 @@ export async function createWebSearchResponse(input: {
           }
         }
       }
+    }
+
+    if (!responseUsesRequestedModel(model, response.model)) {
+      return {
+        text: null,
+        citations,
+        error: "Market research returned an unexpected model.",
+      };
     }
 
     if (!extracted.text || extracted.status === "failed") {

@@ -25,6 +25,11 @@ export const OUTREACH_QUICK_MAX_OUTPUT_TOKENS = 2048;
 
 export const OUTREACH_QUICK_MAX_OUTPUT_TOKEN_CEILING = 4096;
 
+/** Shared CRM JSON calls. Reasoning tokens count toward this completion budget. */
+export const CRM_JSON_MAX_COMPLETION_TOKENS = 8192;
+
+export const CRM_REASONING_EFFORT = "medium" as const;
+
 const RETRYABLE_HTTP_STATUSES = new Set([408, 409, 429, 500, 502, 503, 504]);
 
 export function resolveOutreachModel(
@@ -53,6 +58,49 @@ export function modelSupportsCustomTemperature(model: string): boolean {
   }
 
   return true;
+}
+
+export function responseUsesRequestedModel(
+  requested: string,
+  actual: string | null | undefined,
+): boolean {
+  const asked = requested.trim().toLowerCase();
+  const returned = actual?.trim().toLowerCase() ?? "";
+  if (!asked || !returned) return false;
+  return returned === asked || returned.startsWith(`${asked}-`);
+}
+
+export function buildJsonCompletionParams(input: {
+  model: string;
+  systemPrompt: string;
+  userPrompt: string;
+}): {
+  model: string;
+  messages: Array<{ role: "system" | "user"; content: string }>;
+  response_format: { type: "json_object" };
+  temperature?: number;
+  reasoning_effort?: typeof CRM_REASONING_EFFORT;
+  max_completion_tokens?: number;
+} {
+  const messages = [
+    { role: "system" as const, content: input.systemPrompt },
+    { role: "user" as const, content: input.userPrompt },
+  ];
+  const base = {
+    model: input.model,
+    messages,
+    response_format: { type: "json_object" as const },
+  };
+
+  if (modelSupportsCustomTemperature(input.model)) {
+    return { ...base, temperature: 0.3 };
+  }
+
+  return {
+    ...base,
+    reasoning_effort: CRM_REASONING_EFFORT,
+    max_completion_tokens: CRM_JSON_MAX_COMPLETION_TOKENS,
+  };
 }
 
 export function isRetryableOutreachError(error: unknown): boolean {
