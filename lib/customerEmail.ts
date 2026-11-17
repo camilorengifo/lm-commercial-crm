@@ -3,15 +3,23 @@ import {
   enforceCustomerBrand,
 } from "@/lib/customerBrand";
 
-export const OUTREACH_LANGUAGES = ["English", "Español"] as const;
+export const OUTREACH_LANGUAGES = [
+  { value: "en", label: "English" },
+  { value: "es", label: "Español" },
+] as const;
 
-export type OutreachLanguage = (typeof OUTREACH_LANGUAGES)[number];
+export type OutreachLanguage = (typeof OUTREACH_LANGUAGES)[number]["value"];
+
+const LANGUAGE_ALIASES: Record<string, OutreachLanguage> = {
+  en: "en",
+  es: "es",
+  english: "en",
+  español: "es",
+  espanol: "es",
+};
 
 export function resolveOutreachLanguage(value: string): OutreachLanguage | null {
-  if ((OUTREACH_LANGUAGES as readonly string[]).includes(value)) {
-    return value as OutreachLanguage;
-  }
-  return null;
+  return LANGUAGE_ALIASES[value.trim().toLowerCase()] ?? null;
 }
 
 export interface CustomerEmailDraft {
@@ -59,7 +67,7 @@ function stripBannedContent(value: string): string {
 }
 
 function closingFor(language: OutreachLanguage): string {
-  return language === "Español" ? "Saludos," : "Best,";
+  return language === "es" ? "Saludos," : "Best,";
 }
 
 function ensureClosing(body: string, language: OutreachLanguage): string {
@@ -115,7 +123,7 @@ export function presentCustomerEmail(
     subject:
       subject ||
       (finishedBody
-        ? language === "Español"
+        ? language === "es"
           ? "Embarques"
           : "Your shipments"
         : ""),

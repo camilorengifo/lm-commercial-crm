@@ -61,7 +61,7 @@ export async function POST(request: Request) {
   const companyId = body.companyId?.trim();
   const outreachType = resolveOutreachType(body.outreachType?.trim() ?? "");
   const tone = resolveOutreachTone(body.tone?.trim() ?? "");
-  const language = resolveOutreachLanguage(body.language?.trim() || "English");
+  const language = resolveOutreachLanguage(body.language?.trim() || "en");
 
   if (!companyId) {
     return aiClientErrorResponse("Company ID is required.", 400);

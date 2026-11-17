@@ -6,6 +6,7 @@ import {
   countWords,
   emailCopyText,
   presentCustomerEmail,
+  resolveOutreachLanguage,
 } from "./customerEmail.ts";
 import {
   buildMarketAssessment,
@@ -60,9 +61,14 @@ const scenarios = [
 ] as const;
 
 assert.equal(scenarios.length, 20);
+assert.equal(resolveOutreachLanguage("en"), "en");
+assert.equal(resolveOutreachLanguage("es"), "es");
+assert.equal(resolveOutreachLanguage("English"), "en");
+assert.equal(resolveOutreachLanguage("Español"), "es");
+assert.equal(resolveOutreachLanguage("fr"), null);
 
 for (const [index, [subject, body]] of scenarios.entries()) {
-  const language = index >= 13 ? "Español" : "English";
+  const language = index >= 13 ? "es" : "en";
   const presented = presentCustomerEmail(
     {
       subject,
@@ -82,8 +88,8 @@ for (const [index, [subject, body]] of scenarios.entries()) {
   assert.doesNotMatch(copy, /I hope this email finds you well/i);
   assert.match(copy, new RegExp(CUSTOMER_FACING_COMPANY));
   assert.match(copy, /^Subject:/);
-  if (language === "English") assert.match(presented.body, /Best,/);
-  if (language === "Español") {
+  if (language === "en") assert.match(presented.body, /Best,/);
+  if (language === "es") {
     assert.match(presented.body, /Saludos,/);
     assert.doesNotMatch(presented.body, /\nBest,/);
   }
@@ -97,7 +103,7 @@ const question = presentCustomerEmail(
     body: "",
     clarificationQuestion: "Which shipment should this email cover?",
   },
-  "English",
+  "en",
 );
 assert.equal(question.clarificationQuestion, "Which shipment should this email cover?");
 assert.equal(question.body, "");
@@ -281,7 +287,10 @@ const sql = readFileSync(
   join(here, "../supabase/migrations/046_market_research_reports.sql"),
   "utf8",
 );
-assert.match(assistant, /Outreach Language/);
+assert.match(assistant, />\s*Language\s*</);
+assert.match(assistant, /language: current\.language/);
+assert.match(assistant, /language: "en"/);
+assert.doesNotMatch(assistant, /Outreach Language/);
 assert.match(assistant, /Enable Market Research/);
 assert.match(assistant, /CUSTOMER_FACING_COMPANY/);
 assert.match(assistant, /does not send email/i);

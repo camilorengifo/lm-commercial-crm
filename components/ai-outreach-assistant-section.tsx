@@ -20,6 +20,7 @@ import {
 import { CUSTOMER_FACING_COMPANY } from "@/lib/customerBrand";
 import {
   OUTREACH_LANGUAGES,
+  resolveOutreachLanguage,
   type OutreachLanguage,
 } from "@/lib/customerEmail";
 import { formatSupabaseError } from "@/lib/crmFormat";
@@ -60,7 +61,7 @@ function emptyOutreachDraft(): AiOutreachDraftState {
     outreachType: DEFAULT_OUTREACH_TYPE,
     contactId: "",
     tone: DEFAULT_TONE,
-    language: "English",
+    language: "en",
     goal: "",
     enableMarketResearch: false,
     laneKey: "",
@@ -86,7 +87,7 @@ function withDraftDefaults(value: Partial<AiOutreachDraftState>): AiOutreachDraf
       resolveOutreachType(String(value.outreachType ?? base.outreachType)) ??
       base.outreachType,
     tone: resolveOutreachTone(String(value.tone ?? base.tone)) ?? base.tone,
-    language: value.language === "Español" ? "Español" : "English",
+    language: resolveOutreachLanguage(String(value.language ?? "en")) ?? "en",
     enableMarketResearch: value.enableMarketResearch === true,
     laneKey: value.laneKey ?? "",
     goal: value.goal ?? "",
@@ -105,7 +106,7 @@ function isOutreachDraftEmpty(value: AiOutreachDraftState): boolean {
     !value.contactId &&
     !value.laneKey &&
     !value.enableMarketResearch &&
-    value.language === "English" &&
+    value.language === "en" &&
     !value.draft &&
     !value.editedSubject.trim() &&
     !value.editedBody.trim() &&
@@ -370,7 +371,7 @@ export function AiOutreachAssistantSection({
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid gap-4 md:grid-cols-2">
-          <div>
+          <div className="md:col-start-1">
             <label htmlFor="outreach-type" className="mb-1.5 block text-sm font-medium text-zinc-700">
               Outreach Type
             </label>
@@ -394,7 +395,7 @@ export function AiOutreachAssistantSection({
             </select>
           </div>
 
-          <div>
+          <div className="md:col-start-1">
             <label htmlFor="outreach-contact" className="mb-1.5 block text-sm font-medium text-zinc-700">
               Contact
             </label>
@@ -419,9 +420,9 @@ export function AiOutreachAssistantSection({
             </select>
           </div>
 
-          <div>
+          <div className="md:col-start-1">
             <label htmlFor="outreach-language" className="mb-1.5 block text-sm font-medium text-zinc-700">
-              Outreach Language
+              Language
             </label>
             <select
               id="outreach-language"
@@ -429,21 +430,21 @@ export function AiOutreachAssistantSection({
               onChange={(event) =>
                 setForm((prev) => ({
                   ...withDraftDefaults(prev),
-                  language: event.target.value as OutreachLanguage,
+                  language: resolveOutreachLanguage(event.target.value) ?? "en",
                 }))
               }
               disabled={loading}
               className={fieldClass}
             >
               {OUTREACH_LANGUAGES.map((language) => (
-                <option key={language} value={language}>
-                  {language}
+                <option key={language.value} value={language.value}>
+                  {language.label}
                 </option>
               ))}
             </select>
           </div>
 
-          <div>
+          <div className="md:col-start-1">
             <label htmlFor="outreach-tone" className="mb-1.5 block text-sm font-medium text-zinc-700">
               Tone
             </label>

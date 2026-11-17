@@ -151,13 +151,17 @@ assert.match(OUTREACH_SYSTEM_PROMPT, /produce/i);
 assert.match(OUTREACH_SYSTEM_PROMPT, /Do not invent/i);
 assert.match(OUTREACH_SYSTEM_PROMPT, /do NOT send email/i);
 assert.match(OUTREACH_SYSTEM_PROMPT, /40 to 90 words/);
-assert.match(OUTREACH_SYSTEM_PROMPT, /Español/);
+assert.match(OUTREACH_SYSTEM_PROMPT, /selected language parameter is authoritative/);
+assert.match(OUTREACH_SYSTEM_PROMPT, /If language is "en"/);
+assert.match(OUTREACH_SYSTEM_PROMPT, /If language is "es"/);
+assert.match(OUTREACH_SYSTEM_PROMPT, /Never infer the language/);
+assert.match(OUTREACH_SYSTEM_PROMPT, /Armstrong Transport Group/);
 assert.doesNotMatch(OUTREACH_SYSTEM_PROMPT, /Commercial Objective|Market Intelligence|AI Recommendations/);
 assert.doesNotMatch(OUTREACH_SYSTEM_PROMPT, /temperature|top_p/);
 assert.doesNotMatch(OUTREACH_SYSTEM_PROMPT, /Logistics Masters is the customer's/);
 
 const promptOptions = {
-  language: "English" as const,
+  language: "en" as const,
   emailGuidance: [],
   selectedLane: {
     origin: "McAllen, TX",
@@ -176,7 +180,7 @@ assert.match(prompt, /Avocados/);
 assert.match(prompt, /McAllen, TX/);
 assert.match(prompt, /Do not imply that any message will be sent/);
 assert.match(prompt, /missingInformation/);
-assert.match(prompt, /Language: English/);
+assert.match(prompt, /language: "en"/);
 assert.doesNotMatch(prompt, /956-555-0199/);
 assert.doesNotMatch(prompt, /Commercial Objective|Market Intelligence/);
 
@@ -192,10 +196,10 @@ assert.doesNotMatch(objectionPrompt, /sections must be/);
 
 const spanishPrompt = buildOutreachUserPrompt(source(), {
   ...promptOptions,
-  language: "Español",
+  language: "es",
 });
-assert.match(spanishPrompt, /Language: Español/);
-assert.match(spanishPrompt, /this language only/);
+assert.match(spanishPrompt, /language: "es"/);
+assert.match(spanishPrompt, /parameter is authoritative/);
 
 const incompletePrompt = buildOutreachUserPrompt(
   source({
@@ -214,7 +218,7 @@ const incompletePrompt = buildOutreachUserPrompt(
     lanePatterns: [],
   }),
   {
-    language: "English",
+    language: "en",
     emailGuidance: [],
     selectedLane: null,
     laneChosenByBroker: false,

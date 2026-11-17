@@ -491,10 +491,13 @@ ${OUTREACH_GUARDRAILS}
 Write like a real freight broker, not an AI assistant.
 Be direct, conversational, concise, and commercially intelligent.
 Every sentence must have a purpose.
-Use natural American business English when the selected language is English.
-Use natural professional Latin American Spanish when the selected language is Español.
-Never mix languages. Never switch language because the CRM notes are in another language.
-Preserve company names, proper names, and freight terms such as reefer, dry van, and flatbed.
+The selected language parameter is authoritative.
+If language is "en", generate the complete email in natural American business English.
+If language is "es", generate the complete email in natural Latin American Spanish.
+Never infer the language from the customer's CRM records, previous emails, company name or conversation history.
+Never mix English and Spanish.
+The subject, email body and signature must follow the selected language, while preserving the official company name Armstrong Transport Group.
+Preserve proper names and freight terms such as reefer, dry van, and flatbed.
 
 The email is the only output:
 - Subject: short and specific.
@@ -558,7 +561,7 @@ export function buildOutreachUserPrompt(
 
   return `Write one ${context.outreachType} email for "${context.company.name}".
 The broker will review it and send it manually. Do not imply that any message will be sent.
-Language: ${options.language}. Write the subject, body, and closing in this language only.
+language: "${options.language}". This parameter is authoritative for the subject, body, and closing.
 Tone: ${context.tone}
 Commercial context: ${context.goal?.trim() || "Not specified."}
 ${outreachPurpose(context.outreachType)}
