@@ -1,4 +1,10 @@
 import type { AccountCrmSummary, BrokerCrmSummary } from "@/lib/aiCrmContext";
+import { CUSTOMER_BRAND_RULES, enforceCustomerBrand } from "@/lib/customerBrand";
+import {
+  presentCustomerEmail,
+  type CustomerEmailDraft,
+  type OutreachLanguage,
+} from "@/lib/customerEmail";
 import {
   compactOutreachContext,
   type OutreachPromptSource,
@@ -6,6 +12,7 @@ import {
 
 const SHARED_RULES = `
 You are the AI commercial assistant for a freight broker CRM called Logistics Masters AI Commercial Assistant.
+${CUSTOMER_BRAND_RULES}
 Analyze ONLY the CRM data provided in the user message.
 Do not invent facts, activities, contacts, lanes, rates, or outcomes that are not present in the data.
 If information is missing or insufficient, say that clearly in your output.
@@ -222,39 +229,39 @@ Return JSON with exactly these keys:
 - followUpDisciplineReminders (array of strings)`;
 
 const OUTREACH_GUARDRAILS = `
-This tool is ASSISTIVE ONLY. You prepare drafts and commercial recommendations for the broker to review, edit, and send manually.
+This tool is ASSISTIVE ONLY. You prepare a draft for the broker to review, edit, and send manually.
 You do NOT send email, WhatsApp, SMS, LinkedIn messages, or any other outreach. You do NOT contact customers, book freight, quote a live rate, or run campaigns.
 You do NOT say that a message was sent, will be sent automatically, or that you contacted the customer.
 
-Use ONLY the CRM records and, when present, the market research payload in the user message.
+Use ONLY the CRM records and the usable market notes in the user message.
 Do not invent companies, contacts, job titles, calls, emails, lanes, commodities, equipment, frequencies, volumes, quotes, rates, objections, preferences, seasons, or outcomes.
-There is no separate industry field. Describe the customer's business only from company notes, commodities, and opportunity notes. If those do not state an industry or product, say it is not on file.
-If information is missing, say it is not on file. The user message lists missing information. Do not fill those gaps with plausible freight details.
+There is no separate industry field. Describe the customer's business only from company notes, commodities, and opportunity notes. If those do not state an industry or product, leave it out of the customer email.
+Do not fill missing facts with plausible freight details.
 Historical quoted rates and target rates are past figures recorded by the broker. They are not current market rates. Never invent a current freight rate, index, capacity condition, or market statistic.
-Never say capacity is tightening or rates are increasing unless that exact claim appears in a market finding whose scope is "verified".
-A finding whose scope is "observation" is general or dated context. Do not present it as a current lane condition.
-If market research is null, its status is "unavailable", or there are no findings, say that current market research was not available. Do not replace it with generic produce or freight commentary.
+Never say capacity is tightening or rates are increasing unless a usable market note supports that condition.
 Do not treat a national trend as a condition on one of this customer's lanes.
-Do not open with "just checking in", "hope you are doing well", or "touching base".
+Do not tell the customer that research was or was not available.
+Do not open with "just checking in", "hope you are doing well", "I hope this email finds you well", or "touching base".
 
 How to think:
-1. Customer intelligence. Read the sales stage, priority, location, notes, contact roles, last communication, follow-ups, and load history. Judge whether the relationship is new, active, quoted, quiet, or in need of nurturing.
-2. Personalized outreach. Write natural, professional American business English. Use the customer's actual products, lanes, and equipment when they are on file. Match the requested tone. Vary the structure so it does not sound like a stock sales template. Do not repeat an approach the broker marked too generic, not relevant, or incorrect.
-3. Follow-up strategy. Recommend the next touch from the recorded history. Do not repeat an ask that earlier notes already made. When the account is quiet, early, or the last note shows resistance, recommend nurturing rather than a hard close.
-4. Sales intelligence. Name an objection only when a note records it, and suggest how the broker can respond without inventing a concession. Suggest a Logistics Masters service only where the recorded freight supports it. Offer discovery questions that are still unanswered, chosen from shipping volume, lanes, commodities, seasonality, and the customer's current broker or carrier setup. Recommend one next commercial action the broker can take.
+1. Customer intelligence. Read the sales stage, priority, location, notes, contact roles, last communication, follow-ups, and load history.
+2. Personalized outreach. Follow the selected language. Use the customer's actual products, lanes, and equipment when they are on file. Match the requested tone. Do not repeat an approach the broker marked too generic, not relevant, or incorrect.
+3. Follow-up. Let the recorded history decide the one question in the email. Do not repeat an ask that earlier notes already made. When the account is quiet or the last note shows resistance, keep the ask light.
+4. Sales intelligence. Name an objection only when a note records it. Use Armstrong Transport Group when the draft speaks as the company.
 5. Freight judgment. You understand full truckload (FTL), refrigerated freight (reefer), dry van, flatbed, produce and fresh vegetables, fruit and vegetable transportation, shipping lanes, seasonal demand, carrier capacity, spot and contract rates, and shipper and receiver operations. Use that judgment to interpret the records. Do not use it to invent this customer's volume, lanes, or the market.
 
-The broker goal, when provided, refines the selected outreach type. It does not replace that type's objective.
+The commercial context, when provided, refines the email. It does not create a separate objective section.
 Prior draft feedback is the broker's judgment on earlier drafts for this company. Do not say the model was retrained.
-Write in English. Be specific, concise, and commercially useful.
+Follow the selected language. Be specific, concise, and commercially useful.
 `.trim();
 
 export const ACCOUNT_OUTREACH_QUICK_SYSTEM_PROMPT = `
-You are a senior Business Development Director at Logistics Masters, a United States freight brokerage. You advise one broker inside the Logistics Masters AI Commercial Assistant.
+You write customer-facing drafts for Armstrong Transport Group brokers inside the CRM.
+${CUSTOMER_BRAND_RULES}
 ${OUTREACH_GUARDRAILS}
 Return JSON with exactly these keys:
 - suggestedEmailSubject (string; specific to the recorded business, never "Checking in" or "Following up")
-- suggestedEmailBody (string; about 90 to 160 words, for the broker to copy)
+- suggestedEmailBody (string; about 40 to 90 words, for the broker to copy, signed Armstrong Transport Group)
 - linkedInMessage (string; shorter than the email, same facts)
 - callOpener (string; one or two sentences the broker can say)
 - followUpReason (string; why this touch is the right next action, including any missing CRM information)
@@ -287,6 +294,7 @@ export function buildAccountOutreachQuickUserPrompt(
 ): string {
   const brief = compactOutreachContext(context);
   return `Generate outreach DRAFTS for company "${context.company.name}".
+Language: English.
 The broker will review and reach out manually. Do not imply anything will be sent automatically.
 If missingInformation is not empty, acknowledge those gaps in followUpReason and do not invent them.
 
@@ -311,8 +319,12 @@ function normalizeAccountPlanItem(value: unknown): BrokerActionPlanAccount | nul
     whyItMatters: normalizeString(record.whyItMatters) || "Review CRM signals for this account.",
     recommendedAction:
       normalizeString(record.recommendedAction) || "Review account and plan next touch.",
-    emailDraft: normalizeString(record.emailDraft) || "Draft unavailable — add more CRM context.",
-    callOpener: normalizeString(record.callOpener) || "Draft unavailable — add more CRM context.",
+    emailDraft:
+      enforceCustomerBrand(normalizeString(record.emailDraft)) ||
+      "Draft unavailable — add more CRM context.",
+    callOpener:
+      enforceCustomerBrand(normalizeString(record.callOpener)) ||
+      "Draft unavailable — add more CRM context.",
   };
 }
 
@@ -352,15 +364,16 @@ export function normalizeAccountOutreachQuick(
 
   return {
     suggestedEmailSubject:
-      normalizeString(record.suggestedEmailSubject) || "Follow-up on freight capacity",
+      enforceCustomerBrand(normalizeString(record.suggestedEmailSubject)) ||
+      "Follow-up on freight capacity",
     suggestedEmailBody:
-      normalizeString(record.suggestedEmailBody) ||
+      enforceCustomerBrand(normalizeString(record.suggestedEmailBody)) ||
       "Add more CRM notes to generate a stronger email draft.",
     linkedInMessage:
-      normalizeString(record.linkedInMessage) ||
+      enforceCustomerBrand(normalizeString(record.linkedInMessage)) ||
       "Add contact details to personalize LinkedIn outreach.",
     callOpener:
-      normalizeString(record.callOpener) ||
+      enforceCustomerBrand(normalizeString(record.callOpener)) ||
       "Hi — I wanted to follow up on your freight needs.",
     followUpReason:
       normalizeString(record.followUpReason) ||
@@ -448,280 +461,145 @@ export function isOutreachFeedbackRating(
 }
 
 export const OUTREACH_TONES = [
+  "Natural / Conversational",
   "Professional",
   "Friendly",
   "Direct",
-  "Warm",
-  "Persistent but respectful",
 ] as const;
 
 export type OutreachTone = (typeof OUTREACH_TONES)[number];
 
-export interface OutreachDraftResponse {
-  subjectLine: string | null;
-  subjectAlternatives: string[];
-  commercialSummary: string | null;
-  marketInsight: string | null;
-  commercialRecommendation: string | null;
-  suggestedNextStep: string | null;
-  emailDraft: string | null;
-  sections: Array<{ title: string; content: string }>;
-  fullDraft: string;
+const LEGACY_OUTREACH_TONES: Record<string, OutreachTone> = {
+  Warm: "Friendly",
+  "Persistent but respectful": "Direct",
+};
+
+export function resolveOutreachTone(value: string): OutreachTone | null {
+  if ((OUTREACH_TONES as readonly string[]).includes(value)) {
+    return value as OutreachTone;
+  }
+  return LEGACY_OUTREACH_TONES[value] ?? null;
 }
 
+export type OutreachDraftResponse = CustomerEmailDraft;
+
 export const OUTREACH_SYSTEM_PROMPT = `
-You are a senior Business Development Director at Logistics Masters, a United States freight brokerage. You advise one broker inside the Logistics Masters AI Commercial Assistant.
+You are an experienced freight broker writing one customer email for Armstrong Transport Group.
+${CUSTOMER_BRAND_RULES}
 ${OUTREACH_GUARDRAILS}
-Email bodies should usually be 90 to 160 words. Call scripts should stay short enough to use live.
-Return JSON with these keys:
-- subjectLine (string or null; the strongest subject, null for Call Script)
-- subjectAlternatives (array of exactly 3 distinct strings for every type except Call Script; empty array for Call Script)
-- commercialSummary (string or null)
-- marketInsight (string or null; required for Technical Follow-up, otherwise null)
-- commercialRecommendation (string or null; include a recorded objection and a way to handle it when the notes contain one)
-- suggestedNextStep (string; the single next commercial action)
-- emailDraft (string or null; the email body for email types, null for Call Script)
-- sections (array of { title, content }; never empty; use the titles required by the selected outreach type)
-- fullDraft (string; the complete text the broker can copy)
+
+Write like a real freight broker, not an AI assistant.
+Be direct, conversational, concise, and commercially intelligent.
+Every sentence must have a purpose.
+Use natural American business English when the selected language is English.
+Use natural professional Latin American Spanish when the selected language is Español.
+Never mix languages. Never switch language because the CRM notes are in another language.
+Preserve company names, proper names, and freight terms such as reefer, dry van, and flatbed.
+
+The email is the only output:
+- Subject: short and specific.
+- Body: usually 40 to 90 words, 1 to 3 short paragraphs, one simple question.
+- Close with "Best," in English or "Saludos," in Spanish.
+- Do not put the company name in the body. The signature is added separately as Armstrong Transport Group.
+
+Do not write commercial objectives, strategies, recommendations, market reports, source citations, or an explanation of the email.
+Do not use more than one call to action.
+Do not mention that anyone is monitoring data.
+Include a market condition only when the user message provides a usable market note and it helps this customer. Paraphrase it in one sentence. Do not quote rates, percentages, or load-to-truck ratios. Do not present a regional note as this lane's rate.
+If no usable market note is provided, write from the CRM history and do not mention market conditions.
+If a recorded quote is the reason for the email, treat the quoted rate as a past quote. Do not present it as today's market rate.
+If the request cannot be answered without inventing a lane, quote, or contact, leave subject and body empty and put one short clarification question in clarificationQuestion. Otherwise clarificationQuestion is null.
+
+Return JSON with exactly these keys:
+- subject (string)
+- body (string)
+- signature (string; Armstrong Transport Group)
+- clarificationQuestion (string or null)
 `.trim();
 
-function outreachStrategy(type: string): string {
+function outreachPurpose(type: string): string {
   switch (type) {
     case "Call Script":
-      return `Objective: prepare a live phone conversation.
-Sections must be: Opening line, Reason for calling, Discovery questions, Value proposition, Closing / next step.
-The reason for calling must come from a recorded lane, quote, follow-up, or note. Discovery questions must be an ordered list inside that section's content.
-subjectLine is null. subjectAlternatives is empty. emailDraft is null. marketInsight is null.`;
+      return "The email should offer a short call. The reason must come from a recorded lane, quote, follow-up, or note.";
     case "Relationship Follow-up":
-      return `Objective: continue a real commercial relationship.
-Use a recorded interaction, open follow-up, quote, objection, or lane as the reason to reconnect.
-Match the tone to the relationship. If the last note shows resistance or the account is quiet, nurture it instead of pushing for an award.
-Write a natural note that can lead to more business over time.
-Do not send a generic check-in. If there is no recorded reason to write, say what is missing instead of inventing warmth.
-sections must be: Relationship context, Email draft, Suggested next step.
-marketInsight is null.`;
+      return "Continue the recorded relationship. If the last note shows resistance or the account is quiet, keep the ask light.";
     case "Technical Follow-up":
-      return `Objective: give the customer a useful market reason to talk, as a freight market analyst and commercial advisor.
-Every point must connect to a recorded lane, region, commodity, or equipment type for this company.
-commercialSummary explains the freight pattern found in the CRM.
-marketInsight restates only the supplied market findings, with source name, publication date, and whether each item is verified or an observation. If research is unavailable, say so in marketInsight.
-commercialRecommendation explains why the finding matters to this customer and how the broker should open the conversation.
-emailDraft is a short professional email that shares that specific insight and invites a conversation. It must not fit any generic produce company.
-suggestedNextStep is the broker's practical next action.
-sections must be: Commercial Intelligence Summary, Market Insight, Commercial Recommendation, Email Draft, Suggested Next Step.`;
+      return "If a usable market note is provided, let one relevant condition be the reason to write. Otherwise use the recorded lane or shipment.";
     case "Quote Follow-up":
-      return `Objective: follow up on a recorded quotation.
-Name the recorded lane, equipment, commodity when present, and the date of the quote. Use the recorded quoted rate only as a past quote, framed for broker review.
-If a note records an objection, address that objection. Ask what happened with that freight. Do not present the old quote as today's market rate.
-sections must be: Recorded quote, Objection handling, Email draft, Suggested next step.
-marketInsight is null.`;
+      return "Follow up on a recorded quote. Mention the recorded lane and equipment. Ask what happened with that freight. Do not restate the old rate as today's market.";
     case "Re-engagement":
-      return `Objective: reopen a quiet account using its actual history.
-Refer to the last recorded interaction, quote, or lane and the gap since then. Acknowledge that the account has gone quiet when the dates show that.
-Recommend nurturing when there is no fresh opportunity. Do not pretend there was a recent conversation.
-sections must be: Last recorded contact, Email draft, Suggested next step.
-marketInsight is null.`;
+      return "Reopen a quiet account from the last recorded interaction or lane. Do not pretend there was a recent conversation.";
     case "Opportunity Development":
-      return `Objective: develop the next commercial opportunity from patterns already in the CRM.
-Point to a repeated lane, a lost or quoted opportunity, or a geographic concentration. Propose a specific conversation about that freight.
-Do not invent a new lane the customer has never requested.
-If no lane is recorded, the sections must say what is missing and ask discovery questions. Do not invent a lane.
-sections must be: Pattern in the CRM, Discovery questions, Email draft, Suggested next step.
-marketInsight is null.`;
+      return "Ask about a lane, commodity, or equipment already recorded. Do not invent a new lane.";
     default:
-      return "Use the CRM records to write a specific draft. marketInsight is null.";
+      return "Use the recorded commercial history as the reason to write.";
   }
 }
 
 export function buildOutreachUserPrompt(
   context: OutreachPromptSource,
-  marketResearch: import("@/lib/marketResearchRules").MarketResearchResult | null,
+  options: {
+    language: OutreachLanguage;
+    emailGuidance: string[];
+    selectedLane: {
+      origin: string;
+      destination: string;
+      equipmentType: string | null;
+      commodities: string[];
+    } | null;
+    laneChosenByBroker: boolean;
+  },
 ): string {
-  const emailType = isEmailOutreachType(context.outreachType);
   const brief = compactOutreachContext(context);
+  const guidance =
+    options.emailGuidance.length > 0
+      ? options.emailGuidance.map((note) => `- ${note}`).join("\n")
+      : "None. Do not mention market conditions, capacity, rates, or weather.";
 
-  return `Generate a ${context.outreachType} DRAFT for company "${context.company.name}".
-The broker will review this text and reach out manually. Do not imply that any message will be sent.
-If missingInformation is not empty, say what is not on file. Do not invent those facts.
-
+  return `Write one ${context.outreachType} email for "${context.company.name}".
+The broker will review it and send it manually. Do not imply that any message will be sent.
+Language: ${options.language}. Write the subject, body, and closing in this language only.
 Tone: ${context.tone}
-Broker goal: ${context.goal?.trim() || "Not specified. Use the outreach type's commercial objective."}
+Commercial context: ${context.goal?.trim() || "Not specified."}
+${outreachPurpose(context.outreachType)}
 Selected contact: ${
     context.selectedContact
       ? `${context.selectedContact.name}${context.selectedContact.jobTitle ? `, ${context.selectedContact.jobTitle}` : ""}`
-      : "No specific contact"
+      : "No specific contact. Use a simple greeting without inventing a name."
+  }
+Lane for this email: ${
+    options.selectedLane
+      ? `${options.selectedLane.origin} to ${options.selectedLane.destination}${options.selectedLane.equipmentType ? `, ${options.selectedLane.equipmentType}` : ""}${options.selectedLane.commodities.length ? `, ${options.selectedLane.commodities.join(", ")}` : ""}. ${options.laneChosenByBroker ? "The broker selected this lane." : "This is the most recently recorded lane. Do not claim it is the customer's only lane."}`
+      : "No recorded lane. Do not invent one."
   }
 
-Strategy:
-${outreachStrategy(context.outreachType)}
-
-Subject rules for email drafts:
-- Write exactly 3 subject alternatives.
-- Each subject must be specific to this company's recorded business. Use a lane, commodity, equipment type, or verified market finding when one exists.
-- Do not use "Checking in", "Following up", "Quick question", or "Hope you are well".
-- No clickbait and no claims the research payload does not support.
-- Put the best subject in subjectLine as well as subjectAlternatives.
+Usable market notes, already checked. Do not copy them verbatim, do not cite a source, and do not add numbers:
+${guidance}
 
 CRM brief:
 ${JSON.stringify(brief)}
 
-Market research payload:
-${JSON.stringify(marketResearch)}
-
-${
-  emailType
-    ? "fullDraft must include the three subject alternatives, then the email body, then the suggested next step."
-    : "fullDraft is the call script the broker can read on the phone."
-}`;
-}
-
-function normalizeStringList(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is string => typeof item === "string")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function uniqueSubjects(subjects: string[]): string[] {
-  const seen = new Set<string>();
-  const unique: string[] = [];
-  for (const subject of subjects) {
-    const key = subject.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(subject);
-  }
-  return unique.slice(0, 3);
+Return only the email JSON. Do not add a commercial objective, market report, or recommendation.`;
 }
 
 export function normalizeOutreachDraft(
   value: unknown,
-  outreachType: string,
+  language: OutreachLanguage,
 ): OutreachDraftResponse {
-  const record =
-    value && typeof value === "object"
-      ? (value as Record<string, unknown>)
-      : {};
-
-  const sections = Array.isArray(record.sections)
-    ? record.sections
-        .filter(
-          (item): item is { title: string; content: string } =>
-            Boolean(
-              item &&
-                typeof item === "object" &&
-                typeof (item as { title?: unknown }).title === "string" &&
-                typeof (item as { content?: unknown }).content === "string",
-            ),
-        )
-        .map((item) => ({
-          title: item.title.trim(),
-          content: item.content.trim(),
-        }))
-        .filter((item) => item.title && item.content)
-    : [];
-
-  const emailType = isEmailOutreachType(outreachType);
-  const subjectAlternatives = emailType
-    ? uniqueSubjects(normalizeStringList(record.subjectAlternatives))
-    : [];
-  const subjectLine = emailType
-    ? (typeof record.subjectLine === "string" && record.subjectLine.trim()
-        ? record.subjectLine.trim()
-        : null) ?? subjectAlternatives[0] ?? null
-    : null;
-  const normalizedSubjects =
-    emailType && subjectLine
-      ? uniqueSubjects([subjectLine, ...subjectAlternatives])
-      : subjectAlternatives;
-
-  const textOrNull = (key: string): string | null => {
-    const text = typeof record[key] === "string" ? record[key].trim() : "";
-    return text || null;
-  };
-
-  const commercialSummary = textOrNull("commercialSummary");
-  const marketInsight =
-    outreachType === "Technical Follow-up" ? textOrNull("marketInsight") : null;
-  const commercialRecommendation = textOrNull("commercialRecommendation");
-  const suggestedNextStep = textOrNull("suggestedNextStep");
-  const emailDraft = emailType ? textOrNull("emailDraft") : null;
-
-  let fullDraft = typeof record.fullDraft === "string" ? record.fullDraft.trim() : "";
-  if (!fullDraft) {
-    const parts = [
-      commercialSummary ? `Commercial Intelligence Summary\n${commercialSummary}` : "",
-      marketInsight ? `Market Insight\n${marketInsight}` : "",
-      commercialRecommendation
-        ? `Commercial Recommendation\n${commercialRecommendation}`
-        : "",
-      normalizedSubjects.length
-        ? `Subject alternatives\n${normalizedSubjects.map((subject, index) => `${index + 1}. ${subject}`).join("\n")}`
-        : "",
-      emailDraft ? `Email draft\n${emailDraft}` : "",
-      suggestedNextStep ? `Suggested next step\n${suggestedNextStep}` : "",
-      sections.map((section) => `${section.title}\n${section.content}`).join("\n\n"),
-    ].filter(Boolean);
-    fullDraft = parts.join("\n\n") || "No outreach draft was generated.";
-  }
-
-  return {
-    subjectLine,
-    subjectAlternatives: normalizedSubjects,
-    commercialSummary,
-    marketInsight,
-    commercialRecommendation,
-    suggestedNextStep,
-    emailDraft,
-    sections,
-    fullDraft,
-  };
-}
-
-function nullableStringSchema(): Record<string, unknown> {
-  return { anyOf: [{ type: "string" }, { type: "null" }] };
+  return presentCustomerEmail(value, language);
 }
 
 export const OUTREACH_DRAFT_JSON_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
-  required: [
-    "subjectLine",
-    "subjectAlternatives",
-    "commercialSummary",
-    "marketInsight",
-    "commercialRecommendation",
-    "suggestedNextStep",
-    "emailDraft",
-    "sections",
-    "fullDraft",
-  ],
+  required: ["subject", "body", "signature", "clarificationQuestion"],
   properties: {
-    subjectLine: nullableStringSchema(),
-    subjectAlternatives: {
-      type: "array",
-      items: { type: "string" },
+    subject: { type: "string" },
+    body: { type: "string" },
+    signature: { type: "string" },
+    clarificationQuestion: {
+      anyOf: [{ type: "string" }, { type: "null" }],
     },
-    commercialSummary: nullableStringSchema(),
-    marketInsight: nullableStringSchema(),
-    commercialRecommendation: nullableStringSchema(),
-    suggestedNextStep: nullableStringSchema(),
-    emailDraft: nullableStringSchema(),
-    sections: {
-      type: "array",
-      minItems: 1,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["title", "content"],
-        properties: {
-          title: { type: "string" },
-          content: { type: "string" },
-        },
-      },
-    },
-    fullDraft: { type: "string" },
   },
 };
 

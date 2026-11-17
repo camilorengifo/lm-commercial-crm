@@ -142,7 +142,7 @@ assert.ok(sparse.missingInformation.includes("company notes"));
 assert.ok(sparse.missingInformation.includes("commercial history"));
 assert.ok(sparse.missingInformation.includes("lanes, commodities, and equipment"));
 
-assert.match(OUTREACH_SYSTEM_PROMPT, /senior Business Development Director/);
+assert.match(OUTREACH_SYSTEM_PROMPT, /Armstrong Transport Group/);
 assert.match(OUTREACH_SYSTEM_PROMPT, /Full truckload \(FTL\)/i);
 assert.match(OUTREACH_SYSTEM_PROMPT, /reefer/i);
 assert.match(OUTREACH_SYSTEM_PROMPT, /dry van/i);
@@ -150,10 +150,25 @@ assert.match(OUTREACH_SYSTEM_PROMPT, /flatbed/i);
 assert.match(OUTREACH_SYSTEM_PROMPT, /produce/i);
 assert.match(OUTREACH_SYSTEM_PROMPT, /Do not invent/i);
 assert.match(OUTREACH_SYSTEM_PROMPT, /do NOT send email/i);
-assert.match(OUTREACH_SYSTEM_PROMPT, /not on file/i);
+assert.match(OUTREACH_SYSTEM_PROMPT, /40 to 90 words/);
+assert.match(OUTREACH_SYSTEM_PROMPT, /Español/);
+assert.doesNotMatch(OUTREACH_SYSTEM_PROMPT, /Commercial Objective|Market Intelligence|AI Recommendations/);
 assert.doesNotMatch(OUTREACH_SYSTEM_PROMPT, /temperature|top_p/);
+assert.doesNotMatch(OUTREACH_SYSTEM_PROMPT, /Logistics Masters is the customer's/);
 
-const prompt = buildOutreachUserPrompt(source(), null);
+const promptOptions = {
+  language: "English" as const,
+  emailGuidance: [],
+  selectedLane: {
+    origin: "McAllen, TX",
+    destination: "Bronx, NY",
+    equipmentType: "Reefer",
+    commodities: ["Avocados"],
+  },
+  laneChosenByBroker: true,
+};
+
+const prompt = buildOutreachUserPrompt(source(), promptOptions);
 assert.match(prompt, /Valley Produce Co/);
 assert.match(prompt, /too high/);
 assert.match(prompt, /current broker/);
@@ -161,16 +176,26 @@ assert.match(prompt, /Avocados/);
 assert.match(prompt, /McAllen, TX/);
 assert.match(prompt, /Do not imply that any message will be sent/);
 assert.match(prompt, /missingInformation/);
+assert.match(prompt, /Language: English/);
 assert.doesNotMatch(prompt, /956-555-0199/);
+assert.doesNotMatch(prompt, /Commercial Objective|Market Intelligence/);
 
 const objectionPrompt = buildOutreachUserPrompt(
   source({ outreachType: "Quote Follow-up" }),
-  null,
+  promptOptions,
 );
-assert.match(objectionPrompt, /sections must be: Recorded quote/);
+assert.match(objectionPrompt, /recorded quote/i);
 assert.match(objectionPrompt, /Quote Follow-up/);
 assert.match(objectionPrompt, /4500/);
 assert.match(objectionPrompt, /too high/);
+assert.doesNotMatch(objectionPrompt, /sections must be/);
+
+const spanishPrompt = buildOutreachUserPrompt(source(), {
+  ...promptOptions,
+  language: "Español",
+});
+assert.match(spanishPrompt, /Language: Español/);
+assert.match(spanishPrompt, /this language only/);
 
 const incompletePrompt = buildOutreachUserPrompt(
   source({
@@ -188,12 +213,17 @@ const incompletePrompt = buildOutreachUserPrompt(
     opportunities: [],
     lanePatterns: [],
   }),
-  { status: "unavailable", findings: [], limitation: "No lanes on file.", searchedAt: "2026-11-13" },
+  {
+    language: "English",
+    emailGuidance: [],
+    selectedLane: null,
+    laneChosenByBroker: false,
+  },
 );
 assert.match(incompletePrompt, /Blank Shipper/);
 assert.match(incompletePrompt, /company notes/);
-assert.match(incompletePrompt, /unavailable/);
-assert.match(incompletePrompt, /Do not invent those facts/);
+assert.match(incompletePrompt, /Do not mention market conditions/);
+assert.match(incompletePrompt, /Do not invent one/);
 
 const quick = buildAccountOutreachQuickUserPrompt(source());
 assert.match(ACCOUNT_OUTREACH_QUICK_SYSTEM_PROMPT, /do NOT send email/i);

@@ -1,3 +1,8 @@
+import {
+  adapterForUrl,
+  findingFreshness,
+} from "@/lib/freightMarket/adapters";
+
 export type MarketFindingScope = "verified" | "observation";
 
 export interface MarketFinding {
@@ -5,8 +10,11 @@ export interface MarketFinding {
   sourceName: string;
   sourceUrl: string | null;
   publishedAt: string | null;
+  retrievedAt?: string | null;
   scope: MarketFindingScope;
   relevance: string;
+  sourceType?: string;
+  cadence?: "daily" | "weekly" | "monthly";
 }
 
 export interface MarketResearchResult {
@@ -16,37 +24,10 @@ export interface MarketResearchResult {
   searchedAt: string;
 }
 
-const ALLOWED_HOST_SUFFIXES = [
-  "dat.com",
-  "usda.gov",
-  "weather.gov",
-  "noaa.gov",
-  "fmcsa.dot.gov",
-  "dot.gov",
-  "freightwaves.com",
-  "joc.com",
-  "ttnews.com",
-  "bls.gov",
-  "atri-online.org",
-];
-
-const CURRENT_WINDOW_DAYS = 45;
-
 const UNSUPPORTED_CLAIM =
   /tight(en|ening)|rates? (are |is )?(up|increas|rising|higher)|capacity (is |remains )?(tight|short|constrained)|shortage of trucks|truck shortage/i;
 
 const RATE_FIGURE = /\$\s?\d|\b\d{3,5}\s?(per mile|\/mi|rpm)\b/i;
-
-function hostAllowed(url: string): boolean {
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    return ALLOWED_HOST_SUFFIXES.some(
-      (suffix) => host === suffix || host.endsWith(`.${suffix}`),
-    );
-  } catch {
-    return false;
-  }
-}
 
 function sameResource(left: string, right: string): boolean {
   try {
@@ -56,12 +37,6 @@ function sameResource(left: string, right: string): boolean {
   } catch {
     return false;
   }
-}
-
-function parseDate(value: string | null): number | null {
-  if (!value) return null;
-  const time = Date.parse(value);
-  return Number.isNaN(time) ? null : time;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -101,7 +76,8 @@ export function sanitizeMarketFindings(
         : null;
 
     if (!insight || !relevance) continue;
-    if (!sourceUrl || !hostAllowed(sourceUrl)) {
+    const adapter = sourceUrl ? adapterForUrl(sourceUrl) : null;
+    if (!sourceUrl || !adapter) {
       limitationParts.push(
         "A market statement was omitted because it did not cite an allowed freight source URL.",
       );
@@ -117,12 +93,8 @@ export function sanitizeMarketFindings(
       continue;
     }
 
-    const publishedTime = parseDate(publishedAt);
-    const ageDays =
-      publishedTime === null
-        ? null
-        : (Date.parse(searchedAt) - publishedTime) / 86_400_000;
-    const current = ageDays !== null && ageDays >= -1 && ageDays <= CURRENT_WINDOW_DAYS;
+    const freshness = findingFreshness(publishedAt, searchedAt, adapter);
+    const current = freshness === "current";
     const hasUnsupportedClaim = UNSUPPORTED_CLAIM.test(insight) || RATE_FIGURE.test(insight);
 
     if (hasUnsupportedClaim && !current) {
@@ -131,14 +103,28 @@ export function sanitizeMarketFindings(
       );
       continue;
     }
+    if (freshness === "undated" && hasUnsupportedClaim) {
+      limitationParts.push(
+        "A rate or capacity claim was omitted because the source had no publication date.",
+      );
+      continue;
+    }
+    if (freshness === "monthly") {
+      limitationParts.push(
+        "A monthly indicator was kept for internal context and is not a current weekly lane condition.",
+      );
+    }
 
     findings.push({
       insight,
-      sourceName: sourceName || new URL(sourceUrl).hostname,
+      sourceName: sourceName || adapter.sourceName,
       sourceUrl,
       publishedAt,
+      retrievedAt: searchedAt,
       scope: current ? "verified" : "observation",
       relevance,
+      sourceType: adapter.sourceType,
+      cadence: adapter.cadence,
     });
   }
 
@@ -151,7 +137,7 @@ export function sanitizeMarketFindings(
 
   return {
     status: findings.length > 0 ? "completed" : "unavailable",
-    findings: findings.slice(0, 5),
+    findings: findings.slice(0, 8),
     limitation,
     searchedAt,
   };

@@ -1,16 +1,17 @@
-// Assistive only: returns draft text. No sending or automated outreach.
-import { buildCrmFacts } from "@/lib/laneIntelligence";
+// Assistive only: returns one email draft. No sending or automated outreach.
 import { buildOutreachCrmContext } from "@/lib/aiCrmContext";
 import {
-  OUTREACH_TONES,
   OUTREACH_SYSTEM_PROMPT,
   buildOutreachUserPrompt,
   normalizeOutreachDraft,
   OUTREACH_DRAFT_JSON_SCHEMA,
+  resolveOutreachTone,
   resolveOutreachType,
   type OutreachDraftResponse,
-  type OutreachTone,
 } from "@/lib/aiPrompts";
+import { emailCopyText, resolveOutreachLanguage } from "@/lib/customerEmail";
+import { findLaneByKey, rankLanesForOutreach } from "@/lib/laneIntelligence";
+import { saveMarketResearchReport } from "@/lib/freightMarket/store";
 import {
   aiClientErrorResponse,
   aiGenerationErrorResponse,
@@ -22,7 +23,7 @@ import {
   logAiSuccess,
   resolveCompanyAccess,
 } from "@/lib/aiRouteHelpers";
-import { researchFreightMarket, type MarketResearchResult } from "@/lib/marketResearch";
+import { researchFreightMarket } from "@/lib/marketResearch";
 import { generateOutreachJson, getOutreachModel } from "@/lib/openaiServer";
 import { OUTREACH_PROMPT_CACHE_KEY, OUTREACH_REASONING_EFFORT } from "@/lib/outreachModel";
 
@@ -35,10 +36,9 @@ interface OutreachRequestBody {
   outreachType?: string;
   tone?: string;
   goal?: string | null;
-}
-
-function isOutreachTone(value: string): value is OutreachTone {
-  return (OUTREACH_TONES as readonly string[]).includes(value);
+  language?: string;
+  enableMarketResearch?: boolean;
+  laneKey?: string | null;
 }
 
 export async function POST(request: Request) {
@@ -60,7 +60,8 @@ export async function POST(request: Request) {
 
   const companyId = body.companyId?.trim();
   const outreachType = resolveOutreachType(body.outreachType?.trim() ?? "");
-  const tone = body.tone?.trim() ?? "";
+  const tone = resolveOutreachTone(body.tone?.trim() ?? "");
+  const language = resolveOutreachLanguage(body.language?.trim() || "English");
 
   if (!companyId) {
     return aiClientErrorResponse("Company ID is required.", 400);
@@ -70,12 +71,18 @@ export async function POST(request: Request) {
     return aiClientErrorResponse("A valid outreach type is required.", 400);
   }
 
-  if (!isOutreachTone(tone)) {
+  if (!tone) {
     return aiClientErrorResponse("A valid tone is required.", 400);
+  }
+
+  if (!language) {
+    return aiClientErrorResponse("A valid outreach language is required.", 400);
   }
 
   const contactId = body.contactId?.trim() || null;
   const goal = body.goal?.trim() || null;
+  const laneKey = body.laneKey?.trim() || null;
+  const enableMarketResearch = body.enableMarketResearch === true;
 
   const logContext = createAiLogContext("AI_OUTREACH", user.id, companyId);
   logAiStart(logContext);
@@ -112,28 +119,59 @@ export async function POST(request: Request) {
       return aiClientErrorResponse(context.outreachBlockedReason, 409);
     }
 
-    let marketResearch: MarketResearchResult | null = null;
-    if (outreachType === "Technical Follow-up") {
-      const location = [context.company.city, context.company.state, context.company.country]
-        .filter(Boolean)
-        .join(", ");
-      marketResearch = await researchFreightMarket({
-        companyName: context.company.name,
-        location: location || null,
-        lanePatterns: context.lanePatterns,
-        model: getOutreachModel(),
-        reasoningEffort: OUTREACH_REASONING_EFFORT,
-      });
+    const rankedLanes = rankLanesForOutreach(context.lanePatterns);
+    const selectedLane = findLaneByKey(rankedLanes, laneKey);
+    if (laneKey && !selectedLane) {
+      return aiClientErrorResponse("Select a lane recorded on this company.", 400);
+    }
+    const focusLane = selectedLane ?? rankedLanes[0] ?? null;
+
+    let emailGuidance: string[] = [];
+    if (enableMarketResearch) {
+      try {
+        const location = [context.company.city, context.company.state, context.company.country]
+          .filter(Boolean)
+          .join(", ");
+        const assessment = await researchFreightMarket({
+          companyName: context.company.name,
+          location: location || null,
+          lanePatterns: context.lanePatterns,
+          focusLane,
+          model: getOutreachModel(),
+          reasoningEffort: OUTREACH_REASONING_EFFORT,
+        });
+        emailGuidance = assessment.emailGuidance;
+        await saveMarketResearchReport(supabase, {
+          companyId,
+          createdBy: user.id,
+          assessment,
+        });
+      } catch (error) {
+        logAiFailed(logContext, error, { stage: "market_research" });
+        emailGuidance = [];
+      }
     }
 
     const { data, error } = await generateOutreachJson<OutreachDraftResponse>({
       systemPrompt: OUTREACH_SYSTEM_PROMPT,
-      userPrompt: buildOutreachUserPrompt(context, marketResearch),
-      schemaName: "outreach_draft",
+      userPrompt: buildOutreachUserPrompt(context, {
+        language,
+        emailGuidance,
+        selectedLane: focusLane
+          ? {
+              origin: focusLane.origin,
+              destination: focusLane.destination,
+              equipmentType: focusLane.equipmentType,
+              commodities: focusLane.commodities,
+            }
+          : null,
+        laneChosenByBroker: Boolean(selectedLane),
+      }),
+      schemaName: "outreach_email",
       schema: OUTREACH_DRAFT_JSON_SCHEMA,
       promptCacheKey: OUTREACH_PROMPT_CACHE_KEY,
       context: "AI_OUTREACH",
-      timeoutMs: marketResearch ? 60_000 : 80_000,
+      timeoutMs: enableMarketResearch ? 60_000 : 80_000,
     });
 
     if (error || !data) {
@@ -141,38 +179,17 @@ export async function POST(request: Request) {
       return aiGenerationErrorResponse(error);
     }
 
-    const draft = normalizeOutreachDraft(data, outreachType);
-    const intelligence = {
-      crmFacts: buildCrmFacts({
-        companyName: context.company.name,
-        city: context.company.city,
-        state: context.company.state,
-        country: context.company.country,
-        mainPhone: context.company.mainPhone,
-        salesStage: context.company.salesStage,
-        priority: context.company.priority,
-        notes: context.company.generalNotes,
-        contactCount: context.contacts.length,
-        opportunityCount: context.opportunities.length,
-        activityCount: context.commercialTimeline.length,
-        followUpCount:
-          context.pendingFollowUps.length + context.completedFollowUps.length,
-        lanePatterns: context.lanePatterns,
-      }),
-      lanePatterns: context.lanePatterns,
-      marketResearch,
-      priorDraftFeedback: context.priorDraftFeedback,
-    };
+    const draft = normalizeOutreachDraft(data, language);
 
     logAiSuccess(logContext, {
       companyName: context.company.name,
       model: getOutreachModel(),
+      marketResearch: enableMarketResearch,
     });
 
     return aiSuccessResponse({
       draft,
-      intelligence,
-      message: draft.fullDraft,
+      message: emailCopyText(draft),
       companyName: context.company.name,
       generatedAt: new Date().toISOString(),
     });

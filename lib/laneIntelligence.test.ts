@@ -84,7 +84,7 @@ const kept = sanitizeMarketFindings(
           "USDA reported active avocado crossings at Pharr, Texas during the latest weekly fruit and vegetable shipment summary.",
         sourceName: "USDA AMS",
         sourceUrl: "https://www.ams.usda.gov/mnreports/example.pdf",
-        publishedAt: "2026-10-20",
+        publishedAt: "2026-11-02",
         relevance: "McAllen, TX produce shipments",
       },
     ],
