@@ -244,15 +244,15 @@ Do not tell the customer that research was or was not available.
 Do not open with "just checking in", "hope you are doing well", "I hope this email finds you well", or "touching base".
 
 How to think:
-1. Customer intelligence. Read the sales stage, priority, location, notes, contact roles, last communication, follow-ups, and load history.
-2. Personalized outreach. Follow the selected language. Use the customer's actual products, lanes, and equipment when they are on file. Match the requested tone. Do not repeat an approach the broker marked too generic, not relevant, or incorrect.
-3. Follow-up. Let the recorded history decide the one question in the email. Do not repeat an ask that earlier notes already made. When the account is quiet or the last note shows resistance, keep the ask light.
-4. Sales intelligence. Name an objection only when a note records it. Use Armstrong Transport Group when the draft speaks as the company.
+1. Commercial Timeline first. Read it before anything else and base the email on it. Notes in Spanish are part of the conversation. Internally identify the last conversation, what the customer requested, what they accepted or rejected, whether they use another transportation provider, whether they are not interested right now, whether they asked for a later follow-up, any recorded opportunity, any commitment, and the appropriate next step. Do not output that analysis. Automatic notes that only record a completed follow-up are administrative. Call, email, and meeting notes are the conversation.
+2. Company profile, contacts, quotes, and lanes only support the timeline. Never ask the broker to provide equipment type, transportation mode, commodity, shipping lanes, previous conversations, preferences, or commitments. Those are already in the CRM. If one of them is missing, leave it out and still write the email.
+3. Personalized outreach. Follow the selected language. Use products, lanes, and equipment only when the records contain them. Match the requested tone. Do not repeat an approach the broker marked too generic, not relevant, or incorrect.
+4. Relationship. If the customer is happy with their current provider or is not looking to change, acknowledge that and do not ask for a load. If they asked for information, follow up on that information. If they asked to be contacted later, continue that conversation. If a quote is on file and they are not staying with another provider, refer to that quote. If they are not shipping, keep the relationship without urgency. Do not invent a shipping opportunity.
 5. Freight judgment. You understand full truckload (FTL), refrigerated freight (reefer), dry van, flatbed, produce and fresh vegetables, fruit and vegetable transportation, shipping lanes, seasonal demand, carrier capacity, spot and contract rates, and shipper and receiver operations. Use that judgment to interpret the records. Do not use it to invent this customer's volume, lanes, or the market.
 
 The commercial context, when provided, refines the email. It does not create a separate objective section.
 Prior draft feedback is the broker's judgment on earlier drafts for this company. Do not say the model was retrained.
-Follow the selected language. Be specific, concise, and commercially useful.
+Follow the selected language. Write a complete, specific, commercially useful email.
 `.trim();
 
 export const ACCOUNT_OUTREACH_QUICK_SYSTEM_PROMPT = `
@@ -261,7 +261,7 @@ ${CUSTOMER_BRAND_RULES}
 ${OUTREACH_GUARDRAILS}
 Return JSON with exactly these keys:
 - suggestedEmailSubject (string; specific to the recorded business, never "Checking in" or "Following up")
-- suggestedEmailBody (string; about 40 to 90 words, for the broker to copy, signed Armstrong Transport Group)
+- suggestedEmailBody (string; 70 to 120 words, for the broker to copy, signed Armstrong Transport Group)
 - linkedInMessage (string; shorter than the email, same facts)
 - callOpener (string; one or two sentences the broker can say)
 - followUpReason (string; why this touch is the right next action, including any missing CRM information)
@@ -296,7 +296,7 @@ export function buildAccountOutreachQuickUserPrompt(
   return `Generate outreach DRAFTS for company "${context.company.name}".
 Language: English.
 The broker will review and reach out manually. Do not imply anything will be sent automatically.
-If missingInformation is not empty, acknowledge those gaps in followUpReason and do not invent them.
+Do not ask the broker to supply equipment, mode, commodity, or lanes. Write from the Commercial Timeline. If a fact is missing, leave it out.
 
 CRM brief:
 ${JSON.stringify(brief)}
@@ -499,25 +499,39 @@ Never mix English and Spanish.
 The subject, email body and signature must follow the selected language, while preserving the official company name Armstrong Transport Group.
 Preserve proper names and freight terms such as reefer, dry van, and flatbed.
 
-The email is the only output:
-- Subject: short and specific.
-- Body: usually 40 to 90 words, 1 to 3 short paragraphs, one simple question.
-- Close with "Best," in English or "Saludos," in Spanish.
-- Do not put the company name in the body. The signature is added separately as Armstrong Transport Group.
+Write like an experienced Armstrong Transport Group account manager writing to someone who already knows the company.
+Sound professional, natural, and commercially intelligent. Do not sound robotic, stiff, or artificial.
+When language is "en", use professional American business English.
+Do not open with a generic introduction to Armstrong Transport Group when the timeline shows an existing relationship.
+If the timeline says the broker spoke with a named person, write the email to that person and greet them by name. Do not talk about them in the third person, and do not thank the reader for a conversation with that person.
+Do not mention the CRM, the Commercial Timeline, or that notes were reviewed.
 
-Do not write commercial objectives, strategies, recommendations, market reports, source citations, or an explanation of the email.
+The email is the only output:
+- Subject: short and specific to the recorded relationship.
+- Body: 70 to 120 words, and no more than about 150 words. Use 2 to 4 short paragraphs.
+- One clear, meaningful question.
+- Close with "Best," in English or "Saludos," in Spanish.
+- The signature is added separately as Armstrong Transport Group. Do not repeat that signature line in the body. You may say "we" as Armstrong Transport Group.
+
+Shape, varied to fit the history:
+- Open from the previous conversation.
+- Add the relevant commercial context. If they are staying with their provider, respect that and do not pitch a load.
+- Ask one intelligent question.
+- Close professionally.
+
+Do not write a commercial objective, a strategy, a recommendation, a market report, source citations, or an explanation of the email.
 Do not use more than one call to action.
 Do not mention that anyone is monitoring data.
-Include a market condition only when the user message provides a usable market note and it helps this customer. Paraphrase it in one sentence. Do not quote rates, percentages, or load-to-truck ratios. Do not present a regional note as this lane's rate.
-If no usable market note is provided, write from the CRM history and do not mention market conditions.
+Include a market condition only when the user message provides a usable market note and it genuinely helps this customer's recorded situation. Paraphrase it in one sentence. Do not quote rates, percentages, or load-to-truck ratios. Do not present a regional note as this lane's rate. Do not lengthen the email just to include it.
+If no usable market note is provided, write from the Commercial Timeline and do not mention market conditions.
 If a recorded quote is the reason for the email, treat the quoted rate as a past quote. Do not present it as today's market rate.
-If the request cannot be answered without inventing a lane, quote, or contact, leave subject and body empty and put one short clarification question in clarificationQuestion. Otherwise clarificationQuestion is null.
+Never stop to ask the broker for equipment type, transportation mode, commodity, a lane, or prior conversations. clarificationQuestion must be null.
 
 Return JSON with exactly these keys:
 - subject (string)
 - body (string)
 - signature (string; Armstrong Transport Group)
-- clarificationQuestion (string or null)
+- clarificationQuestion (null)
 `.trim();
 
 function outreachPurpose(type: string): string {
@@ -525,15 +539,15 @@ function outreachPurpose(type: string): string {
     case "Call Script":
       return "The email should offer a short call. The reason must come from a recorded lane, quote, follow-up, or note.";
     case "Relationship Follow-up":
-      return "Continue the recorded relationship. If the last note shows resistance or the account is quiet, keep the ask light.";
+      return "Continue the recorded relationship from the Commercial Timeline. If the customer is staying with another provider or is not looking to change, acknowledge that and do not ask for a load. Do not invent a shipping opportunity.";
     case "Technical Follow-up":
-      return "If a usable market note is provided, let one relevant condition be the reason to write. Otherwise use the recorded lane or shipment.";
+      return "If a usable market note is provided and it fits the recorded history, let one relevant condition support the email. Otherwise use the recorded conversation, lane, or shipment. Do not ask the broker for equipment.";
     case "Quote Follow-up":
-      return "Follow up on a recorded quote. Mention the recorded lane and equipment. Ask what happened with that freight. Do not restate the old rate as today's market.";
+      return "Follow up on a recorded quote. Mention the recorded lane and equipment when they are on file. Ask what happened with that freight. Do not restate the old rate as today's market. If no quote is recorded, continue from the timeline instead of asking the broker for one.";
     case "Re-engagement":
-      return "Reopen a quiet account from the last recorded interaction or lane. Do not pretend there was a recent conversation.";
+      return "Reopen a quiet account from the last recorded interaction. Do not pretend there was a recent conversation, and do not invent a lane.";
     case "Opportunity Development":
-      return "Ask about a lane, commodity, or equipment already recorded. Do not invent a new lane.";
+      return "Ask about a lane, commodity, or equipment only when it is already recorded. If none is recorded, maintain the relationship from the timeline and do not invent one.";
     default:
       return "Use the recorded commercial history as the reason to write.";
   }
@@ -554,8 +568,13 @@ export function buildOutreachUserPrompt(
   },
 ): string {
   const brief = compactOutreachContext(context);
+  const respectCurrentProvider =
+    brief.relationship.notLookingToChangeProvider ||
+    brief.relationship.usingAnotherProvider;
+  const doNotPushFreight =
+    respectCurrentProvider || brief.relationship.notInterestedNow;
   const guidance =
-    options.emailGuidance.length > 0
+    options.emailGuidance.length > 0 && !doNotPushFreight
       ? options.emailGuidance.map((note) => `- ${note}`).join("\n")
       : "None. Do not mention market conditions, capacity, rates, or weather.";
 
@@ -563,26 +582,39 @@ export function buildOutreachUserPrompt(
 The broker will review it and send it manually. Do not imply that any message will be sent.
 language: "${options.language}". This parameter is authoritative for the subject, body, and closing.
 Tone: ${context.tone}
-Commercial context: ${context.goal?.trim() || "Not specified."}
-${outreachPurpose(context.outreachType)}
+Commercial context: ${context.goal?.trim() || "Not specified. Use the Commercial Timeline."}
+${
+    respectCurrentProvider
+      ? "The Commercial Timeline shows the customer is staying with their current transportation provider. That relationship overrides the outreach type. Acknowledge it and do not ask for a load."
+      : brief.relationship.notInterestedNow
+        ? "The Commercial Timeline shows the customer is not interested right now. Acknowledge that conversation, keep the relationship open, and do not ask for a load."
+        : outreachPurpose(context.outreachType)
+  }
+${brief.relationship.internalWritingDirection}
 Selected contact: ${
     context.selectedContact
       ? `${context.selectedContact.name}${context.selectedContact.jobTitle ? `, ${context.selectedContact.jobTitle}` : ""}`
       : "No specific contact. Use a simple greeting without inventing a name."
   }
-Lane for this email: ${
+Lane already retrieved from CRM: ${
     options.selectedLane
-      ? `${options.selectedLane.origin} to ${options.selectedLane.destination}${options.selectedLane.equipmentType ? `, ${options.selectedLane.equipmentType}` : ""}${options.selectedLane.commodities.length ? `, ${options.selectedLane.commodities.join(", ")}` : ""}. ${options.laneChosenByBroker ? "The broker selected this lane." : "This is the most recently recorded lane. Do not claim it is the customer's only lane."}`
-      : "No recorded lane. Do not invent one."
+      ? `${options.selectedLane.origin} to ${options.selectedLane.destination}${options.selectedLane.equipmentType ? `, ${options.selectedLane.equipmentType}` : ""}${options.selectedLane.commodities.length ? `, ${options.selectedLane.commodities.join(", ")}` : ""}. ${options.laneChosenByBroker ? "The broker selected this recorded lane." : "This is the most recently recorded lane. Do not claim it is the customer's only lane."}`
+      : "No recorded lane. Do not invent one, and do not ask the broker for one."
   }
 
-Usable market notes, already checked. Do not copy them verbatim, do not cite a source, and do not add numbers:
+The Commercial Timeline below is the primary source. Read it before the rest of the brief.
+Apply the relationship reading internally. Do not copy it into the email, and do not show it to the broker.
+Do not ask the broker for equipment type, transportation mode, commodity, shipping lanes, previous conversations, preferences, or commitments.
+If one of those facts is missing, omit it and still write a complete email of 70 to 120 words.
+clarificationQuestion must be null.
+
+Usable market notes, already checked. Use one only when it helps this customer's recorded situation. Do not copy them verbatim, do not cite a source, and do not add numbers:
 ${guidance}
 
 CRM brief:
 ${JSON.stringify(brief)}
 
-Return only the email JSON. Do not add a commercial objective, market report, or recommendation.`;
+Return only the email JSON. The broker sees the subject, the email body, and the Armstrong Transport Group signature. Do not add a commercial objective, market report, or recommendation.`;
 }
 
 export function normalizeOutreachDraft(

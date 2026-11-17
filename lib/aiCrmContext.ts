@@ -749,31 +749,38 @@ export async function buildOutreachCrmContext(
       "Every contact on this company has declined further follow-up. Outreach was not drafted.";
   }
 
-  const [followUpsResult, activitiesResult, feedbackResult] = await Promise.all([
+  const [followUpsResult, activitiesResult, feedbackResult, timelineContactsResult] =
+    await Promise.all([
     supabase
       .from("follow_ups")
-      .select("title, notes, due_at, status, completed_at")
+      .select("title, notes, due_at, status, completed_at, contact_id")
       .eq("company_id", companyId)
       .eq("user_id", dataOwnerUserId)
       .order("due_at", { ascending: false })
-      .limit(16),
+      .limit(24),
     supabase
       .from("activities")
-      .select("activity_type, subject, notes, activity_at")
+      .select("activity_type, subject, notes, activity_at, contact_id")
       .eq("company_id", companyId)
       .eq("user_id", dataOwnerUserId)
       .order("activity_at", { ascending: false })
-      .limit(12),
+      .limit(24),
     supabase
       .from("outreach_draft_feedback")
       .select("rating, outreach_type, created_at")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false })
       .limit(8),
+    supabase
+      .from("contacts")
+      .select("id, first_name, last_name")
+      .eq("company_id", companyId)
+      .eq("user_id", dataOwnerUserId),
   ]);
 
   if (followUpsResult.error) throw followUpsResult.error;
   if (activitiesResult.error) throw activitiesResult.error;
+  if (timelineContactsResult.error) throw timelineContactsResult.error;
 
   const feedbackMissing =
     feedbackResult.error &&
@@ -785,6 +792,11 @@ export async function buildOutreachCrmContext(
 
   const allFollowUps = followUpsResult.data ?? [];
   const timelineActivities = activitiesResult.data ?? [];
+  const contactNames = new Map<string, string>();
+  for (const contact of timelineContactsResult.data ?? []) {
+    const name = [contact.first_name, contact.last_name].filter(Boolean).join(" ").trim();
+    if (name) contactNames.set(contact.id, name);
+  }
 
   let selectedContact: OutreachCrmContext["selectedContact"] = null;
 
@@ -834,13 +846,19 @@ export async function buildOutreachCrmContext(
       occurredAt:
         formatDateLabel(followUp.completed_at ?? followUp.due_at) ??
         followUp.due_at,
+      contactName: followUp.contact_id
+        ? contactNames.get(followUp.contact_id) ?? null
+        : null,
     })),
-    ...recentActivities.map((activity) => ({
+    ...timelineActivities.map((activity) => ({
       kind: "activity" as const,
-      status: activity.type,
+      status: activity.activity_type,
       title: activity.subject,
       notes: activity.notes,
-      occurredAt: activity.activityAt,
+      occurredAt: formatDateLabel(activity.activity_at) ?? activity.activity_at,
+      contactName: activity.contact_id
+        ? contactNames.get(activity.contact_id) ?? null
+        : null,
     })),
   ];
 

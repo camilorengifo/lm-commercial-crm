@@ -1,8 +1,11 @@
+import { interpretCommercialRelationship } from "./commercialRelationship.ts";
+
 const COMPANY_NOTE_LIMIT = 900;
-const NOTE_LIMIT = 420;
+const RECENT_NOTE_LIMIT = 1400;
+const NOTE_LIMIT = 700;
 const MAX_CONTACTS = 8;
 const MAX_PENDING_FOLLOW_UPS = 8;
-const MAX_HISTORY = 12;
+const MAX_HISTORY = 16;
 const MAX_OPPORTUNITIES = 8;
 const MAX_LANES = 8;
 const MAX_FEEDBACK = 6;
@@ -54,6 +57,7 @@ export interface OutreachPromptSource {
     title: string | null;
     notes: string | null;
     occurredAt: string | null;
+    contactName?: string | null;
   }>;
   opportunities: Array<{
     status: string;
@@ -124,8 +128,9 @@ export function compactOutreachContext(source: OutreachPromptSource) {
       kind: item.kind,
       status: item.status,
       title: item.title,
-      notes: trimText(item.notes, NOTE_LIMIT),
+      notes: item.notes,
       occurredAt: item.occurredAt,
+      contactName: item.contactName ?? null,
     }));
 
   const history =
@@ -135,12 +140,22 @@ export function compactOutreachContext(source: OutreachPromptSource) {
           kind: "follow_up" as const,
           status: "completed",
           title: followUp.title,
-          notes: trimText(followUp.notes, NOTE_LIMIT),
+          notes: followUp.notes,
           occurredAt: followUp.completedAt,
+          contactName: null as string | null,
         }));
 
   history.sort((left, right) => timeValue(right.occurredAt) - timeValue(left.occurredAt));
-  const recentCommercialHistory = history.slice(0, MAX_HISTORY);
+  const relationship = interpretCommercialRelationship({
+    commercialTimeline: history,
+    companyNotes: source.company.generalNotes,
+    pendingFollowUps: source.pendingFollowUps,
+    opportunities: source.opportunities,
+  });
+  const recentCommercialHistory = history.slice(0, MAX_HISTORY).map((item, index) => ({
+    ...item,
+    notes: trimText(item.notes, index < 4 ? RECENT_NOTE_LIMIT : NOTE_LIMIT),
+  }));
   const lastCommunication = recentCommercialHistory[0] ?? null;
 
   const opportunities = source.opportunities.slice(0, MAX_OPPORTUNITIES).map((opportunity) => ({
@@ -169,11 +184,10 @@ export function compactOutreachContext(source: OutreachPromptSource) {
   if (recentCommercialHistory.length === 0) {
     missingInformation.push("commercial history");
   }
-  if (opportunities.length === 0 && source.lanePatterns.length === 0) {
-    missingInformation.push("lanes, commodities, and equipment");
-  }
 
   return {
+    commercialTimeline: recentCommercialHistory,
+    relationship,
     company: {
       name: source.company.name,
       salesStage: source.company.salesStage,
@@ -197,7 +211,6 @@ export function compactOutreachContext(source: OutreachPromptSource) {
     contacts,
     pendingFollowUps,
     lastCommunication,
-    recentCommercialHistory,
     opportunities,
     lanePatterns: source.lanePatterns.slice(0, MAX_LANES),
     priorDraftFeedback: source.priorDraftFeedback.slice(0, MAX_FEEDBACK),

@@ -99,9 +99,11 @@ assert.equal(brief.company.mainPhoneOnFile, true);
 assert.equal("mainPhone" in brief.company, false);
 assert.equal(brief.contacts[0]?.emailOnFile, true);
 assert.equal("email" in (brief.contacts[0] ?? {}), false);
-assert.match(brief.recentCommercialHistory[0]?.notes ?? "", /too high/);
+assert.match(brief.commercialTimeline[0]?.notes ?? "", /too high/);
 assert.equal(brief.lastCommunication?.occurredAt, "2026-10-20");
 assert.equal(brief.opportunities[0]?.commodity, "Avocados");
+assert.equal(brief.relationship.usingAnotherProvider, true);
+assert.match(brief.relationship.internalWritingDirection, /do not ask for a load/i);
 assert.deepEqual(brief.missingInformation, []);
 
 const longNotes = "x".repeat(2000);
@@ -118,7 +120,7 @@ const trimmed = compactOutreachContext(
   }),
 );
 assert.ok((trimmed.company.generalNotes?.length ?? 0) < 1000);
-assert.equal(trimmed.recentCommercialHistory.length, 12);
+assert.equal(trimmed.commercialTimeline.length, 16);
 assert.ok(trimmed.omittedCounts.commercialHistory > 0);
 
 const sparse = compactOutreachContext(
@@ -140,7 +142,11 @@ const sparse = compactOutreachContext(
 );
 assert.ok(sparse.missingInformation.includes("company notes"));
 assert.ok(sparse.missingInformation.includes("commercial history"));
-assert.ok(sparse.missingInformation.includes("lanes, commodities, and equipment"));
+assert.equal(
+  sparse.missingInformation.includes("lanes, commodities, and equipment"),
+  false,
+);
+assert.match(sparse.relationship.internalWritingDirection, /do not ask the broker/i);
 
 assert.match(OUTREACH_SYSTEM_PROMPT, /Armstrong Transport Group/);
 assert.match(OUTREACH_SYSTEM_PROMPT, /Full truckload \(FTL\)/i);
@@ -150,7 +156,11 @@ assert.match(OUTREACH_SYSTEM_PROMPT, /flatbed/i);
 assert.match(OUTREACH_SYSTEM_PROMPT, /produce/i);
 assert.match(OUTREACH_SYSTEM_PROMPT, /Do not invent/i);
 assert.match(OUTREACH_SYSTEM_PROMPT, /do NOT send email/i);
-assert.match(OUTREACH_SYSTEM_PROMPT, /40 to 90 words/);
+assert.match(OUTREACH_SYSTEM_PROMPT, /70 to 120 words/);
+assert.doesNotMatch(OUTREACH_SYSTEM_PROMPT, /40 to 90/);
+assert.doesNotMatch(OUTREACH_SYSTEM_PROMPT, /leave subject and body empty/);
+assert.match(OUTREACH_SYSTEM_PROMPT, /clarificationQuestion must be null/);
+assert.match(OUTREACH_SYSTEM_PROMPT, /Commercial Timeline/);
 assert.match(OUTREACH_SYSTEM_PROMPT, /selected language parameter is authoritative/);
 assert.match(OUTREACH_SYSTEM_PROMPT, /If language is "en"/);
 assert.match(OUTREACH_SYSTEM_PROMPT, /If language is "es"/);
@@ -188,11 +198,28 @@ const objectionPrompt = buildOutreachUserPrompt(
   source({ outreachType: "Quote Follow-up" }),
   promptOptions,
 );
-assert.match(objectionPrompt, /recorded quote/i);
 assert.match(objectionPrompt, /Quote Follow-up/);
 assert.match(objectionPrompt, /4500/);
 assert.match(objectionPrompt, /too high/);
+assert.match(objectionPrompt, /do not ask for a load/i);
 assert.doesNotMatch(objectionPrompt, /sections must be/);
+
+const quoteOnlyPrompt = buildOutreachUserPrompt(
+  source({
+    outreachType: "Quote Follow-up",
+    commercialTimeline: [
+      {
+        kind: "activity",
+        status: "call",
+        title: "Quote sent",
+        notes: "Sent the McAllen to Bronx reefer quote and asked Maria to review it.",
+        occurredAt: "2026-10-20",
+      },
+    ],
+  }),
+  promptOptions,
+);
+assert.match(quoteOnlyPrompt, /recorded quote/i);
 
 const spanishPrompt = buildOutreachUserPrompt(source(), {
   ...promptOptions,
@@ -228,6 +255,137 @@ assert.match(incompletePrompt, /Blank Shipper/);
 assert.match(incompletePrompt, /company notes/);
 assert.match(incompletePrompt, /Do not mention market conditions/);
 assert.match(incompletePrompt, /Do not invent one/);
+assert.match(incompletePrompt, /do not ask the broker for one/i);
+
+const martinezPrompt = buildOutreachUserPrompt(
+  source({
+    outreachType: "Relationship Follow-up",
+    tone: "Natural / Conversational",
+    goal: null,
+    selectedContact: {
+      name: "Hellen",
+      email: "hellen@amartinezproduce.example",
+      phone: null,
+      jobTitle: null,
+    },
+    company: {
+      ...source().company,
+      name: "A Martinez Produce Corporation",
+      generalNotes: "Produce shipper.",
+    },
+    contacts: [
+      {
+        name: "Hellen",
+        email: "hellen@amartinezproduce.example",
+        phone: null,
+        jobTitle: null,
+        isPrimary: true,
+      },
+    ],
+    pendingFollowUps: [],
+    opportunities: [],
+    lanePatterns: [],
+    commercialTimeline: [
+      {
+        kind: "activity",
+        status: "call",
+        title: "Call with Hellen",
+        notes:
+          "Spoke with Hellen at A Martinez Produce Corporation. She said they are happy with their current transportation provider and are not looking to change providers right now. She asked us to stay in touch. No new shipping opportunity was discussed.",
+        occurredAt: "2026-11-12",
+        contactName: "Hellen",
+      },
+    ],
+  }),
+  {
+    language: "en",
+    emailGuidance: ["Reefer capacity has been tighter across South Texas this week."],
+    selectedLane: null,
+    laneChosenByBroker: false,
+  },
+);
+assert.match(martinezPrompt, /A Martinez Produce Corporation/);
+assert.match(martinezPrompt, /Hellen/);
+assert.match(martinezPrompt, /not looking to change providers/);
+assert.match(martinezPrompt, /happy with their current transportation provider/);
+assert.match(martinezPrompt, /Commercial Timeline/);
+assert.match(martinezPrompt, /do not ask for a load/i);
+assert.match(martinezPrompt, /do not invent a shipping opportunity/i);
+assert.match(martinezPrompt, /equipment type/i);
+assert.match(martinezPrompt, /70 to 120 words/);
+assert.match(martinezPrompt, /clarificationQuestion must be null/);
+assert.match(martinezPrompt, /Armstrong Transport Group/);
+assert.match(martinezPrompt, /Do not mention market conditions/);
+assert.doesNotMatch(martinezPrompt, /tighter across South Texas/);
+assert.doesNotMatch(martinezPrompt, /Commercial Objective|Market Intelligence|AI Recommendations/);
+
+const spanishLoyalty = compactOutreachContext(
+  source({
+    commercialTimeline: [
+      {
+        kind: "activity",
+        status: "call",
+        title: "Llamada con Hellen",
+        notes:
+          "Hellen dijo que están contentos con su transportista actual y no quieren cambiar de proveedor.",
+        occurredAt: "2026-11-12",
+        contactName: "Hellen",
+      },
+    ],
+    opportunities: [],
+    lanePatterns: [],
+  }),
+);
+assert.equal(spanishLoyalty.relationship.notLookingToChangeProvider, true);
+assert.equal(spanishLoyalty.relationship.usingAnotherProvider, true);
+
+const hellenSource = source({
+  company: {
+    ...source().company,
+    name: "A Martinez produce Coorporation",
+  },
+  selectedContact: {
+    name: "Hellen",
+    email: null,
+    phone: null,
+    jobTitle: null,
+  },
+  opportunities: [],
+  lanePatterns: [],
+  pendingFollowUps: [],
+  commercialTimeline: [
+    {
+      kind: "activity",
+      status: "call",
+      title: "Call",
+      notes:
+        "hable con Hellen, me dijo que ahorita no estan interesados pero que envie el correo por si en el futuro necesitan algo",
+      occurredAt: "2026-11-10",
+      contactName: "Hellen",
+    },
+  ],
+});
+const hellenCall = compactOutreachContext(hellenSource);
+assert.equal(hellenCall.relationship.notInterestedNow, true);
+assert.equal(hellenCall.relationship.notLookingToChangeProvider, false);
+assert.equal(hellenCall.relationship.futureFollowUpRequested, true);
+assert.match(hellenCall.relationship.internalWritingDirection, /not interested right now/i);
+assert.match(
+  hellenCall.relationship.internalWritingDirection,
+  /do not invent a shipping opportunity/i,
+);
+const hellenPrompt = buildOutreachUserPrompt(hellenSource, {
+  language: "en",
+  emailGuidance: ["Reefer capacity has been tighter across South Texas this week."],
+  selectedLane: null,
+  laneChosenByBroker: false,
+});
+assert.match(OUTREACH_SYSTEM_PROMPT, /write the email to that person/);
+assert.match(hellenPrompt, /not interested right now/i);
+assert.match(hellenPrompt, /do not ask for a load/i);
+assert.match(hellenPrompt, /no estan interesados/);
+assert.doesNotMatch(hellenPrompt, /staying with their current transportation provider/);
+assert.doesNotMatch(hellenPrompt, /tighter across South Texas/);
 
 const quick = buildAccountOutreachQuickUserPrompt(source());
 assert.match(ACCOUNT_OUTREACH_QUICK_SYSTEM_PROMPT, /do NOT send email/i);

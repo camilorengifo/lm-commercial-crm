@@ -9,7 +9,12 @@ import {
   resolveOutreachType,
   type OutreachDraftResponse,
 } from "@/lib/aiPrompts";
-import { emailCopyText, resolveOutreachLanguage } from "@/lib/customerEmail";
+import {
+  chooseOutreachDraft,
+  emailCopyText,
+  resolveOutreachLanguage,
+  shouldRewriteOutreachDraft,
+} from "@/lib/customerEmail";
 import { findLaneByKey, rankLanesForOutreach } from "@/lib/laneIntelligence";
 import { saveMarketResearchReport } from "@/lib/freightMarket/store";
 import {
@@ -152,25 +157,29 @@ export async function POST(request: Request) {
       }
     }
 
-    const { data, error } = await generateOutreachJson<OutreachDraftResponse>({
+    const userPrompt = buildOutreachUserPrompt(context, {
+      language,
+      emailGuidance,
+      selectedLane: focusLane
+        ? {
+            origin: focusLane.origin,
+            destination: focusLane.destination,
+            equipmentType: focusLane.equipmentType,
+            commodities: focusLane.commodities,
+          }
+        : null,
+      laneChosenByBroker: Boolean(selectedLane),
+    });
+    const generationInput = {
       systemPrompt: OUTREACH_SYSTEM_PROMPT,
-      userPrompt: buildOutreachUserPrompt(context, {
-        language,
-        emailGuidance,
-        selectedLane: focusLane
-          ? {
-              origin: focusLane.origin,
-              destination: focusLane.destination,
-              equipmentType: focusLane.equipmentType,
-              commodities: focusLane.commodities,
-            }
-          : null,
-        laneChosenByBroker: Boolean(selectedLane),
-      }),
       schemaName: "outreach_email",
       schema: OUTREACH_DRAFT_JSON_SCHEMA,
       promptCacheKey: OUTREACH_PROMPT_CACHE_KEY,
-      context: "AI_OUTREACH",
+      context: "AI_OUTREACH" as const,
+    };
+    const { data, error } = await generateOutreachJson<OutreachDraftResponse>({
+      ...generationInput,
+      userPrompt,
       timeoutMs: enableMarketResearch ? 60_000 : 80_000,
     });
 
@@ -179,7 +188,19 @@ export async function POST(request: Request) {
       return aiGenerationErrorResponse(error);
     }
 
-    const draft = normalizeOutreachDraft(data, language);
+    let draft = normalizeOutreachDraft(data, language);
+    if (shouldRewriteOutreachDraft(draft)) {
+      const retry = await generateOutreachJson<OutreachDraftResponse>({
+        ...generationInput,
+        userPrompt: `${userPrompt}
+
+The previous draft was too short, too long, or asked for transportation details already retrieved from the CRM. Rewrite one complete email of 70 to 120 words from the Commercial Timeline. Do not ask for equipment, mode, commodity, or a lane. Do not invent a shipping opportunity. clarificationQuestion must be null.`,
+        timeoutMs: 45_000,
+      });
+      if (retry.data) {
+        draft = chooseOutreachDraft(draft, normalizeOutreachDraft(retry.data, language));
+      }
+    }
 
     logAiSuccess(logContext, {
       companyName: context.company.name,

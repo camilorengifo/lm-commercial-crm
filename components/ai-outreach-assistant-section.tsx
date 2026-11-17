@@ -240,15 +240,20 @@ export function AiOutreachAssistantSection({
       subject: data.draft.subject,
       body: data.draft.body,
       signature: CUSTOMER_FACING_COMPANY,
-      clarificationQuestion: data.draft.clarificationQuestion,
+      clarificationQuestion: null,
     };
+    if (!email.body.trim()) {
+      setError(
+        "The email could not be written from the Commercial Timeline. Please generate the draft again.",
+      );
+      setLoading(false);
+      return;
+    }
     setForm((prev) => ({
       ...withDraftDefaults(prev),
       draft: email,
       editedSubject: email.subject,
-      editedBody: email.clarificationQuestion
-        ? ""
-        : `${email.body}\n${CUSTOMER_FACING_COMPANY}`.trim(),
+      editedBody: `${email.body}\n${CUSTOMER_FACING_COMPANY}`.trim(),
     }));
     setFeedbackMessage(null);
     setLoading(false);
@@ -260,9 +265,6 @@ export function AiOutreachAssistantSection({
   }
 
   function copySource(): string {
-    if (draftState.draft?.clarificationQuestion && !draftState.editedBody.trim()) {
-      return draftState.draft.clarificationQuestion;
-    }
     return `Subject: ${draftState.editedSubject.trim()}\n\n${draftState.editedBody.trim()}`.trim();
   }
 
@@ -360,8 +362,8 @@ export function AiOutreachAssistantSection({
           AI Commercial Intelligence Assistant
         </h2>
         <p className="mt-1 text-sm text-zinc-500">
-          Writes one short {CUSTOMER_FACING_COMPANY} email for {companyName}.
-          Review it, edit it, and send it from your own tools.
+          Writes a personalized {CUSTOMER_FACING_COMPANY} email from {companyName}&apos;s
+          Commercial Timeline. Review it, edit it, and send it from your own tools.
         </p>
         <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-sm text-amber-900">
           Assistive only: this tool does not send email, WhatsApp, SMS, or
@@ -471,7 +473,7 @@ export function AiOutreachAssistantSection({
           {lanes.length > 0 && (
             <div className="md:col-span-2">
               <label htmlFor="outreach-lane" className="mb-1.5 block text-sm font-medium text-zinc-700">
-                Shipping lane
+                Recorded lane <span className="font-normal text-zinc-500">(optional)</span>
               </label>
               <select
                 id="outreach-lane"
@@ -485,7 +487,7 @@ export function AiOutreachAssistantSection({
                 disabled={loading}
                 className={fieldClass}
               >
-                <option value="">Use CRM history</option>
+                <option value="">Use the Commercial Timeline</option>
                 {lanes.map((lane) => (
                   <option key={laneSelectionKey(lane)} value={laneSelectionKey(lane)}>
                     {laneLabel(lane)}
@@ -497,7 +499,7 @@ export function AiOutreachAssistantSection({
 
           <div className="md:col-span-2">
             <label htmlFor="outreach-goal" className="mb-1.5 block text-sm font-medium text-zinc-700">
-              Goal
+              Additional context <span className="font-normal text-zinc-500">(optional)</span>
             </label>
             <input
               id="outreach-goal"
@@ -511,7 +513,7 @@ export function AiOutreachAssistantSection({
                 }))
               }
               disabled={loading}
-              placeholder="Follow up on a previous quote, ask about available lanes, reconnect after no response..."
+              placeholder="Optional note. Equipment, lanes, and past conversations are read from the Commercial Timeline."
               className={fieldClass}
             />
           </div>
@@ -533,7 +535,7 @@ export function AiOutreachAssistantSection({
           <span>
             <span className="font-medium">Enable Market Research</span>
             <span className="mt-0.5 block text-xs text-zinc-500">
-              Uses current public freight conditions for the selected lane when they help the email.
+              Researched internally and used in the email only when it fits this customer&apos;s history.
             </span>
           </span>
         </label>
@@ -579,13 +581,7 @@ export function AiOutreachAssistantSection({
         </p>
       )}
 
-      {!loading && draftState.draft?.clarificationQuestion && !draftState.editedBody.trim() && (
-        <p className="mt-6 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-800">
-          {draftState.draft.clarificationQuestion}
-        </p>
-      )}
-
-      {!loading && draftState.draft && !draftState.draft.clarificationQuestion && (
+      {!loading && draftState.draft && draftState.editedBody.trim() && (
         <div className="mt-6 space-y-4 border-t border-zinc-100 pt-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs text-zinc-500">
@@ -641,7 +637,7 @@ export function AiOutreachAssistantSection({
             </label>
             <textarea
               id="outreach-body"
-              rows={12}
+              rows={14}
               value={draftState.editedBody}
               onChange={(event) =>
                 setForm((prev) => ({

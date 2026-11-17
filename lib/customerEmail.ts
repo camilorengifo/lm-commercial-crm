@@ -57,6 +57,30 @@ export function countWords(value: string): number {
   return words?.length ?? 0;
 }
 
+const ASKS_FOR_TRANSPORTATION_FACTS =
+  /\b(?:what|which)\s+(?:equipment(?:\s+type)?|transportation mode|mode of transport|commodity|shipping lane)\b|\bplease (?:provide|confirm|send)\b[^.]{0,48}\b(?:equipment|commodity|lane|mode)\b/i;
+
+export function shouldRewriteOutreachDraft(draft: CustomerEmailDraft): boolean {
+  const words = countWords(draft.body);
+  if (words < 60 || words > 180) return true;
+  return ASKS_FOR_TRANSPORTATION_FACTS.test(draft.body);
+}
+
+export function chooseOutreachDraft(
+  first: CustomerEmailDraft,
+  second: CustomerEmailDraft | null,
+): CustomerEmailDraft {
+  if (!second || countWords(second.body) === 0) return first;
+  if (!shouldRewriteOutreachDraft(second)) return second;
+  if (
+    shouldRewriteOutreachDraft(first) &&
+    countWords(second.body) > countWords(first.body)
+  ) {
+    return second;
+  }
+  return first;
+}
+
 function stripBannedContent(value: string): string {
   const lines = value
     .replace(BANNED_SENTENCE, "")
@@ -86,11 +110,6 @@ export function presentCustomerEmail(
   language: OutreachLanguage,
 ): CustomerEmailDraft {
   const record = asRecord(value);
-  const clarification = stripBannedContent(
-    typeof record?.clarificationQuestion === "string"
-      ? record.clarificationQuestion
-      : "",
-  );
   const subject = stripBannedContent(
     typeof record?.subject === "string"
       ? record.subject
@@ -109,15 +128,6 @@ export function presentCustomerEmail(
         : "",
   );
 
-  if (clarification && countWords(body) < 20) {
-    return {
-      subject: "",
-      body: "",
-      signature: CUSTOMER_FACING_COMPANY,
-      clarificationQuestion: clarification,
-    };
-  }
-
   const finishedBody = body ? ensureClosing(body, language) : "";
   return {
     subject:
@@ -134,7 +144,7 @@ export function presentCustomerEmail(
 }
 
 export function emailCopyText(draft: CustomerEmailDraft): string {
-  if (draft.clarificationQuestion) return draft.clarificationQuestion;
+  if (!draft.body.trim()) return "";
   return [`Subject: ${draft.subject}`, "", draft.body, draft.signature]
     .filter((part) => part !== "")
     .join("\n");

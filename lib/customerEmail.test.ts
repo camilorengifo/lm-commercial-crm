@@ -3,10 +3,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CUSTOMER_FACING_COMPANY } from "./customerBrand.ts";
 import {
+  chooseOutreachDraft,
   countWords,
   emailCopyText,
   presentCustomerEmail,
   resolveOutreachLanguage,
+  shouldRewriteOutreachDraft,
 } from "./customerEmail.ts";
 import {
   buildMarketAssessment,
@@ -94,20 +96,55 @@ for (const [index, [subject, body]] of scenarios.entries()) {
     assert.doesNotMatch(presented.body, /\nBest,/);
   }
   assert.ok(countWords(presented.body) >= 12, `scenario ${index} was too short`);
-  assert.ok(countWords(presented.body) <= 120, `scenario ${index} was too long`);
+  assert.ok(countWords(presented.body) <= 160, `scenario ${index} was too long`);
 }
 
 const question = presentCustomerEmail(
   {
-    subject: "",
+    subject: "Equipment",
     body: "",
-    clarificationQuestion: "Which shipment should this email cover?",
+    clarificationQuestion: "What equipment type should this email use?",
   },
   "en",
 );
-assert.equal(question.clarificationQuestion, "Which shipment should this email cover?");
+assert.equal(question.clarificationQuestion, null);
 assert.equal(question.body, "");
-assert.doesNotMatch(emailCopyText(question), /Subject:/);
+assert.equal(emailCopyText(question), "");
+assert.doesNotMatch(emailCopyText(question), /equipment type/i);
+
+const kept = presentCustomerEmail(
+  {
+    subject: "Following our conversation",
+    body: "Hellen, thank you for the time last week. I understand A Martinez Produce is in a good spot with its current transportation provider, and I will not crowd that relationship. I will stay available if anything changes on your end, and I would like to keep the conversation open for later in the season. Would it be useful if I checked back in a few months, or is there a better time for you? I appreciate the straightforward update.",
+    clarificationQuestion: "What equipment type should I ask for?",
+  },
+  "en",
+);
+assert.equal(kept.clarificationQuestion, null);
+assert.match(kept.body, /current transportation provider/);
+assert.match(kept.body, /Best,/);
+assert.ok(countWords(kept.body) >= 60);
+assert.ok(countWords(kept.body) <= 150);
+assert.equal(shouldRewriteOutreachDraft(kept), false);
+assert.equal(
+  shouldRewriteOutreachDraft({
+    ...kept,
+    body: "Hi Hellen, do you have a minute?",
+  }),
+  true,
+);
+assert.equal(
+  shouldRewriteOutreachDraft({
+    ...kept,
+    body: `${kept.body}\n\nWhat equipment type should we plan for?`,
+  }),
+  true,
+);
+const rewritten = chooseOutreachDraft(
+  { ...kept, body: "Too short." },
+  kept,
+);
+assert.equal(rewritten, kept);
 
 const searchedAt = "2026-11-17T12:00:00.000Z";
 const verifiedTight: MarketFinding = {
@@ -292,6 +329,9 @@ assert.match(assistant, /language: current\.language/);
 assert.match(assistant, /language: "en"/);
 assert.doesNotMatch(assistant, /Outreach Language/);
 assert.match(assistant, /Enable Market Research/);
+assert.match(assistant, /Commercial Timeline/);
+assert.doesNotMatch(assistant, /Equipment type|Transportation mode/);
+assert.doesNotMatch(assistant, /draft\.clarificationQuestion/);
 assert.match(assistant, /CUSTOMER_FACING_COMPANY/);
 assert.match(assistant, /does not send email/i);
 assert.doesNotMatch(
