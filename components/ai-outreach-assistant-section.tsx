@@ -497,7 +497,7 @@ export function AiOutreachAssistantSection({
 
           <div className="md:col-span-2">
             <label htmlFor="outreach-goal" className="mb-1.5 block text-sm font-medium text-zinc-700">
-              Commercial context
+              Goal
             </label>
             <input
               id="outreach-goal"
@@ -544,7 +544,7 @@ export function AiOutreachAssistantSection({
             disabled={loading}
             className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loading ? "Writing email..." : "Generate Email"}
+            {loading ? "Writing draft..." : "Generate Draft"}
           </button>
           {!isOutreachDraftEmpty(draftState) && (
             <button
