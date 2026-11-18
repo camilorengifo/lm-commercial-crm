@@ -7,8 +7,7 @@ import type { AccountSummaryResponse } from "@/lib/aiPrompts";
 import type { BrokerRecommendationsResponse } from "@/lib/aiPrompts";
 import type { BrokerActionPlanResponse } from "@/lib/aiPrompts";
 import type { AccountOutreachQuickResponse } from "@/lib/aiPrompts";
-import type { LanePattern } from "@/lib/laneIntelligence";
-import type { MarketResearchResult } from "@/lib/marketResearchRules";
+import type { OutreachLanguage } from "@/lib/customerEmail";
 import type {
   OutreachDraftResponse,
   OutreachFeedbackRating,
@@ -31,7 +30,7 @@ async function getAccessToken(): Promise<string | null> {
 
 async function postAiRequest<T extends AiApiResponse>(
   path: string,
-  body?: Record<string, string | null | undefined>,
+  body?: Record<string, string | number | boolean | null | undefined>,
 ): Promise<{ data: T | null; error: string | null }> {
   const accessToken = await getAccessToken();
 
@@ -98,28 +97,20 @@ export async function fetchAccountSummary(companyId: string) {
   }>("/api/ai/account-summary", { companyId });
 }
 
-export interface OutreachIntelligence {
-  crmFacts: string[];
-  lanePatterns: LanePattern[];
-  marketResearch: MarketResearchResult | null;
-  priorDraftFeedback: Array<{
-    rating: string;
-    outreachType: string;
-    createdAt: string;
-  }>;
-}
-
 export async function fetchOutreachDraft(input: {
   companyId: string;
   contactId: string | null;
   outreachType: OutreachType;
   tone: OutreachTone;
+  communicationStyle: string;
   goal: string | null;
+  language: OutreachLanguage;
+  enableMarketResearch: boolean;
+  laneKey: string | null;
 }) {
   return postAiRequest<{
     success: true;
     draft: OutreachDraftResponse;
-    intelligence: OutreachIntelligence;
     message: string;
     companyName: string;
     generatedAt: string;
@@ -128,7 +119,11 @@ export async function fetchOutreachDraft(input: {
     contactId: input.contactId,
     outreachType: input.outreachType,
     tone: input.tone,
+    communicationStyle: input.communicationStyle,
     goal: input.goal,
+    language: input.language,
+    enableMarketResearch: input.enableMarketResearch,
+    laneKey: input.laneKey,
   });
 }
 

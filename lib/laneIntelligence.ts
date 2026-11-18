@@ -125,6 +125,35 @@ export function buildLanePatterns(lanes: LaneSource[]): LanePattern[] {
   });
 }
 
+export function laneSelectionKey(lane: {
+  origin: string;
+  destination: string;
+  equipmentType: string | null;
+}): string {
+  return [lane.origin, lane.destination, lane.equipmentType ?? ""]
+    .join("|")
+    .toLowerCase();
+}
+
+export function rankLanesForOutreach(patterns: LanePattern[]): LanePattern[] {
+  return [...patterns].sort((left, right) => {
+    const leftTime = Date.parse(left.lastRecordedAt ?? "") || 0;
+    const rightTime = Date.parse(right.lastRecordedAt ?? "") || 0;
+    if (leftTime !== rightTime) return rightTime - leftTime;
+    if (left.quoteCount !== right.quoteCount) return right.quoteCount - left.quoteCount;
+    return left.origin.localeCompare(right.origin);
+  });
+}
+
+export function findLaneByKey(
+  patterns: LanePattern[],
+  laneKey: string | null | undefined,
+): LanePattern | null {
+  const wanted = laneKey?.trim().toLowerCase();
+  if (!wanted) return null;
+  return patterns.find((lane) => laneSelectionKey(lane) === wanted) ?? null;
+}
+
 export function buildCrmFacts(input: {
   companyName: string;
   city: string | null;

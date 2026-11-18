@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  buildJsonCompletionParams,
   buildOutreachResponseBody,
   DEFAULT_OPENAI_OUTREACH_MODEL,
   extractResponsesOutputText,
@@ -13,6 +14,7 @@ import {
   parseModelJson,
   readResponseUsage,
   resolveOutreachModel,
+  responseUsesRequestedModel,
 } from "./outreachModel.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -24,8 +26,21 @@ assert.equal(DEFAULT_OPENAI_OUTREACH_MODEL, "gpt-6.1-sol");
 assert.equal(OUTREACH_REASONING_EFFORT, "medium");
 
 assert.equal(modelSupportsCustomTemperature("gpt-6.1-sol"), false);
-assert.equal(modelSupportsCustomTemperature("gpt-5.6-terra"), false);
+assert.equal(modelSupportsCustomTemperature("gpt-5"), false);
 assert.equal(modelSupportsCustomTemperature("gpt-4o-mini"), true);
+
+const solCompletion = buildJsonCompletionParams({
+  model: "gpt-6.1-sol",
+  systemPrompt: "Return JSON.",
+  userPrompt: "ok",
+});
+assert.equal(solCompletion.reasoning_effort, "medium");
+assert.equal(solCompletion.max_completion_tokens, 8192);
+assert.equal(solCompletion.temperature, undefined);
+assert.equal("top_p" in solCompletion, false);
+assert.equal(responseUsesRequestedModel("gpt-6.1-sol", "gpt-6.1-sol"), true);
+assert.equal(responseUsesRequestedModel("gpt-6.1-sol", "gpt-6.1-sol-2026-11-01"), true);
+assert.equal(responseUsesRequestedModel("gpt-6.1-sol", "gpt-5.6-terra"), false);
 
 assert.equal(isRetryableOutreachError({ status: 429, name: "RateLimitError" }), true);
 assert.equal(isRetryableOutreachError({ status: 500 }), true);
@@ -154,6 +169,12 @@ const client = readFileSync(join(here, "../components/ai-outreach-assistant-sect
 
 assert.match(config, /OPENAI_OUTREACH_MODEL/);
 assert.match(config, /resolveOutreachModel/);
+assert.match(config, /gpt-6\.1-sol/);
+assert.doesNotMatch(config, /gpt-5\.6-terra/);
+assert.doesNotMatch(
+  readFileSync(join(here, "./openaiServer.ts"), "utf8"),
+  /gpt-5\.6-terra/,
+);
 assert.doesNotMatch(outreachRoute, /generateJsonCompletion|chat\.completions|resend|temperature|top_p/);
 assert.match(outreachRoute, /generateOutreachJson/);
 assert.match(outreachRoute, /getOutreachModel/);
@@ -173,7 +194,7 @@ const sharedRoutes = [
 for (const relativePath of sharedRoutes) {
   const source = readFileSync(join(here, relativePath), "utf8");
   assert.match(source, /generateJsonCompletion/);
-  assert.doesNotMatch(source, /generateOutreachJson|OPENAI_OUTREACH_MODEL|gpt-6\.1-sol/);
+  assert.doesNotMatch(source, /generateOutreachJson|OPENAI_OUTREACH_MODEL|gpt-5\.6-terra|gpt-6\.1-sol/);
 }
 
 console.log("outreach model checks passed");

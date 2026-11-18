@@ -4,97 +4,134 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   fetchOutreachDraft,
   saveOutreachFeedback,
-  type OutreachIntelligence,
 } from "@/lib/aiClient";
 import { AI_CLIENT_ERROR_MESSAGE } from "@/lib/aiConstants";
 import {
   OUTREACH_FEEDBACK_RATINGS,
+  OUTREACH_STYLES,
   OUTREACH_TONES,
   OUTREACH_TYPES,
-  isEmailOutreachType,
+  resolveOutreachStyle,
+  resolveOutreachTone,
   resolveOutreachType,
   type OutreachDraftResponse,
   type OutreachFeedbackRating,
+  type OutreachStyle,
   type OutreachTone,
   type OutreachType,
 } from "@/lib/aiPrompts";
+import { CUSTOMER_FACING_COMPANY } from "@/lib/customerBrand";
+import {
+  OUTREACH_LANGUAGES,
+  resolveOutreachLanguage,
+  type OutreachLanguage,
+} from "@/lib/customerEmail";
 import { formatSupabaseError } from "@/lib/crmFormat";
 import {
+  buildLanePatterns,
+  laneSelectionKey,
+  rankLanesForOutreach,
+  type LanePattern,
+} from "@/lib/laneIntelligence";
+import {
   type ContactOption,
+  type LoadOpportunity,
   fetchContactsForCompany,
+  fetchLoadOpportunitiesForCompany,
   formatContactName,
 } from "@/lib/loadOpportunities";
 import { companyDraftKey, usePersistentDraft } from "@/lib/usePersistentDraft";
 import { supabase } from "@/lib/supabaseClient";
 
-const DEFAULT_OUTREACH_TYPE: OutreachType = "Call Script";
-const DEFAULT_TONE: OutreachTone = "Professional";
+const DEFAULT_OUTREACH_TYPE: OutreachType = "Technical Follow-up";
+const DEFAULT_STYLE: OutreachStyle = "Standard commercial email";
+const DEFAULT_TONE: OutreachTone = "Professional and polished";
 
 interface AiOutreachDraftState {
   outreachType: OutreachType;
   contactId: string;
+  communicationStyle: OutreachStyle;
   tone: OutreachTone;
+  language: OutreachLanguage;
   goal: string;
+  enableMarketResearch: boolean;
+  laneKey: string;
   draft: OutreachDraftResponse | null;
-  intelligence: OutreachIntelligence | null;
-  editedFullDraft: string;
-  editedSubjects: string[];
-  editedSummary: string;
-  editedMarketInsight: string;
-  editedRecommendation: string;
-  editedEmail: string;
-  editedNextStep: string;
+  editedSubject: string;
+  editedBody: string;
 }
 
 function emptyOutreachDraft(): AiOutreachDraftState {
   return {
     outreachType: DEFAULT_OUTREACH_TYPE,
     contactId: "",
+    communicationStyle: DEFAULT_STYLE,
     tone: DEFAULT_TONE,
+    language: "en",
     goal: "",
+    enableMarketResearch: false,
+    laneKey: "",
     draft: null,
-    intelligence: null,
-    editedFullDraft: "",
-    editedSubjects: [],
-    editedSummary: "",
-    editedMarketInsight: "",
-    editedRecommendation: "",
-    editedEmail: "",
-    editedNextStep: "",
+    editedSubject: "",
+    editedBody: "",
   };
 }
 
-function technicalDraftText(form: AiOutreachDraftState): string {
-  const subjects = (form.editedSubjects ?? []).filter(Boolean);
-  return [
-    form.editedSummary
-      ? `Commercial Intelligence Summary\n${form.editedSummary}`
-      : "",
-    form.editedMarketInsight ? `Market Insight\n${form.editedMarketInsight}` : "",
-    form.editedRecommendation
-      ? `Commercial Recommendation\n${form.editedRecommendation}`
-      : "",
-    subjects.length
-      ? `Subject alternatives\n${subjects
-          .map((subject, index) => `${index + 1}. ${subject}`)
-          .join("\n")}`
-      : "",
-    form.editedEmail ? `Email draft\n${form.editedEmail}` : "",
-    form.editedNextStep ? `Suggested next step\n${form.editedNextStep}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+function withDraftDefaults(value: Partial<AiOutreachDraftState>): AiOutreachDraftState {
+  const base = emptyOutreachDraft();
+  const draft =
+    value.draft &&
+    typeof value.draft.subject === "string" &&
+    typeof value.draft.body === "string" &&
+    typeof value.draft.signature === "string"
+      ? value.draft
+      : null;
+  const rawTone = String(value.tone ?? base.tone);
+  return {
+    ...base,
+    ...value,
+    outreachType:
+      resolveOutreachType(String(value.outreachType ?? base.outreachType)) ??
+      base.outreachType,
+    communicationStyle:
+      resolveOutreachStyle(String(value.communicationStyle ?? "")) ??
+      (rawTone === "Natural / Conversational"
+        ? "Natural and conversational"
+        : base.communicationStyle),
+    tone: resolveOutreachTone(rawTone) ?? base.tone,
+    language: resolveOutreachLanguage(String(value.language ?? "en")) ?? "en",
+    enableMarketResearch: value.enableMarketResearch === true,
+    laneKey: value.laneKey ?? "",
+    goal: value.goal ?? "",
+    contactId: value.contactId ?? "",
+    draft,
+    editedSubject: value.editedSubject ?? draft?.subject ?? "",
+    editedBody:
+      value.editedBody ??
+      (draft?.body ?? ""),
+  };
 }
 
 function isOutreachDraftEmpty(value: AiOutreachDraftState): boolean {
   return (
     !value.goal.trim() &&
     !value.contactId &&
+    !value.laneKey &&
+    !value.enableMarketResearch &&
+    value.language === "en" &&
     !value.draft &&
-    !value.editedFullDraft?.trim() &&
+    !value.editedSubject.trim() &&
+    !value.editedBody.trim() &&
     value.outreachType === DEFAULT_OUTREACH_TYPE &&
+    value.communicationStyle === DEFAULT_STYLE &&
     value.tone === DEFAULT_TONE
   );
+}
+
+function laneLabel(lane: LanePattern): string {
+  const equipment = lane.equipmentType ? ` · ${lane.equipmentType}` : "";
+  const commodity = lane.commodities.length ? ` · ${lane.commodities.join(", ")}` : "";
+  return `${lane.origin} → ${lane.destination}${equipment}${commodity}`;
 }
 
 export function AiOutreachAssistantSection({
@@ -113,6 +150,7 @@ export function AiOutreachAssistantSection({
   onActivitySaved?: () => void;
 }) {
   const [contacts, setContacts] = useState<ContactOption[]>([]);
+  const [lanes, setLanes] = useState<LanePattern[]>([]);
   const [contactsLoading, setContactsLoading] = useState(true);
 
   const draftKey = useMemo(
@@ -120,7 +158,7 @@ export function AiOutreachAssistantSection({
     [companyId],
   );
 
-  const [form, setForm, clearForm] = usePersistentDraft<AiOutreachDraftState>({
+  const [form, setForm, clearForm, hydrated] = usePersistentDraft<AiOutreachDraftState>({
     key: draftKey,
     initialValue: emptyOutreachDraft(),
     isEmpty: isOutreachDraftEmpty,
@@ -135,22 +173,51 @@ export function AiOutreachAssistantSection({
   const [savingFeedback, setSavingFeedback] = useState(false);
 
   const scopedUserId = isAdmin ? ownerUserId : viewerUserId;
+  const draftState = withDraftDefaults(form);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const normalized = withDraftDefaults(form);
+    if (JSON.stringify(normalized) !== JSON.stringify(form)) {
+      setForm(normalized);
+    }
+  }, [hydrated, form, setForm]);
 
   const loadContacts = useCallback(async () => {
     setContactsLoading(true);
-    const { data, error: contactsError } = await fetchContactsForCompany(
-      scopedUserId,
-      companyId,
-      isAdmin,
-    );
+    const [contactsResult, lanesResult] = await Promise.all([
+      fetchContactsForCompany(scopedUserId, companyId, isAdmin),
+      fetchLoadOpportunitiesForCompany(scopedUserId, companyId, isAdmin),
+    ]);
 
-    if (contactsError) {
-      setError(formatSupabaseError(contactsError));
+    if (contactsResult.error) {
+      setError(formatSupabaseError(contactsResult.error));
       setContacts([]);
     } else {
-      setContacts(data);
+      setContacts(contactsResult.data);
     }
 
+    const opportunities = (lanesResult.data ?? []) as LoadOpportunity[];
+    setLanes(
+      rankLanesForOutreach(
+        buildLanePatterns(
+          opportunities.map((opportunity) => ({
+            origin: opportunity.lane_origin,
+            destination: opportunity.lane_destination,
+            equipmentType: opportunity.equipment_type,
+            commodity: opportunity.commodity,
+            status: opportunity.status,
+            frequency: opportunity.frequency,
+            estimatedLoadsPerWeek: opportunity.estimated_loads_per_week,
+            targetRate: opportunity.target_rate,
+            quotedRate: opportunity.quoted_rate,
+            createdAt: opportunity.created_at,
+            updatedAt: opportunity.updated_at,
+            notes: opportunity.notes,
+          })),
+        ),
+      ),
+    );
     setContactsLoading(false);
   }, [companyId, scopedUserId, isAdmin]);
 
@@ -158,25 +225,26 @@ export function AiOutreachAssistantSection({
     loadContacts();
   }, [loadContacts]);
 
-  useEffect(() => {
-    const resolved = resolveOutreachType(form.outreachType) ?? DEFAULT_OUTREACH_TYPE;
-    if (resolved !== form.outreachType) {
-      setForm((prev) => ({ ...prev, outreachType: resolved }));
-    }
-  }, [form.outreachType, setForm]);
-
   async function generateDraft() {
     setLoading(true);
     setError(null);
     setSaveMessage(null);
     setCopySuccess(false);
+    const current = withDraftDefaults(form);
 
     const { data, error: requestError } = await fetchOutreachDraft({
       companyId,
-      contactId: form.contactId.trim() || null,
-      outreachType: form.outreachType,
-      tone: form.tone,
-      goal: form.goal.trim() || null,
+      contactId: current.contactId.trim() || null,
+      outreachType: current.outreachType,
+      tone: current.tone,
+      communicationStyle: current.communicationStyle,
+      goal: current.goal.trim() || null,
+      language: current.language,
+      enableMarketResearch: current.enableMarketResearch,
+      laneKey:
+        lanes.some((lane) => laneSelectionKey(lane) === current.laneKey)
+          ? current.laneKey
+          : null,
     });
 
     if (requestError || !data) {
@@ -185,29 +253,25 @@ export function AiOutreachAssistantSection({
       return;
     }
 
-    const requestedType = form.outreachType;
-    setForm((prev) => {
-      const nextForm: AiOutreachDraftState = {
-        ...prev,
-        outreachType: requestedType,
-        draft: data.draft,
-        intelligence: data.intelligence,
-        editedSubjects: data.draft.subjectAlternatives ?? [],
-        editedSummary: data.draft.commercialSummary ?? "",
-        editedMarketInsight: data.draft.marketInsight ?? "",
-        editedRecommendation: data.draft.commercialRecommendation ?? "",
-        editedEmail: data.draft.emailDraft ?? data.draft.fullDraft,
-        editedNextStep: data.draft.suggestedNextStep ?? "",
-        editedFullDraft: data.draft.fullDraft,
-      };
-      return {
-        ...nextForm,
-        editedFullDraft:
-          requestedType === "Technical Follow-up"
-            ? technicalDraftText(nextForm)
-            : data.draft.fullDraft,
-      };
-    });
+    const email: OutreachDraftResponse = {
+      subject: data.draft.subject,
+      body: data.draft.body,
+      signature: CUSTOMER_FACING_COMPANY,
+      clarificationQuestion: null,
+    };
+    if (!email.body.trim()) {
+      setError(
+        "The email could not be written from the Commercial Timeline. Please generate the draft again.",
+      );
+      setLoading(false);
+      return;
+    }
+    setForm((prev) => ({
+      ...withDraftDefaults(prev),
+      draft: email,
+      editedSubject: email.subject,
+      editedBody: email.body,
+    }));
     setFeedbackMessage(null);
     setLoading(false);
   }
@@ -217,15 +281,12 @@ export function AiOutreachAssistantSection({
     await generateDraft();
   }
 
-  function draftText(): string {
-    if (form.outreachType === "Technical Follow-up") {
-      return technicalDraftText(form) || form.editedFullDraft || form.draft?.fullDraft || "";
-    }
-    return form.editedFullDraft || form.draft?.fullDraft || "";
+  function copySource(): string {
+    return `Subject: ${draftState.editedSubject.trim()}\n\n${draftState.editedBody.trim()}`.trim();
   }
 
   async function handleCopy() {
-    const text = draftText();
+    const text = copySource();
     if (!text) return;
 
     try {
@@ -238,40 +299,35 @@ export function AiOutreachAssistantSection({
   }
 
   async function handleSaveAsActivity() {
-    const textToSave = draftText();
-    if (!textToSave || !form.draft) return;
+    const textToSave = copySource();
+    if (!textToSave || !draftState.draft) return;
 
     setSavingActivity(true);
     setSaveMessage(null);
     setError(null);
 
     const selectedContact = contacts.find(
-      (contact) => contact.id === form.contactId,
+      (contact) => contact.id === draftState.contactId,
     );
     const contactLabel = selectedContact
       ? formatContactName(selectedContact)
       : null;
 
-    const notesParts = [
-      `Outreach type: ${form.outreachType}`,
-      `Tone: ${form.tone}`,
+    const notes = [
+      "AI email draft for broker review. Nothing was sent.",
       contactLabel ? `Contact: ${contactLabel}` : null,
-      form.goal.trim() ? `Goal: ${form.goal.trim()}` : null,
-      form.editedSubjects?.length
-        ? `Subjects:\n${form.editedSubjects.map((subject, index) => `${index + 1}. ${subject}`).join("\n")}`
-        : form.draft.subjectLine
-          ? `Subject: ${form.draft.subjectLine}`
-          : null,
       "",
       textToSave,
-    ].filter((part) => part !== null);
+    ]
+      .filter((part) => part !== null)
+      .join("\n");
 
     const { error: insertError } = await supabase.from("activities").insert({
       user_id: scopedUserId,
       company_id: companyId,
       activity_type: "note",
       subject: "AI outreach draft generated",
-      notes: notesParts.join("\n"),
+      notes,
       activity_at: new Date().toISOString(),
     });
 
@@ -296,13 +352,13 @@ export function AiOutreachAssistantSection({
   }
 
   async function handleFeedback(rating: OutreachFeedbackRating) {
-    if (!form.draft) return;
+    if (!draftState.draft) return;
     setSavingFeedback(true);
     setFeedbackMessage(null);
     setError(null);
     const { error: feedbackError } = await saveOutreachFeedback({
       companyId,
-      outreachType: form.outreachType,
+      outreachType: draftState.outreachType,
       rating,
     });
     setSavingFeedback(false);
@@ -310,13 +366,11 @@ export function AiOutreachAssistantSection({
       setError(feedbackError);
       return;
     }
-    setFeedbackMessage(
-      "Rating saved for this company. The next draft will take it into account. The model is not retrained.",
-    );
+    setFeedbackMessage("Rating saved for this company. The next email will take it into account.");
   }
 
-  const technicalSelected = form.outreachType === "Technical Follow-up";
-  const emailSelected = isEmailOutreachType(form.outreachType);
+  const fieldClass =
+    "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60";
 
   return (
     <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -325,9 +379,8 @@ export function AiOutreachAssistantSection({
           AI Commercial Intelligence Assistant
         </h2>
         <p className="mt-1 text-sm text-zinc-500">
-          Draft-only assistant for {companyName}. It reads this company&apos;s
-          commercial history and prepares a call script or email for you to
-          review, edit, and send from your own tools.
+          Writes a personalized {CUSTOMER_FACING_COMPANY} email from {companyName}&apos;s
+          Commercial Timeline. Review it, edit it, and send it from your own tools.
         </p>
         <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-sm text-amber-900">
           Assistive only: this tool does not send email, WhatsApp, SMS, or
@@ -337,56 +390,56 @@ export function AiOutreachAssistantSection({
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid gap-4 md:grid-cols-2">
-          <div>
-            <label
-              htmlFor="outreach-type"
-              className="mb-1.5 block text-sm font-medium text-zinc-700"
-            >
+          <div className="md:col-start-1">
+            <label htmlFor="outreach-type" className="mb-1.5 block text-sm font-medium text-zinc-700">
               Outreach Type
             </label>
             <select
               id="outreach-type"
-              value={form.outreachType}
+              value={draftState.outreachType}
               onChange={(event) =>
                 setForm((prev) => ({
-                  ...prev,
+                  ...withDraftDefaults(prev),
                   outreachType: event.target.value as OutreachType,
                 }))
               }
               disabled={loading}
-              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
+              className={fieldClass}
             >
               {OUTREACH_TYPES.map((type) => (
                 <option key={type} value={type}>
-                  {type} (draft)
+                  {type}
                 </option>
               ))}
             </select>
-            <p className="mt-1 text-xs text-zinc-500">
-              {technicalSelected
-                ? "Technical Follow-up uses this company's recorded lanes and public freight sources. Nothing is sent from the CRM."
-                : "Select the type of draft to generate. Nothing is sent from the CRM."}
-            </p>
+            {draftState.outreachType === "Automatic / next best follow-up" ? (
+              <p className="mt-1.5 text-xs text-zinc-500">
+                Reviews the Commercial Timeline and writes the next email. A lane is not required.
+              </p>
+            ) : null}
+            {draftState.outreachType === "Market insight" &&
+            !draftState.enableMarketResearch ? (
+              <p className="mt-1.5 text-xs text-zinc-500">
+                Market research is off, so this draft will not include a market claim.
+              </p>
+            ) : null}
           </div>
 
-          <div>
-            <label
-              htmlFor="outreach-contact"
-              className="mb-1.5 block text-sm font-medium text-zinc-700"
-            >
+          <div className="md:col-start-1">
+            <label htmlFor="outreach-contact" className="mb-1.5 block text-sm font-medium text-zinc-700">
               Contact
             </label>
             <select
               id="outreach-contact"
-              value={form.contactId}
+              value={draftState.contactId}
               onChange={(event) =>
                 setForm((prev) => ({
-                  ...prev,
+                  ...withDraftDefaults(prev),
                   contactId: event.target.value,
                 }))
               }
               disabled={loading || contactsLoading}
-              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
+              className={fieldClass}
             >
               <option value="">No specific contact</option>
               {contacts.map((contact) => (
@@ -397,24 +450,70 @@ export function AiOutreachAssistantSection({
             </select>
           </div>
 
-          <div>
-            <label
-              htmlFor="outreach-tone"
-              className="mb-1.5 block text-sm font-medium text-zinc-700"
+          <div className="md:col-start-1">
+            <label htmlFor="outreach-language" className="mb-1.5 block text-sm font-medium text-zinc-700">
+              Email Language
+            </label>
+            <select
+              id="outreach-language"
+              value={draftState.language}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...withDraftDefaults(prev),
+                  language: resolveOutreachLanguage(event.target.value) ?? "en",
+                }))
+              }
+              disabled={loading}
+              className={fieldClass}
             >
+              {OUTREACH_LANGUAGES.map((language) => (
+                <option key={language.value} value={language.value}>
+                  {language.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="md:col-start-1">
+            <label htmlFor="outreach-style" className="mb-1.5 block text-sm font-medium text-zinc-700">
+              Communication style
+            </label>
+            <select
+              id="outreach-style"
+              value={draftState.communicationStyle}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...withDraftDefaults(prev),
+                  communicationStyle:
+                    resolveOutreachStyle(event.target.value) ?? DEFAULT_STYLE,
+                }))
+              }
+              disabled={loading}
+              className={fieldClass}
+            >
+              {OUTREACH_STYLES.map((style) => (
+                <option key={style} value={style}>
+                  {style}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="md:col-start-1">
+            <label htmlFor="outreach-tone" className="mb-1.5 block text-sm font-medium text-zinc-700">
               Tone
             </label>
             <select
               id="outreach-tone"
-              value={form.tone}
+              value={draftState.tone}
               onChange={(event) =>
                 setForm((prev) => ({
-                  ...prev,
+                  ...withDraftDefaults(prev),
                   tone: event.target.value as OutreachTone,
                 }))
               }
               disabled={loading}
-              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
+              className={fieldClass}
             >
               {OUTREACH_TONES.map((option) => (
                 <option key={option} value={option}>
@@ -424,26 +523,75 @@ export function AiOutreachAssistantSection({
             </select>
           </div>
 
+          {lanes.length > 0 && (
+            <div className="md:col-span-2">
+              <label htmlFor="outreach-lane" className="mb-1.5 block text-sm font-medium text-zinc-700">
+                Recorded lane <span className="font-normal text-zinc-500">(optional)</span>
+              </label>
+              <select
+                id="outreach-lane"
+                value={draftState.laneKey}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...withDraftDefaults(prev),
+                    laneKey: event.target.value,
+                  }))
+                }
+                disabled={loading}
+                className={fieldClass}
+              >
+                <option value="">Use the Commercial Timeline</option>
+                {lanes.map((lane) => (
+                  <option key={laneSelectionKey(lane)} value={laneSelectionKey(lane)}>
+                    {laneLabel(lane)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="md:col-span-2">
-            <label
-              htmlFor="outreach-goal"
-              className="mb-1.5 block text-sm font-medium text-zinc-700"
-            >
-              Goal
+            <label htmlFor="outreach-goal" className="mb-1.5 block text-sm font-medium text-zinc-700">
+              Additional Instructions <span className="font-normal text-zinc-500">(optional)</span>
             </label>
             <input
               id="outreach-goal"
               type="text"
-              value={form.goal}
+              maxLength={240}
+              value={draftState.goal}
               onChange={(event) =>
-                setForm((prev) => ({ ...prev, goal: event.target.value }))
+                setForm((prev) => ({
+                  ...withDraftDefaults(prev),
+                  goal: event.target.value,
+                }))
               }
               disabled={loading}
-              placeholder="Example: Ask for available lanes, follow up on a quote, reconnect after no response..."
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
+              placeholder="Optional. Leave blank to use the stage and the Commercial Timeline."
+              className={fieldClass}
             />
           </div>
         </div>
+
+        <label className="flex items-start gap-2 text-sm text-zinc-700">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={draftState.enableMarketResearch}
+            disabled={loading}
+            onChange={(event) =>
+              setForm((prev) => ({
+                ...withDraftDefaults(prev),
+                enableMarketResearch: event.target.checked,
+              }))
+            }
+          />
+          <span>
+            <span className="font-medium">Enable Market Research</span>
+            <span className="mt-0.5 block text-xs text-zinc-500">
+              Optional. Runs only when checked. A relevant public finding may be included. If none is found, the email is written without a market claim.
+            </span>
+          </span>
+        </label>
 
         <div className="flex flex-wrap gap-2">
           <button
@@ -451,9 +599,9 @@ export function AiOutreachAssistantSection({
             disabled={loading}
             className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loading ? "Generating draft..." : "Generate Draft"}
+            {loading ? "Writing email..." : "Generate Email"}
           </button>
-          {!isOutreachDraftEmpty(form) && (
+          {!isOutreachDraftEmpty(draftState) && (
             <button
               type="button"
               onClick={handleDiscard}
@@ -480,19 +628,17 @@ export function AiOutreachAssistantSection({
 
       {loading && (
         <p className="mt-4 text-sm text-zinc-500">
-          {technicalSelected
-            ? "Reviewing this company's freight history and current market sources..."
-            : "Building the draft from this company's commercial history..."}
+          {draftState.enableMarketResearch
+            ? "Checking this week's freight conditions, then writing the email..."
+            : "Writing the email..."}
         </p>
       )}
 
-      {!loading && form.draft && (
+      {!loading && draftState.draft && draftState.editedBody.trim() && (
         <div className="mt-6 space-y-4 border-t border-zinc-100 pt-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs text-zinc-500">
-              Draft for broker review only. Copy and use in your own tools — the
-              CRM does not send messages or contact customers. Your edits are
-              kept if you switch browser tabs.
+              Draft for broker review only. Nothing is sent from the CRM.
             </p>
             <div className="flex flex-wrap gap-2">
               <button
@@ -500,7 +646,7 @@ export function AiOutreachAssistantSection({
                 onClick={handleCopy}
                 className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
               >
-                {copySuccess ? "Copied" : "Copy"}
+                {copySuccess ? "Copied" : "Copy Email"}
               </button>
               <button
                 type="button"
@@ -521,190 +667,58 @@ export function AiOutreachAssistantSection({
             </div>
           </div>
 
-          {technicalSelected && form.intelligence && (
-            <div className="space-y-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-              <div>
-                <h3 className="text-sm font-semibold text-zinc-900">
-                  CRM information used
-                </h3>
-                <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
-                  {form.intelligence.crmFacts.map((fact) => (
-                    <li key={fact}>{fact}</li>
-                  ))}
-                </ul>
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-zinc-900">
-                  Relevant lanes
-                </h3>
-                {form.intelligence.lanePatterns.length === 0 ? (
-                  <p className="mt-1 text-sm text-zinc-600">
-                    No origin and destination lanes are recorded for this company.
-                  </p>
-                ) : (
-                  <ul className="mt-2 space-y-2 text-sm text-zinc-700">
-                    {form.intelligence.lanePatterns.map((lane) => (
-                      <li key={`${lane.origin}-${lane.destination}-${lane.equipmentType ?? "equipment"}`}>
-                        {lane.origin} to {lane.destination}
-                        {lane.equipmentType ? ` · ${lane.equipmentType}` : ""}
-                        {lane.commodities.length ? ` · ${lane.commodities.join(", ")}` : ""}
-                        {` · ${lane.quoteCount} record${lane.quoteCount === 1 ? "" : "s"}`}
-                        {lane.lastRecordedAt ? ` · last recorded ${lane.lastRecordedAt}` : ""}
-                        {lane.repeatedLane ? " · repeated lane" : ""}
-                        {lane.closedWithoutAward ? " · previously not awarded" : ""}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-zinc-900">
-                  Market insights
-                </h3>
-                {form.intelligence.marketResearch?.findings.length ? (
-                  <ul className="mt-2 space-y-3 text-sm text-zinc-700">
-                    {form.intelligence.marketResearch.findings.map((finding) => (
-                      <li key={`${finding.sourceUrl}-${finding.insight}`}>
-                        <p>{finding.insight}</p>
-                        <p className="mt-1 text-xs text-zinc-500">
-                          {finding.sourceName}
-                          {finding.publishedAt ? ` · ${finding.publishedAt}` : " · date not on the source"}
-                          {` · ${finding.scope === "verified" ? "Verified current source" : "Observation, not a current lane condition"}`}
-                          {finding.sourceUrl ? ` · ${finding.sourceUrl}` : ""}
-                        </p>
-                        <p className="text-xs text-zinc-500">{finding.relevance}</p>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="mt-1 text-sm text-zinc-600">
-                    {form.intelligence.marketResearch?.limitation ??
-                      "Current market research was not available for this draft."}
-                  </p>
-                )}
-                {form.intelligence.marketResearch?.limitation &&
-                  (form.intelligence.marketResearch.findings.length ?? 0) > 0 && (
-                    <p className="mt-2 text-xs text-zinc-500">
-                      {form.intelligence.marketResearch.limitation}
-                    </p>
-                  )}
-              </div>
-            </div>
-          )}
-
-          {emailSelected && (form.editedSubjects ?? []).length > 0 && (
-            <div className="space-y-2 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-                Subject alternatives
-              </p>
-              {(form.editedSubjects ?? []).map((subject, index) => (
-                <input
-                  key={`subject-${index}`}
-                  value={subject}
-                  onChange={(event) => {
-                    const editedSubjects = [...(form.editedSubjects ?? [])];
-                    editedSubjects[index] = event.target.value;
-                    setForm((prev) => ({ ...prev, editedSubjects }));
-                  }}
-                  className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
-                  aria-label={`Subject alternative ${index + 1}`}
-                />
-              ))}
-            </div>
-          )}
-
-          {!technicalSelected && (
-            <div className="space-y-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-              {form.draft.sections.map((section) => (
-                <div key={section.title}>
-                  <h3 className="text-sm font-semibold text-zinc-900">
-                    {section.title}
-                  </h3>
-                  <p className="mt-1 whitespace-pre-wrap text-sm text-zinc-700">
-                    {section.content}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {technicalSelected ? (
-            <div className="space-y-4">
-              {(
-                [
-                  ["editedSummary", "Commercial intelligence summary", form.editedSummary],
-                  ["editedMarketInsight", "Market insight", form.editedMarketInsight],
-                  ["editedRecommendation", "Commercial recommendation", form.editedRecommendation],
-                  ["editedEmail", "Recommended email draft", form.editedEmail],
-                  ["editedNextStep", "Suggested next step", form.editedNextStep],
-                ] as const
-              ).map(([key, label, value]) => (
-                <div key={key} className="rounded-lg border border-zinc-200 bg-white p-4">
-                  <label
-                    htmlFor={`outreach-${key}`}
-                    className="text-xs font-medium uppercase tracking-wide text-zinc-500"
-                  >
-                    {label}
-                  </label>
-                  <textarea
-                    id={`outreach-${key}`}
-                    rows={key === "editedEmail" ? 10 : 4}
-                    value={value ?? ""}
-                    onChange={(event) =>
-                      setForm((prev) => ({ ...prev, [key]: event.target.value }))
-                    }
-                    className="mt-2 w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-800 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
-                  />
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="rounded-lg border border-zinc-200 bg-white p-4">
-              <label
-                htmlFor="outreach-edited-draft"
-                className="text-xs font-medium uppercase tracking-wide text-zinc-500"
-              >
-                Draft to copy / edit
-              </label>
-              <textarea
-                id="outreach-edited-draft"
-                rows={12}
-                value={form.editedFullDraft ?? ""}
-                onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    editedFullDraft: event.target.value,
-                  }))
-                }
-                className="mt-2 w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-800 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
-              />
-            </div>
-          )}
-
-          <div className="rounded-lg border border-zinc-200 bg-white p-4">
-            <p className="text-sm font-medium text-zinc-900">Rate this recommendation</p>
-            <p className="mt-1 text-xs text-zinc-500">
-              Your rating is saved on this company and included the next time a
-              draft is generated. This does not retrain the model, and nothing
-              is sent to the customer.
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {OUTREACH_FEEDBACK_RATINGS.map((rating) => (
-                <button
-                  key={rating.id}
-                  type="button"
-                  onClick={() => handleFeedback(rating.id)}
-                  disabled={savingFeedback}
-                  className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {rating.label}
-                </button>
-              ))}
-            </div>
-            {feedbackMessage && (
-              <p className="mt-3 text-sm text-emerald-800">{feedbackMessage}</p>
-            )}
+          <div>
+            <label htmlFor="outreach-subject" className="mb-1.5 block text-sm font-medium text-zinc-700">
+              Subject
+            </label>
+            <input
+              id="outreach-subject"
+              value={draftState.editedSubject}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...withDraftDefaults(prev),
+                  editedSubject: event.target.value,
+                }))
+              }
+              className={fieldClass}
+            />
           </div>
+
+          <div>
+            <label htmlFor="outreach-body" className="mb-1.5 block text-sm font-medium text-zinc-700">
+              Email
+            </label>
+            <textarea
+              id="outreach-body"
+              rows={14}
+              value={draftState.editedBody}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...withDraftDefaults(prev),
+                  editedBody: event.target.value,
+                }))
+              }
+              className={fieldClass}
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm text-zinc-500">Rate this email</p>
+            {OUTREACH_FEEDBACK_RATINGS.map((rating) => (
+              <button
+                key={rating.id}
+                type="button"
+                onClick={() => handleFeedback(rating.id)}
+                disabled={savingFeedback}
+                className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {rating.label}
+              </button>
+            ))}
+          </div>
+          {feedbackMessage && (
+            <p className="text-sm text-emerald-800">{feedbackMessage}</p>
+          )}
         </div>
       )}
     </section>

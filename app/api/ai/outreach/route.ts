@@ -1,16 +1,29 @@
-// Assistive only: returns draft text. No sending or automated outreach.
-import { buildCrmFacts } from "@/lib/laneIntelligence";
+// Assistive only: returns one email draft. No sending or automated outreach.
 import { buildOutreachCrmContext } from "@/lib/aiCrmContext";
 import {
-  OUTREACH_TONES,
   OUTREACH_SYSTEM_PROMPT,
   buildOutreachUserPrompt,
   normalizeOutreachDraft,
   OUTREACH_DRAFT_JSON_SCHEMA,
+  resolveOutreachStyle,
+  resolveOutreachTone,
   resolveOutreachType,
   type OutreachDraftResponse,
-  type OutreachTone,
 } from "@/lib/aiPrompts";
+import {
+  chooseOutreachDraft,
+  draftAsksBrokerBeforeWriting,
+  emailCopyText,
+  generalOutreachFallback,
+  keepQuoteLinks,
+  postPresentationCallFallback,
+  resolveOutreachLanguage,
+  shouldRewriteOutreachDraft,
+  timelineReferenceUrls,
+} from "@/lib/customerEmail";
+import { findLaneByKey, rankLanesForOutreach } from "@/lib/laneIntelligence";
+import { extractCommercialFacts } from "@/lib/outreachContext";
+import { saveMarketResearchReport } from "@/lib/freightMarket/store";
 import {
   aiClientErrorResponse,
   aiGenerationErrorResponse,
@@ -22,7 +35,7 @@ import {
   logAiSuccess,
   resolveCompanyAccess,
 } from "@/lib/aiRouteHelpers";
-import { researchFreightMarket, type MarketResearchResult } from "@/lib/marketResearch";
+import { researchFreightMarket } from "@/lib/marketResearch";
 import { generateOutreachJson, getOutreachModel } from "@/lib/openaiServer";
 import { OUTREACH_PROMPT_CACHE_KEY, OUTREACH_REASONING_EFFORT } from "@/lib/outreachModel";
 
@@ -34,11 +47,11 @@ interface OutreachRequestBody {
   contactId?: string | null;
   outreachType?: string;
   tone?: string;
+  communicationStyle?: string;
   goal?: string | null;
-}
-
-function isOutreachTone(value: string): value is OutreachTone {
-  return (OUTREACH_TONES as readonly string[]).includes(value);
+  language?: string;
+  enableMarketResearch?: boolean;
+  laneKey?: string | null;
 }
 
 export async function POST(request: Request) {
@@ -60,7 +73,11 @@ export async function POST(request: Request) {
 
   const companyId = body.companyId?.trim();
   const outreachType = resolveOutreachType(body.outreachType?.trim() ?? "");
-  const tone = body.tone?.trim() ?? "";
+  const tone = resolveOutreachTone(body.tone?.trim() ?? "");
+  const communicationStyle =
+    resolveOutreachStyle(body.communicationStyle?.trim() ?? "") ??
+    "Standard commercial email";
+  const language = resolveOutreachLanguage(body.language?.trim() || "en");
 
   if (!companyId) {
     return aiClientErrorResponse("Company ID is required.", 400);
@@ -70,12 +87,18 @@ export async function POST(request: Request) {
     return aiClientErrorResponse("A valid outreach type is required.", 400);
   }
 
-  if (!isOutreachTone(tone)) {
+  if (!tone) {
     return aiClientErrorResponse("A valid tone is required.", 400);
+  }
+
+  if (!language) {
+    return aiClientErrorResponse("A valid outreach language is required.", 400);
   }
 
   const contactId = body.contactId?.trim() || null;
   const goal = body.goal?.trim() || null;
+  const laneKey = body.laneKey?.trim() || null;
+  const enableMarketResearch = body.enableMarketResearch === true;
 
   const logContext = createAiLogContext("AI_OUTREACH", user.id, companyId);
   logAiStart(logContext);
@@ -112,67 +135,163 @@ export async function POST(request: Request) {
       return aiClientErrorResponse(context.outreachBlockedReason, 409);
     }
 
-    let marketResearch: MarketResearchResult | null = null;
-    if (outreachType === "Technical Follow-up") {
-      const location = [context.company.city, context.company.state, context.company.country]
-        .filter(Boolean)
-        .join(", ");
-      marketResearch = await researchFreightMarket({
-        companyName: context.company.name,
-        location: location || null,
-        lanePatterns: context.lanePatterns,
-        model: getOutreachModel(),
-        reasoningEffort: OUTREACH_REASONING_EFFORT,
-      });
+    const rankedLanes = rankLanesForOutreach(context.lanePatterns);
+    const selectedLane = findLaneByKey(rankedLanes, laneKey);
+    const focusLane = selectedLane ?? (laneKey ? null : rankedLanes[0] ?? null);
+
+    let emailGuidance: string[] = [];
+    if (enableMarketResearch) {
+      try {
+        const location = [context.company.city, context.company.state, context.company.country]
+          .filter(Boolean)
+          .join(", ");
+        const noted = extractCommercialFacts([
+          context.company.generalNotes,
+          ...context.commercialTimeline.map(
+            (item) => `${item.title ?? ""}\n${item.notes ?? ""}`,
+          ),
+          ...context.opportunities.map(
+            (opportunity) =>
+              `${opportunity.commodity ?? ""} ${opportunity.equipmentType ?? ""} ${opportunity.notes ?? ""}`,
+          ),
+        ]);
+        const assessment = await researchFreightMarket({
+          companyName: context.company.name,
+          location: location || null,
+          lanePatterns: context.lanePatterns,
+          focusLane,
+          commodities: noted.commodities,
+          equipment: noted.equipment[0] ?? null,
+          model: getOutreachModel(),
+          reasoningEffort: OUTREACH_REASONING_EFFORT,
+        });
+        emailGuidance = assessment.emailGuidance;
+        await saveMarketResearchReport(supabase, {
+          companyId,
+          createdBy: user.id,
+          assessment,
+        });
+      } catch (error) {
+        logAiFailed(logContext, error, { stage: "market_research" });
+        emailGuidance = [];
+      }
     }
 
-    const { data, error } = await generateOutreachJson<OutreachDraftResponse>({
+    const draftShape = { outreachType, tone, communicationStyle };
+    const postPresentation = outreachType === "Post-Presentation Call Follow-up";
+    let senderName: string | null = null;
+    let senderEmail: string | null = user.email?.trim() || null;
+    if (postPresentation) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name, email")
+        .eq("id", user.id)
+        .maybeSingle();
+      senderName = profile?.full_name?.trim() || null;
+      senderEmail = profile?.email?.trim() || senderEmail;
+    }
+    const referenceUrls = postPresentation
+      ? timelineReferenceUrls([
+          ...context.commercialTimeline.map((item) => item.notes),
+          ...context.completedFollowUps.map((item) => item.notes),
+        ])
+      : [];
+    const stageFallback = () =>
+      postPresentation
+        ? postPresentationCallFallback({
+            contactName: context.selectedContact?.name ?? null,
+            language,
+            senderName,
+            senderEmail,
+            referenceUrl: referenceUrls[0] ?? null,
+          })
+        : generalOutreachFallback({
+            companyName: context.company.name,
+            contactName: context.selectedContact?.name ?? null,
+            language,
+          });
+    const userPrompt = buildOutreachUserPrompt(context, {
+      language,
+      communicationStyle,
+      emailGuidance,
+      selectedLane: focusLane
+        ? {
+            origin: focusLane.origin,
+            destination: focusLane.destination,
+            equipmentType: focusLane.equipmentType,
+            commodities: focusLane.commodities,
+          }
+        : null,
+      laneChosenByBroker: Boolean(selectedLane),
+      sender: postPresentation ? { name: senderName, email: senderEmail } : null,
+      referenceUrls,
+    });
+    const generationInput = {
       systemPrompt: OUTREACH_SYSTEM_PROMPT,
-      userPrompt: buildOutreachUserPrompt(context, marketResearch),
-      schemaName: "outreach_draft",
+      schemaName: "outreach_email",
       schema: OUTREACH_DRAFT_JSON_SCHEMA,
       promptCacheKey: OUTREACH_PROMPT_CACHE_KEY,
-      context: "AI_OUTREACH",
-      timeoutMs: marketResearch ? 60_000 : 80_000,
+      context: "AI_OUTREACH" as const,
+    };
+    const { data, error } = await generateOutreachJson<OutreachDraftResponse>({
+      ...generationInput,
+      userPrompt,
+      timeoutMs: enableMarketResearch ? 60_000 : 80_000,
     });
 
     if (error || !data) {
       logAiFailed(logContext, new Error(error ?? "openai_generation_failed"));
+      if (postPresentation) {
+        const fallback = stageFallback();
+        return aiSuccessResponse({
+          draft: fallback,
+          message: emailCopyText(fallback),
+          companyName: context.company.name,
+          generatedAt: new Date().toISOString(),
+        });
+      }
       return aiGenerationErrorResponse(error);
     }
 
-    const draft = normalizeOutreachDraft(data, outreachType);
-    const intelligence = {
-      crmFacts: buildCrmFacts({
-        companyName: context.company.name,
-        city: context.company.city,
-        state: context.company.state,
-        country: context.company.country,
-        mainPhone: context.company.mainPhone,
-        salesStage: context.company.salesStage,
-        priority: context.company.priority,
-        notes: context.company.generalNotes,
-        contactCount: context.contacts.length,
-        opportunityCount: context.opportunities.length,
-        activityCount: context.commercialTimeline.length,
-        followUpCount:
-          context.pendingFollowUps.length + context.completedFollowUps.length,
-        lanePatterns: context.lanePatterns,
-      }),
-      lanePatterns: context.lanePatterns,
-      marketResearch,
-      priorDraftFeedback: context.priorDraftFeedback,
-    };
+    let draft = keepQuoteLinks(
+      normalizeOutreachDraft(data, language),
+      referenceUrls,
+      language,
+    );
+    if (shouldRewriteOutreachDraft(draft, draftShape)) {
+      const retry = await generateOutreachJson<OutreachDraftResponse>({
+        ...generationInput,
+        userPrompt: `${userPrompt}
+
+The previous draft asked the broker which lane, commodity, or equipment to mention, or it did not fit this stage. Discard that question. Write the customer email now from the company, the contact, and the Commercial Timeline. Missing lane, commodity, or equipment does not block the email. Do not invent those facts. A broad question about the customer's transportation needs belongs inside the email when the stage is opening a conversation.`,
+        timeoutMs: 45_000,
+      });
+      if (retry.data) {
+        draft = chooseOutreachDraft(
+          draft,
+          keepQuoteLinks(
+            normalizeOutreachDraft(retry.data, language),
+            referenceUrls,
+            language,
+          ),
+          draftShape,
+        );
+      }
+    }
+
+    if (!draft.body.trim() || draftAsksBrokerBeforeWriting(draft)) {
+      draft = stageFallback();
+    }
 
     logAiSuccess(logContext, {
       companyName: context.company.name,
       model: getOutreachModel(),
+      marketResearch: enableMarketResearch,
     });
 
     return aiSuccessResponse({
       draft,
-      intelligence,
-      message: draft.fullDraft,
+      message: emailCopyText(draft),
       companyName: context.company.name,
       generatedAt: new Date().toISOString(),
     });

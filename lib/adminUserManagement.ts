@@ -938,6 +938,7 @@ const HISTORICAL_USER_REFERENCES = [
   ["carriers", "updated_by"],
   ["carrier_contacts", "created_by"],
   ["outreach_draft_feedback", "user_id"],
+  ["market_research_reports", "created_by"],
   ["activities", "updated_by"],
   ["activity_edit_audits", "editor_user_id"],
   ["companies", "deleted_by"],
