@@ -260,7 +260,9 @@ const shaped = normalizeOutreachDraft(
     timelineNotes: [],
   },
 );
-assert.equal(shaped.emailDraft?.split("\n").filter(Boolean)[1], POST_PRESENTATION_THANK_YOU.es);
+assert.match(shaped.emailDraft ?? "", /Muchas gracias por atender mi llamada hoy\./);
+assert.equal(shaped.emailDraft, shaped.fullDraft);
+assert.equal(shaped.sections[0]?.content, shaped.fullDraft);
 assert.doesNotMatch(shaped.emailDraft ?? "", /\b(lane|commodity|equipment)\b/i);
 assert.match(shaped.fullDraft, /Subject: Gracias por su tiempo/);
 
