@@ -38,6 +38,8 @@ const UNANSWERED_PATTERN =
   /no contest|sin respuesta|no answer|did not answer|didn't answer|no me atend|no pudo atender|not able to reach|could not reach|couldn't reach|no logre hablar|unable to reach|no response/;
 const ANSWERED_PATTERN =
   /hable con|hablamos|spoke with|talked with|we spoke|we talked|atendi|atendio|took my call|on the phone|tuvimos una llamada/;
+const NOT_INTERESTED_PATTERN =
+  /no estan interesados|no esta interesado|not interested|no interesados|not a fit|no quieren por ahora/;
 
 export interface RecordedFreight {
   lane: string;
@@ -61,7 +63,7 @@ export interface PostPresentationEmailInput {
   recordedFreight?: RecordedFreight | null;
 }
 
-type DevelopedVoice = Exclude<OutreachVoice, "conversational">;
+type DevelopedVoice = Exclude<OutreachVoice, "conversational" | "natural">;
 type CallKind = "answered" | "voicemail" | "unanswered";
 
 export function resolvePostPresentationLanguage(
@@ -105,13 +107,16 @@ export function composePostPresentationEmail(input: PostPresentationEmailInput):
   const language = input.language;
   const reading = readLatestCall(input.timelineNotes ?? []);
   const voice = outreachVoice(input.tone);
+  const recordedLane = freightLabel(input.recordedFreight);
   const paragraphs =
     voice === "conversational"
       ? [openingSentence(language, reading.kind), conversationalCloser(language, reading)]
-      : [
-          openingSentence(language, reading.kind),
-          ...developedParagraphs(language, voice, reading, freightLabel(input.recordedFreight)),
-        ];
+      : voice === "natural"
+        ? [naturalMessage(language, reading, recordedLane)]
+        : [
+            openingSentence(language, reading.kind),
+            ...developedParagraphs(language, voice, reading, recordedLane),
+          ];
   const body = [
     greetingLine(language, input.contactName),
     "",
@@ -123,10 +128,7 @@ export function composePostPresentationEmail(input: PostPresentationEmailInput):
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  const subjects =
-    language === "es"
-      ? ["Gracias por su tiempo", "Después de nuestra llamada", "Seguimiento de nuestra conversación"]
-      : ["Thank you for your time", "After our call", "Following our conversation"];
+  const subjects = subjectLines(language, voice, reading.kind);
 
   return {
     subject: subjects[0],
@@ -144,6 +146,98 @@ export function firstSentenceAfterGreeting(body: string): string {
   const greetingIndex = lines.findIndex((line) => /^(hi|hello|hola)\b/i.test(line));
   const line = lines[greetingIndex + 1] ?? "";
   return line.split(/(?<=\.)\s/)[0] ?? line;
+}
+
+function subjectLines(
+  language: PostPresentationLanguage,
+  voice: OutreachVoice,
+  kind: CallKind,
+): string[] {
+  if (voice !== "natural") {
+    return language === "es"
+      ? ["Gracias por su tiempo", "Después de nuestra llamada", "Seguimiento de nuestra conversación"]
+      : ["Thank you for your time", "After our call", "Following our conversation"];
+  }
+  if (kind === "voicemail" || kind === "unanswered") {
+    return language === "es"
+      ? ["Le dejé un mensaje", "Sobre mi llamada", "Cuando pueda"]
+      : ["I left you a message", "About my call", "When you have a minute"];
+  }
+  return language === "es"
+    ? ["Gracias por la llamada", "Después de hablar", "Una nota breve"]
+    : ["Thanks for the call", "After we talked", "A short note"];
+}
+
+function naturalMessage(
+  language: PostPresentationLanguage,
+  reading: CallReading,
+  recordedLane: string | null,
+): string {
+  const spanish = language === "es";
+  const sentences: string[] = [];
+  if (reading.kind === "voicemail") {
+    sentences.push(spanish ? "Le dejé un mensaje en el buzón." : "I left you a voicemail.");
+  } else if (reading.kind === "unanswered") {
+    sentences.push(
+      spanish ? "Lo llamé hoy y no pude hablar con usted." : "I called today and didn't reach you.",
+    );
+  } else {
+    sentences.push(spanish ? "Gracias por la llamada." : "Thanks for the call.");
+  }
+
+  if (reading.callDay || reading.futureCall) {
+    sentences.push(
+      reading.callDay
+        ? spanish
+          ? `Lo llamo el ${reading.callDay.es}, como quedamos.`
+          : `I'll call you on ${reading.callDay.en}, as we said.`
+        : spanish
+          ? "Lo llamo, como quedamos."
+          : "I'll call you, as we said.",
+    );
+  } else if (reading.sendDocuments) {
+    sentences.push(
+      spanish ? "Le envío los documentos que me pidió." : "I'll send the documents you asked for.",
+    );
+  } else if (reading.quoteUrls[0]) {
+    sentences.push(
+      spanish
+        ? `Gracias por el enlace de cotización: ${reading.quoteUrls[0]}`
+        : `Thanks for the quoting link: ${reading.quoteUrls[0]}`,
+    );
+  } else if (reading.notInterested) {
+    sentences.push(
+      spanish
+        ? "Cuando tenga un embarque, escríbame y lo vemos."
+        : "When you have a shipment, write me and we'll look at it.",
+    );
+  } else if (recordedLane && reading.kind === "answered") {
+    sentences.push(
+      spanish
+        ? `Si quiere, le cotizo esta ruta: ${recordedLane}.`
+        : `If you want, I can price this lane: ${recordedLane}.`,
+    );
+  } else if (reading.kind === "answered") {
+    sentences.push(
+      spanish
+        ? "Si quiere que le cotice un embarque, respóndame con el origen, el destino y el día."
+        : "If you want me to price a shipment, reply with the origin, destination, and the day.",
+    );
+  } else {
+    sentences.push(
+      spanish ? "Cuando pueda, respóndame y lo retomamos." : "Reply when you can and I'll pick it up.",
+    );
+  }
+
+  if (reading.quoteUrls[0] && reading.sendDocuments && sentences.length < 3) {
+    sentences.push(
+      spanish
+        ? `También uso el enlace que compartió: ${reading.quoteUrls[0]}`
+        : `I'll also use the link you shared: ${reading.quoteUrls[0]}`,
+    );
+  }
+
+  return sentences.slice(0, 3).join(" ");
 }
 
 function conversationalCloser(language: PostPresentationLanguage, reading: CallReading): string {
@@ -452,6 +546,7 @@ interface CallReading {
   futureCall: boolean;
   callDay: { en: string; es: string } | null;
   sendDocuments: boolean;
+  notInterested: boolean;
   kind: CallKind;
 }
 
@@ -470,6 +565,7 @@ function readLatestCall(notes: Array<string | PostPresentationTimelineNote>): Ca
     futureCall,
     callDay: futureCall ? weekday(folded) : null,
     sendDocuments: FUTURE_DOCUMENTS_PATTERN.test(folded),
+    notInterested: NOT_INTERESTED_PATTERN.test(folded),
     kind: callKind(folded, latest?.status ?? ""),
   };
 }

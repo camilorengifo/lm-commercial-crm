@@ -443,7 +443,7 @@ export function AiOutreachAssistantSection({
               ))}
             </select>
             <p className="mt-1 text-xs text-zinc-500">
-              Conversational is a short personal note. Other tones write a fuller email with one specific offer.
+              Conversational is a short personal note. Natural is one to three simple sentences in the broker's own voice. Other tones write a fuller email with one specific offer.
             </p>
           </div>
 

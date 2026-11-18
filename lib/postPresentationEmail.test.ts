@@ -112,16 +112,47 @@ const gabyConversational = composePostPresentationEmail({
   timelineNotes: [gabyNote],
 });
 assert.equal(gabyConversational.body, gabyEnglish.body);
-assert.equal(
-  composePostPresentationEmail({
-    language: "en",
-    tone: "Natural",
-    contactName: "Gaby",
-    ...sender,
-    timelineNotes: [gabyNote],
-  }).body,
-  gabyEnglish.body,
-);
+
+const gabyNatural = composePostPresentationEmail({
+  language: "en",
+  tone: "Natural",
+  contactName: "Gaby",
+  ...sender,
+  timelineNotes: [gabyNote],
+});
+assert.match(gabyNatural.body, /^Hi Gaby,\n\nThanks for the call\./);
+assert.match(gabyNatural.body, /reply with the origin, destination, and the day/);
+assert.match(gabyNatural.body, /Best,\nCamilo Rengifo\ncamilo@armstrongtransport\.com$/);
+assert.equal(gabyNatural.subject, "Thanks for the call");
+assert.doesNotMatch(gabyNatural.body, /Thank you for taking my call today/);
+assert.doesNotMatch(gabyNatural.body, /It was good to connect/);
+assert.doesNotMatch(gabyNatural.visible, /Hablé|órdenes|envié/);
+assert.notEqual(gabyNatural.body, gabyConversational.body);
+assert.ok(bodySentenceCount(gabyNatural.body) >= 1 && bodySentenceCount(gabyNatural.body) <= 3);
+
+const gabyNaturalSpanish = composePostPresentationEmail({
+  language: "es",
+  tone: "Natural",
+  contactName: "Gaby",
+  ...sender,
+  timelineNotes: [gabyNote],
+});
+assert.match(gabyNaturalSpanish.body, /^Hola Gaby,\n\nGracias por la llamada\./);
+assert.match(gabyNaturalSpanish.body, /respóndame con el origen, el destino y el día/);
+assert.match(gabyNaturalSpanish.body, /Saludos,\nCamilo Rengifo\ncamilo@armstrongtransport\.com$/);
+assert.doesNotMatch(gabyNaturalSpanish.body, /Thank you|Thanks for the call|It was good to connect/);
+assert.doesNotMatch(gabyNaturalSpanish.visible, /Hablé con Gaby/);
+assert.ok(bodySentenceCount(gabyNaturalSpanish.body) <= 3);
+
+const naturalVoicemail = composePostPresentationEmail({
+  language: "en",
+  tone: "Natural",
+  contactName: "Gaby",
+  ...sender,
+  timelineNotes: ["Left a voicemail for Gaby."],
+});
+assert.match(naturalVoicemail.body, /I left you a voicemail/);
+assert.doesNotMatch(naturalVoicemail.body, /Thanks for the call|Thank you for taking my call/);
 
 const gabyProfessional = composePostPresentationEmail({
   language: "en",
@@ -240,6 +271,14 @@ assert.deepEqual(
   ]),
   { lane: "McAllen, TX → Bronx, NY", equipment: "Reefer", commodity: "Avocados" },
 );
+
+function bodySentenceCount(body: string): number {
+  const lines = body.split("\n").map((line) => line.trim()).filter(Boolean);
+  const greetingIndex = lines.findIndex((line) => /^(hi|hello|hola)\b/i.test(line));
+  const closingIndex = lines.findIndex((line) => /^(best|saludos),?$/i.test(line));
+  const middle = lines.slice(greetingIndex + 1, closingIndex === -1 ? undefined : closingIndex);
+  return middle.join(" ").split(/[.!?]+/).map((part) => part.trim()).filter(Boolean).length;
+}
 
 function coreDraft(body: string): string {
   return body
