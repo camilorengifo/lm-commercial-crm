@@ -569,13 +569,12 @@ Do not mention that anyone is monitoring data.
 Include a market condition only when the user message provides a usable market note and it genuinely helps this customer's recorded situation. Paraphrase it in one sentence. Do not quote rates, percentages, or load-to-truck ratios. Do not present a regional note as this lane's rate. Do not lengthen the email just to include it.
 If no usable market note is provided, write from the Commercial Timeline and do not mention market conditions.
 If a recorded quote is the reason for the email, treat the quoted rate as a past quote. Do not present it as today's market rate.
-Never stop to ask the broker for a goal, equipment type, transportation mode, commodity, a lane, or prior conversations. If the goal is empty, infer it from the stage and the timeline. Ask about lane, commodity, or equipment only when the stage is the lane inquiry. clarificationQuestion must be null. Write the email immediately from what is available.
+Never stop to ask the broker for a goal, equipment type, transportation mode, commodity, a lane, or prior conversations. If the goal is empty, infer it from the stage and the timeline. Missing lane, commodity, or equipment never blocks the email. A specific question about those facts belongs only in a lane-inquiry email addressed to the customer. For other stages, a broad question about the customer's transportation needs may appear inside the email. Never ask the broker what to mention.
 
 Return JSON with exactly these keys:
 - subject (string)
 - body (string)
 - signature (string; Armstrong Transport Group)
-- clarificationQuestion (null)
 `.trim();
 
 const INTRODUCTION_STAGES = new Set<string>([
@@ -591,7 +590,7 @@ function outreachPurpose(type: string): string {
     case "Front desk referral":
       return "The broker does not know this recipient. Introduce the broker and what Armstrong Transport Group does, explain in concrete terms why they are writing, and ask to be connected with the right person or for their details to be passed along. Make it more complete than a short follow-up. Do not pretend there is an existing relationship, and do not invent lanes or needs.";
     case "Opportunity Development":
-      return "Open a relevant commercial conversation. Explain how Armstrong Transport Group could help and propose one simple next step. If lanes or needs are not recorded, do not invent them and do not ask the broker to supply them. Write a useful general email.";
+      return "Open a relevant commercial conversation even when no lane, commodity, equipment, or goal is recorded. Explain how Armstrong Transport Group could help and propose one simple next step. You may ask the customer one broad question about their transportation needs or plans inside the email. Do not invent lanes, commodities, equipment, calls, or referrals. Mention a call or referral only when the timeline records it. Do not ask the broker what to write.";
     case "After-call thank-you":
       return "Thank them for taking the call. Use the actual call notes. Leave a natural next step. Do not turn this into a request for a lane, commodity, or equipment.";
     case "Follow-up after introduction":
@@ -698,14 +697,14 @@ Selected contact: ${
 Lane already retrieved from CRM: ${
     options.selectedLane
       ? `${options.selectedLane.origin} to ${options.selectedLane.destination}${options.selectedLane.equipmentType ? `, ${options.selectedLane.equipmentType}` : ""}${options.selectedLane.commodities.length ? `, ${options.selectedLane.commodities.join(", ")}` : ""}. ${options.laneChosenByBroker ? "The broker selected this recorded lane." : "This is the most recently recorded lane. Do not claim it is the customer's only lane."}`
-      : "No recorded lane. Do not invent one, and do not ask the broker for one."
+      : "No lane, commodity, or equipment is recorded. That does not block this email. Write it now. Do not invent those facts, and do not ask the broker which ones to mention."
   }
-${laneInquiry ? "This stage may ask the customer for the operational detail that is still missing." : "Do not ask the customer or the broker for equipment type, transportation mode, commodity, or a shipping lane."}
+${laneInquiry ? "This stage may ask the customer for the operational detail that is still missing." : "Do not ask the broker for equipment type, transportation mode, commodity, or a shipping lane. When those facts are not recorded and this stage is opening a conversation, put one broad question about the customer's transportation needs inside the email."}
 
 The Commercial Timeline below is the primary source. Read it before the rest of the brief.
 Apply the relationship reading and the follow-up sequence internally. Do not copy them into the email, and do not show them to the broker.
-If a useful detail is missing, write a general editable email now. Do not stop to ask a question first.
-Match the length to the stage. clarificationQuestion must be null.
+If a useful detail is missing, write a general editable email now. Do not stop to ask the broker a question first.
+Match the length to the stage. Return the customer email. Do not return a question to the broker.
 
 Usable market notes, already checked. Use one only when it gives a natural reason to write and it fits this customer. Do not copy them verbatim, do not cite a source, and do not add numbers:
 ${guidance}
@@ -726,14 +725,11 @@ export function normalizeOutreachDraft(
 export const OUTREACH_DRAFT_JSON_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
-  required: ["subject", "body", "signature", "clarificationQuestion"],
+  required: ["subject", "body", "signature"],
   properties: {
     subject: { type: "string" },
     body: { type: "string" },
     signature: { type: "string" },
-    clarificationQuestion: {
-      anyOf: [{ type: "string" }, { type: "null" }],
-    },
   },
 };
 

@@ -12,7 +12,9 @@ import {
 } from "@/lib/aiPrompts";
 import {
   chooseOutreachDraft,
+  draftAsksBrokerBeforeWriting,
   emailCopyText,
+  generalOutreachFallback,
   resolveOutreachLanguage,
   shouldRewriteOutreachDraft,
 } from "@/lib/customerEmail";
@@ -131,10 +133,7 @@ export async function POST(request: Request) {
 
     const rankedLanes = rankLanesForOutreach(context.lanePatterns);
     const selectedLane = findLaneByKey(rankedLanes, laneKey);
-    if (laneKey && !selectedLane) {
-      return aiClientErrorResponse("Select a lane recorded on this company.", 400);
-    }
-    const focusLane = selectedLane ?? rankedLanes[0] ?? null;
+    const focusLane = selectedLane ?? (laneKey ? null : rankedLanes[0] ?? null);
 
     let emailGuidance: string[] = [];
     if (enableMarketResearch) {
@@ -201,7 +200,7 @@ export async function POST(request: Request) {
         ...generationInput,
         userPrompt: `${userPrompt}
 
-The previous draft did not fit this stage, or it asked for transportation details the stage does not require. Rewrite one email now. Match the length to the stage. Do not ask for a lane, commodity, or equipment unless this stage is the lane inquiry. Do not invent a shipping opportunity. clarificationQuestion must be null.`,
+The previous draft asked the broker which lane, commodity, or equipment to mention, or it did not fit this stage. Discard that question. Write the customer email now from the company, the contact, and the Commercial Timeline. Missing lane, commodity, or equipment does not block the email. Do not invent those facts. A broad question about the customer's transportation needs belongs inside the email when the stage is opening a conversation.`,
         timeoutMs: 45_000,
       });
       if (retry.data) {
@@ -211,6 +210,14 @@ The previous draft did not fit this stage, or it asked for transportation detail
           draftShape,
         );
       }
+    }
+
+    if (!draft.body.trim() || draftAsksBrokerBeforeWriting(draft)) {
+      draft = generalOutreachFallback({
+        companyName: context.company.name,
+        contactName: context.selectedContact?.name ?? null,
+        language,
+      });
     }
 
     logAiSuccess(logContext, {

@@ -4,6 +4,7 @@ import {
   buildAccountOutreachQuickUserPrompt,
   buildOutreachUserPrompt,
   OUTREACH_STYLES,
+  OUTREACH_DRAFT_JSON_SCHEMA,
   OUTREACH_SYSTEM_PROMPT,
   OUTREACH_TONES,
   OUTREACH_TYPES,
@@ -167,7 +168,12 @@ assert.match(OUTREACH_SYSTEM_PROMPT, /Direct but persistent/);
 assert.match(OUTREACH_SYSTEM_PROMPT, /Natural and conversational/);
 assert.doesNotMatch(OUTREACH_SYSTEM_PROMPT, /40 to 90/);
 assert.doesNotMatch(OUTREACH_SYSTEM_PROMPT, /leave subject and body empty/);
-assert.match(OUTREACH_SYSTEM_PROMPT, /clarificationQuestion must be null/);
+assert.match(OUTREACH_SYSTEM_PROMPT, /Never ask the broker what to mention/);
+assert.deepEqual(OUTREACH_DRAFT_JSON_SCHEMA.required, [
+  "subject",
+  "body",
+  "signature",
+]);
 assert.match(OUTREACH_SYSTEM_PROMPT, /Commercial Timeline/);
 assert.match(OUTREACH_SYSTEM_PROMPT, /selected language parameter is authoritative/);
 assert.match(OUTREACH_SYSTEM_PROMPT, /If language is "en"/);
@@ -262,8 +268,9 @@ const incompletePrompt = buildOutreachUserPrompt(
 assert.match(incompletePrompt, /Blank Shipper/);
 assert.match(incompletePrompt, /company notes/);
 assert.match(incompletePrompt, /Do not mention market conditions/);
-assert.match(incompletePrompt, /Do not invent one/);
-assert.match(incompletePrompt, /do not ask the broker for one/i);
+assert.match(incompletePrompt, /Do not invent those facts/);
+assert.match(incompletePrompt, /does not block this email/i);
+assert.match(incompletePrompt, /do not ask the broker which ones to mention/i);
 
 const martinezPrompt = buildOutreachUserPrompt(
   source({
@@ -321,7 +328,7 @@ assert.match(martinezPrompt, /do not ask for a load/i);
 assert.match(martinezPrompt, /do not invent a shipping opportunity/i);
 assert.match(martinezPrompt, /equipment type/i);
 assert.match(martinezPrompt, /Match the length to the stage/);
-assert.match(martinezPrompt, /clarificationQuestion must be null/);
+assert.match(martinezPrompt, /Do not return a question to the broker/);
 assert.match(martinezPrompt, /Armstrong Transport Group/);
 assert.match(martinezPrompt, /Do not mention market conditions/);
 assert.doesNotMatch(martinezPrompt, /tighter across South Texas/);
@@ -433,10 +440,11 @@ const opportunityPrompt = buildOutreachUserPrompt(
   }),
   stageOptions,
 );
-assert.match(opportunityPrompt, /do not invent them/i);
+assert.match(opportunityPrompt, /even when no lane, commodity, equipment, or goal is recorded/i);
+assert.match(opportunityPrompt, /one broad question/i);
 assert.match(opportunityPrompt, /Goal: Not specified/);
-assert.match(opportunityPrompt, /do not ask the broker for one/i);
-assert.match(opportunityPrompt, /do not ask the broker to supply them/i);
+assert.match(opportunityPrompt, /does not block this email/i);
+assert.match(opportunityPrompt, /Do not ask the broker what to write/);
 
 const frontDeskPrompt = buildOutreachUserPrompt(
   source({ outreachType: "Front desk referral", goal: null, lanePatterns: [] }),

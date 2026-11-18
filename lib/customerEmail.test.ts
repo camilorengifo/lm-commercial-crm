@@ -8,6 +8,8 @@ import {
   emailCopyText,
   presentCustomerEmail,
   resolveOutreachLanguage,
+  draftAsksBrokerBeforeWriting,
+  generalOutreachFallback,
   shouldRewriteOutreachDraft,
 } from "./customerEmail.ts";
 import {
@@ -140,6 +142,45 @@ assert.equal(
   }),
   true,
 );
+const brokerQuestion = presentCustomerEmail(
+  {
+    subject: "Quick question",
+    body: "What lane, commodity, or equipment should I mention before I write this email?",
+  },
+  "en",
+);
+assert.equal(draftAsksBrokerBeforeWriting(brokerQuestion), true);
+assert.equal(
+  shouldRewriteOutreachDraft(brokerQuestion, {
+    outreachType: "Opportunity Development",
+  }),
+  true,
+);
+const customerQuestion = presentCustomerEmail(
+  {
+    subject: "Transportation plans",
+    body: "Hi Maria, I work with Armstrong Transport Group and wanted to see whether we can be useful to Valley Produce. I will not guess at a lane or a product. Would you be open to sharing how you handle freight today, and whether any upcoming shipments could use another option? I can work from whatever timing makes sense for you, and there is no need to gather details before we talk. A short reply is enough to point the conversation in the right direction.",
+  },
+  "en",
+);
+assert.equal(draftAsksBrokerBeforeWriting(customerQuestion), false);
+assert.equal(
+  shouldRewriteOutreachDraft(customerQuestion, {
+    outreachType: "Opportunity Development",
+    tone: "Direct but persistent",
+  }),
+  false,
+);
+const fallback = generalOutreachFallback({
+  companyName: "Valley Produce",
+  contactName: "Maria Alvarez",
+  language: "en",
+});
+assert.match(fallback.subject, /freight/i);
+assert.match(fallback.body, /Hi Maria Alvarez/);
+assert.match(fallback.body, /Valley Produce/);
+assert.doesNotMatch(fallback.body, /what lane/i);
+assert.equal(fallback.clarificationQuestion, null);
 const rewritten = chooseOutreachDraft(
   { ...kept, body: "Too short." },
   kept,
@@ -353,6 +394,8 @@ assert.doesNotMatch(route, /commercialSummary|marketInsight|fullDraft|intelligen
 assert.match(route, /emailGuidance/);
 assert.match(route, /getOutreachModel/);
 assert.doesNotMatch(route, /resend|chat\.completions/);
+assert.doesNotMatch(route, /Select a lane recorded on this company/);
+assert.match(route, /generalOutreachFallback/);
 assert.match(sql, /ENABLE ROW LEVEL SECURITY/);
 assert.match(sql, /user_owns_active_company/);
 assert.match(sql, /market_research_sources/);

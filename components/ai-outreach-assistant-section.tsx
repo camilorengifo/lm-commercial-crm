@@ -241,7 +241,10 @@ export function AiOutreachAssistantSection({
       goal: current.goal.trim() || null,
       language: current.language,
       enableMarketResearch: current.enableMarketResearch,
-      laneKey: current.laneKey.trim() || null,
+      laneKey:
+        lanes.some((lane) => laneSelectionKey(lane) === current.laneKey)
+          ? current.laneKey
+          : null,
     });
 
     if (requestError || !data) {

@@ -60,6 +60,9 @@ export function countWords(value: string): number {
 const ASKS_FOR_TRANSPORTATION_FACTS =
   /\b(?:what|which)\s+(?:equipment(?:\s+type)?|transportation mode|mode of transport|commodity|shipping lane)\b|\bplease (?:provide|confirm|send)\b[^.]{0,48}\b(?:equipment|commodity|lane|mode)\b/i;
 
+const BROKER_TRANSPORT_QUESTION =
+  /\b(?:what|which)\s+(?:lane|lanes|commodity|commodities|equipment(?:\s+type)?|transportation mode|mode)\b[^?.!]{0,90}\b(?:should I|should this|do you want me|can you (?:tell|give)|please (?:provide|confirm|share)|before I|to mention|to include|to use)\b|\b(?:I need(?: to know)?|please (?:provide|tell me|confirm)|before I write)\b[^?.!]{0,70}\b(?:lane|commodity|equipment)\b/i;
+
 const LANE_INQUIRY_STAGE = "Lane, capacity, commodity or equipment inquiry";
 
 export interface OutreachDraftShape {
@@ -88,15 +91,50 @@ export function lengthBounds(shape: OutreachDraftShape = {}): {
   return { min: 50, max: 190 };
 }
 
+export function draftAsksBrokerBeforeWriting(draft: CustomerEmailDraft): boolean {
+  const body = draft.body.trim();
+  if (!body) return true;
+  return countWords(body) < 80 && BROKER_TRANSPORT_QUESTION.test(body);
+}
+
 export function shouldRewriteOutreachDraft(
   draft: CustomerEmailDraft,
   shape: OutreachDraftShape = {},
 ): boolean {
+  if (draftAsksBrokerBeforeWriting(draft)) return true;
   const words = countWords(draft.body);
   const bounds = lengthBounds(shape);
   if (words < bounds.min || words > bounds.max) return true;
   if (shape.outreachType === LANE_INQUIRY_STAGE) return false;
+  if (shape.outreachType === "Opportunity Development") return false;
   return ASKS_FOR_TRANSPORTATION_FACTS.test(draft.body);
+}
+
+export function generalOutreachFallback(input: {
+  companyName: string;
+  contactName: string | null;
+  language: OutreachLanguage;
+}): CustomerEmailDraft {
+  const company = input.companyName.trim() || "your company";
+  const name = input.contactName?.trim();
+  if (input.language === "es") {
+    const greeting = name ? `Hola ${name},` : "Hola,";
+    return presentCustomerEmail(
+      {
+        subject: "Conversación sobre su transporte",
+        body: `${greeting}\n\nLe escribo de Armstrong Transport Group. Ayudamos a las empresas con su carga y quería abrir una conversación sobre cómo podríamos ser útiles para ${company}.\n\nNo voy a asumir un carril ni un producto. Si tiene embarques en camino, o si le sirve contar con otra opción de transporte, me gustaría conocer qué está planeando.\n\n¿Le parece bien contarme cómo maneja su carga hoy?`,
+      },
+      "es",
+    );
+  }
+  const greeting = name ? `Hi ${name},` : "Hi,";
+  return presentCustomerEmail(
+    {
+      subject: "A conversation about your freight",
+      body: `${greeting}\n\nI am writing from Armstrong Transport Group. We help companies move their freight, and I wanted to open a conversation about whether we can be useful to ${company}.\n\nI will not assume a lane or a product. If you have shipments coming up, or if another transportation option would help, I would like to hear what you are planning.\n\nWould you be open to sharing how you handle freight today?`,
+    },
+    "en",
+  );
 }
 
 export function chooseOutreachDraft(

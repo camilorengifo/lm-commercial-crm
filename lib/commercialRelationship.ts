@@ -264,7 +264,7 @@ export function interpretCommercialRelationship(input: {
       "Continue from the last recorded conversation. Do not reintroduce Armstrong Transport Group, and do not invent a lane, equipment type, or shipping opportunity.";
   } else {
     internalWritingDirection =
-      "Little commercial history is on file. Write from the company profile. Do not invent lanes, equipment, commodities, quotes, or a shipping opportunity, and do not ask the broker to supply them.";
+      "Little commercial history is on file. Write the email now from the company profile. Missing lane, commodity, or equipment does not stop the email. Do not invent lanes, equipment, commodities, quotes, calls, or referrals, and do not ask the broker to supply them.";
   }
 
   return {
