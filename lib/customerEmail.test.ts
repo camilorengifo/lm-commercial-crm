@@ -325,6 +325,17 @@ const sql = readFileSync(
   "utf8",
 );
 assert.match(assistant, />\s*Language\s*</);
+assert.match(assistant, /Communication style/);
+assert.match(assistant, /Natural and conversational/);
+assert.match(assistant, /Standard commercial email/);
+assert.match(assistant, />\s*Goal\s*</);
+assert.match(assistant, /Automatic \/ next best follow-up/);
+const prompts = readFileSync(join(here, "../lib/aiPrompts.ts"), "utf8");
+assert.match(prompts, /Direct but persistent/);
+assert.match(prompts, /Opportunity Development/);
+assert.match(prompts, /Front desk referral/);
+assert.match(prompts, /After-call thank-you/);
+assert.match(prompts, /Español|language is "es"/);
 assert.match(assistant, /language: current\.language/);
 assert.match(assistant, /language: "en"/);
 assert.doesNotMatch(assistant, /Outreach Language/);

@@ -102,6 +102,7 @@ export async function fetchOutreachDraft(input: {
   contactId: string | null;
   outreachType: OutreachType;
   tone: OutreachTone;
+  communicationStyle: string;
   goal: string | null;
   language: OutreachLanguage;
   enableMarketResearch: boolean;
@@ -118,6 +119,7 @@ export async function fetchOutreachDraft(input: {
     contactId: input.contactId,
     outreachType: input.outreachType,
     tone: input.tone,
+    communicationStyle: input.communicationStyle,
     goal: input.goal,
     language: input.language,
     enableMarketResearch: input.enableMarketResearch,

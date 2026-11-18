@@ -8,12 +8,15 @@ import {
 import { AI_CLIENT_ERROR_MESSAGE } from "@/lib/aiConstants";
 import {
   OUTREACH_FEEDBACK_RATINGS,
+  OUTREACH_STYLES,
   OUTREACH_TONES,
   OUTREACH_TYPES,
+  resolveOutreachStyle,
   resolveOutreachTone,
   resolveOutreachType,
   type OutreachDraftResponse,
   type OutreachFeedbackRating,
+  type OutreachStyle,
   type OutreachTone,
   type OutreachType,
 } from "@/lib/aiPrompts";
@@ -40,12 +43,14 @@ import {
 import { companyDraftKey, usePersistentDraft } from "@/lib/usePersistentDraft";
 import { supabase } from "@/lib/supabaseClient";
 
-const DEFAULT_OUTREACH_TYPE: OutreachType = "Relationship Follow-up";
-const DEFAULT_TONE: OutreachTone = "Natural / Conversational";
+const DEFAULT_OUTREACH_TYPE: OutreachType = "Automatic / next best follow-up";
+const DEFAULT_STYLE: OutreachStyle = "Standard commercial email";
+const DEFAULT_TONE: OutreachTone = "Professional and polished";
 
 interface AiOutreachDraftState {
   outreachType: OutreachType;
   contactId: string;
+  communicationStyle: OutreachStyle;
   tone: OutreachTone;
   language: OutreachLanguage;
   goal: string;
@@ -60,6 +65,7 @@ function emptyOutreachDraft(): AiOutreachDraftState {
   return {
     outreachType: DEFAULT_OUTREACH_TYPE,
     contactId: "",
+    communicationStyle: DEFAULT_STYLE,
     tone: DEFAULT_TONE,
     language: "en",
     goal: "",
@@ -80,13 +86,19 @@ function withDraftDefaults(value: Partial<AiOutreachDraftState>): AiOutreachDraf
     typeof value.draft.signature === "string"
       ? value.draft
       : null;
+  const rawTone = String(value.tone ?? base.tone);
   return {
     ...base,
     ...value,
     outreachType:
       resolveOutreachType(String(value.outreachType ?? base.outreachType)) ??
       base.outreachType,
-    tone: resolveOutreachTone(String(value.tone ?? base.tone)) ?? base.tone,
+    communicationStyle:
+      resolveOutreachStyle(String(value.communicationStyle ?? "")) ??
+      (rawTone === "Natural / Conversational"
+        ? "Natural and conversational"
+        : base.communicationStyle),
+    tone: resolveOutreachTone(rawTone) ?? base.tone,
     language: resolveOutreachLanguage(String(value.language ?? "en")) ?? "en",
     enableMarketResearch: value.enableMarketResearch === true,
     laneKey: value.laneKey ?? "",
@@ -111,6 +123,7 @@ function isOutreachDraftEmpty(value: AiOutreachDraftState): boolean {
     !value.editedSubject.trim() &&
     !value.editedBody.trim() &&
     value.outreachType === DEFAULT_OUTREACH_TYPE &&
+    value.communicationStyle === DEFAULT_STYLE &&
     value.tone === DEFAULT_TONE
   );
 }
@@ -224,6 +237,7 @@ export function AiOutreachAssistantSection({
       contactId: current.contactId.trim() || null,
       outreachType: current.outreachType,
       tone: current.tone,
+      communicationStyle: current.communicationStyle,
       goal: current.goal.trim() || null,
       language: current.language,
       enableMarketResearch: current.enableMarketResearch,
@@ -395,6 +409,17 @@ export function AiOutreachAssistantSection({
                 </option>
               ))}
             </select>
+            {draftState.outreachType === "Automatic / next best follow-up" ? (
+              <p className="mt-1.5 text-xs text-zinc-500">
+                Reviews the Commercial Timeline and writes the next email. A lane is not required.
+              </p>
+            ) : null}
+            {draftState.outreachType === "Market insight" &&
+            !draftState.enableMarketResearch ? (
+              <p className="mt-1.5 text-xs text-zinc-500">
+                Market research is off, so this draft will not include a market claim.
+              </p>
+            ) : null}
           </div>
 
           <div className="md:col-start-1">
@@ -441,6 +466,31 @@ export function AiOutreachAssistantSection({
               {OUTREACH_LANGUAGES.map((language) => (
                 <option key={language.value} value={language.value}>
                   {language.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="md:col-start-1">
+            <label htmlFor="outreach-style" className="mb-1.5 block text-sm font-medium text-zinc-700">
+              Communication style
+            </label>
+            <select
+              id="outreach-style"
+              value={draftState.communicationStyle}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...withDraftDefaults(prev),
+                  communicationStyle:
+                    resolveOutreachStyle(event.target.value) ?? DEFAULT_STYLE,
+                }))
+              }
+              disabled={loading}
+              className={fieldClass}
+            >
+              {OUTREACH_STYLES.map((style) => (
+                <option key={style} value={style}>
+                  {style}
                 </option>
               ))}
             </select>
@@ -499,7 +549,7 @@ export function AiOutreachAssistantSection({
 
           <div className="md:col-span-2">
             <label htmlFor="outreach-goal" className="mb-1.5 block text-sm font-medium text-zinc-700">
-              Additional context <span className="font-normal text-zinc-500">(optional)</span>
+              Goal <span className="font-normal text-zinc-500">(optional)</span>
             </label>
             <input
               id="outreach-goal"
@@ -513,7 +563,7 @@ export function AiOutreachAssistantSection({
                 }))
               }
               disabled={loading}
-              placeholder="Optional note. Equipment, lanes, and past conversations are read from the Commercial Timeline."
+              placeholder="Optional. Leave blank to use the stage and the Commercial Timeline."
               className={fieldClass}
             />
           </div>
@@ -535,7 +585,7 @@ export function AiOutreachAssistantSection({
           <span>
             <span className="font-medium">Enable Market Research</span>
             <span className="mt-0.5 block text-xs text-zinc-500">
-              Researched internally and used in the email only when it fits this customer&apos;s history.
+              Optional. Runs only when checked. A relevant public finding may be included. If none is found, the email is written without a market claim.
             </span>
           </span>
         </label>

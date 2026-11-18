@@ -5,6 +5,7 @@ import {
   buildOutreachUserPrompt,
   normalizeOutreachDraft,
   OUTREACH_DRAFT_JSON_SCHEMA,
+  resolveOutreachStyle,
   resolveOutreachTone,
   resolveOutreachType,
   type OutreachDraftResponse,
@@ -40,6 +41,7 @@ interface OutreachRequestBody {
   contactId?: string | null;
   outreachType?: string;
   tone?: string;
+  communicationStyle?: string;
   goal?: string | null;
   language?: string;
   enableMarketResearch?: boolean;
@@ -66,6 +68,9 @@ export async function POST(request: Request) {
   const companyId = body.companyId?.trim();
   const outreachType = resolveOutreachType(body.outreachType?.trim() ?? "");
   const tone = resolveOutreachTone(body.tone?.trim() ?? "");
+  const communicationStyle =
+    resolveOutreachStyle(body.communicationStyle?.trim() ?? "") ??
+    "Standard commercial email";
   const language = resolveOutreachLanguage(body.language?.trim() || "en");
 
   if (!companyId) {
@@ -157,8 +162,10 @@ export async function POST(request: Request) {
       }
     }
 
+    const draftShape = { outreachType, tone, communicationStyle };
     const userPrompt = buildOutreachUserPrompt(context, {
       language,
+      communicationStyle,
       emailGuidance,
       selectedLane: focusLane
         ? {
@@ -189,16 +196,20 @@ export async function POST(request: Request) {
     }
 
     let draft = normalizeOutreachDraft(data, language);
-    if (shouldRewriteOutreachDraft(draft)) {
+    if (shouldRewriteOutreachDraft(draft, draftShape)) {
       const retry = await generateOutreachJson<OutreachDraftResponse>({
         ...generationInput,
         userPrompt: `${userPrompt}
 
-The previous draft was too short, too long, or asked for transportation details already retrieved from the CRM. Rewrite one complete email of 70 to 120 words from the Commercial Timeline. Do not ask for equipment, mode, commodity, or a lane. Do not invent a shipping opportunity. clarificationQuestion must be null.`,
+The previous draft did not fit this stage, or it asked for transportation details the stage does not require. Rewrite one email now. Match the length to the stage. Do not ask for a lane, commodity, or equipment unless this stage is the lane inquiry. Do not invent a shipping opportunity. clarificationQuestion must be null.`,
         timeoutMs: 45_000,
       });
       if (retry.data) {
-        draft = chooseOutreachDraft(draft, normalizeOutreachDraft(retry.data, language));
+        draft = chooseOutreachDraft(
+          draft,
+          normalizeOutreachDraft(retry.data, language),
+          draftShape,
+        );
       }
     }
 

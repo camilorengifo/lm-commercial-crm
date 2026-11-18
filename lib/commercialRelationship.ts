@@ -104,6 +104,88 @@ function opportunityLabel(opportunity: RelationshipOpportunity): string {
     .join(" · ");
 }
 
+const FOLLOW_UP_ANGLES = [
+  "thank-or-recap-a-call",
+  "quote-or-mentioned-need",
+  "upcoming-plans",
+  "concrete-help",
+  "verified-market-note",
+  "brief-direct-reminder",
+  "cordial-close",
+] as const;
+
+export type FollowUpAngle = (typeof FOLLOW_UP_ANGLES)[number];
+
+export interface FollowUpSequencePlan {
+  priorTouchCount: number;
+  anglesAlreadyUsed: FollowUpAngle[];
+  nextAngle: FollowUpAngle;
+  instruction: string;
+}
+
+function anglesIn(text: string): FollowUpAngle[] {
+  const found: FollowUpAngle[] = [];
+  const add = (angle: FollowUpAngle, pattern: RegExp) => {
+    if (pattern.test(text) && !found.includes(angle)) found.push(angle);
+  };
+  add("thank-or-recap-a-call", /thank|agradec|llamad|spoke with|habl[eé] con|after (?:our|the) call/i);
+  add("quote-or-mentioned-need", /\bquote|cotiz|quoted rate|tarifa/i);
+  add("upcoming-plans", /when (?:should|would)|upcoming|planes|reconect|en el futuro|next season|timing is right/i);
+  add("concrete-help", /happy to help|podemos ayudar|how we (?:can|might) help|coverage/i);
+  add("verified-market-note", /market condition|spot market|capacity has been|mercado/i);
+  add("brief-direct-reminder", /just checking in|following up on my last email|touching base|solo (?:para )?dar seguimiento/i);
+  add("cordial-close", /close the loop|last note from me|cerrar el ciclo|unless I hear/i);
+  return found;
+}
+
+export function planFollowUpSequence(
+  entries: Array<{ title?: string | null; notes?: string | null }>,
+  options?: { allowMarketAngle?: boolean },
+): FollowUpSequencePlan {
+  const used = new Set<FollowUpAngle>();
+  let priorTouchCount = 0;
+  for (const entry of entries) {
+    const text = `${entry.title ?? ""} ${entry.notes ?? ""}`.trim();
+    if (!text) continue;
+    priorTouchCount += 1;
+    for (const angle of anglesIn(text)) used.add(angle);
+  }
+
+  const allowMarket = options?.allowMarketAngle === true;
+  let nextAngle: FollowUpAngle = "thank-or-recap-a-call";
+  if (priorTouchCount >= 8 && !used.has("cordial-close")) {
+    nextAngle = "cordial-close";
+  } else {
+    nextAngle =
+      FOLLOW_UP_ANGLES.find(
+        (angle) => !used.has(angle) && (allowMarket || angle !== "verified-market-note"),
+      ) ?? "cordial-close";
+  }
+
+  const usedList = FOLLOW_UP_ANGLES.filter((angle) => used.has(angle));
+  return {
+    priorTouchCount,
+    anglesAlreadyUsed: usedList,
+    nextAngle,
+    instruction:
+      priorTouchCount === 0
+        ? "No earlier outreach is recorded. Write the one email this stage calls for. Do not draft a series."
+        : `This is touch ${priorTouchCount + 1} for this relationship. Write only this email, using the angle "${nextAngle}". Angles already used: ${usedList.join(", ") || "none"}. Do not repeat one of those angles when another fits. A sequence may eventually run from 5 to 12 touches, but do not write the later emails now.`,
+  };
+}
+
+export function stripInternalCrmDetails(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const cleaned = value
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "")
+    .replace(/^.*\b(?:completed follow-up ID|new follow-up ID|follow-up ID)\b.*$/gim, "")
+    .replace(/^Broker:\s*\S+@\S+\s*$/gim, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return cleaned || null;
+}
+
 export function interpretCommercialRelationship(input: {
   commercialTimeline: RelationshipTimelineEntry[];
   companyNotes?: string | null;

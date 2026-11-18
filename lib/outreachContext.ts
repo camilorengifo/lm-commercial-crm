@@ -1,4 +1,8 @@
-import { interpretCommercialRelationship } from "./commercialRelationship.ts";
+import {
+  interpretCommercialRelationship,
+  planFollowUpSequence,
+  stripInternalCrmDetails,
+} from "./commercialRelationship.ts";
 
 const COMPANY_NOTE_LIMIT = 900;
 const RECENT_NOTE_LIMIT = 1400;
@@ -94,7 +98,10 @@ function timeValue(value: string | null): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-export function compactOutreachContext(source: OutreachPromptSource) {
+export function compactOutreachContext(
+  source: OutreachPromptSource,
+  options?: { allowMarketAngle?: boolean },
+) {
   const selectedName = source.selectedContact?.name.trim().toLowerCase() ?? "";
   const orderedContacts = [...source.contacts].sort((left, right) => {
     const leftSelected =
@@ -128,7 +135,7 @@ export function compactOutreachContext(source: OutreachPromptSource) {
       kind: item.kind,
       status: item.status,
       title: item.title,
-      notes: item.notes,
+      notes: stripInternalCrmDetails(item.notes),
       occurredAt: item.occurredAt,
       contactName: item.contactName ?? null,
     }));
@@ -140,12 +147,15 @@ export function compactOutreachContext(source: OutreachPromptSource) {
           kind: "follow_up" as const,
           status: "completed",
           title: followUp.title,
-          notes: followUp.notes,
+          notes: stripInternalCrmDetails(followUp.notes),
           occurredAt: followUp.completedAt,
           contactName: null as string | null,
         }));
 
   history.sort((left, right) => timeValue(right.occurredAt) - timeValue(left.occurredAt));
+  const followUpSequence = planFollowUpSequence(history, {
+    allowMarketAngle: options?.allowMarketAngle === true,
+  });
   const relationship = interpretCommercialRelationship({
     commercialTimeline: history,
     companyNotes: source.company.generalNotes,
@@ -188,6 +198,7 @@ export function compactOutreachContext(source: OutreachPromptSource) {
   return {
     commercialTimeline: recentCommercialHistory,
     relationship,
+    followUpSequence,
     company: {
       name: source.company.name,
       salesStage: source.company.salesStage,

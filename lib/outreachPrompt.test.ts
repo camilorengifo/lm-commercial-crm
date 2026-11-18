@@ -3,7 +3,13 @@ import {
   ACCOUNT_OUTREACH_QUICK_SYSTEM_PROMPT,
   buildAccountOutreachQuickUserPrompt,
   buildOutreachUserPrompt,
+  OUTREACH_STYLES,
   OUTREACH_SYSTEM_PROMPT,
+  OUTREACH_TONES,
+  OUTREACH_TYPES,
+  resolveOutreachStyle,
+  resolveOutreachTone,
+  resolveOutreachType,
 } from "./aiPrompts.ts";
 import { compactOutreachContext, type OutreachPromptSource } from "./outreachContext.ts";
 
@@ -156,7 +162,9 @@ assert.match(OUTREACH_SYSTEM_PROMPT, /flatbed/i);
 assert.match(OUTREACH_SYSTEM_PROMPT, /produce/i);
 assert.match(OUTREACH_SYSTEM_PROMPT, /Do not invent/i);
 assert.match(OUTREACH_SYSTEM_PROMPT, /do NOT send email/i);
-assert.match(OUTREACH_SYSTEM_PROMPT, /70 to 120 words/);
+assert.match(OUTREACH_SYSTEM_PROMPT, /70 to 140 words/);
+assert.match(OUTREACH_SYSTEM_PROMPT, /Direct but persistent/);
+assert.match(OUTREACH_SYSTEM_PROMPT, /Natural and conversational/);
 assert.doesNotMatch(OUTREACH_SYSTEM_PROMPT, /40 to 90/);
 assert.doesNotMatch(OUTREACH_SYSTEM_PROMPT, /leave subject and body empty/);
 assert.match(OUTREACH_SYSTEM_PROMPT, /clarificationQuestion must be null/);
@@ -312,7 +320,7 @@ assert.match(martinezPrompt, /Commercial Timeline/);
 assert.match(martinezPrompt, /do not ask for a load/i);
 assert.match(martinezPrompt, /do not invent a shipping opportunity/i);
 assert.match(martinezPrompt, /equipment type/i);
-assert.match(martinezPrompt, /70 to 120 words/);
+assert.match(martinezPrompt, /Match the length to the stage/);
 assert.match(martinezPrompt, /clarificationQuestion must be null/);
 assert.match(martinezPrompt, /Armstrong Transport Group/);
 assert.match(martinezPrompt, /Do not mention market conditions/);
@@ -392,5 +400,104 @@ assert.match(ACCOUNT_OUTREACH_QUICK_SYSTEM_PROMPT, /do NOT send email/i);
 assert.match(quick, /Valley Produce Co/);
 assert.match(quick, /Logistics Manager/);
 assert.match(quick, /Do not imply anything will be sent automatically/);
+
+assert.equal(resolveOutreachType("Relationship Follow-up"), "Relationship Follow-up");
+assert.equal(resolveOutreachType("Follow-up Email"), "Account nurture");
+assert.equal(resolveOutreachTone("Direct"), "Direct but persistent");
+assert.equal(resolveOutreachTone("Direct but persistent"), "Direct but persistent");
+assert.equal(resolveOutreachStyle("Natural / Conversational"), "Natural and conversational");
+assert.equal(resolveOutreachStyle(""), null);
+assert.ok(OUTREACH_TYPES.includes("Opportunity Development"));
+assert.ok(OUTREACH_TYPES.includes("Front desk referral"));
+assert.ok(OUTREACH_TYPES.includes("After-call thank-you"));
+assert.ok(OUTREACH_TYPES.includes("Automatic / next best follow-up"));
+assert.ok(OUTREACH_TYPES.includes("Call Script"));
+assert.ok(OUTREACH_STYLES.includes("Standard commercial email"));
+assert.ok(OUTREACH_TONES.includes("Warm and personable"));
+assert.ok(OUTREACH_TONES.includes("Concise"));
+
+const stageOptions = {
+  language: "en" as const,
+  communicationStyle: "Standard commercial email",
+  emailGuidance: [],
+  selectedLane: null,
+  laneChosenByBroker: false,
+};
+const opportunityPrompt = buildOutreachUserPrompt(
+  source({
+    outreachType: "Opportunity Development",
+    tone: "Professional and polished",
+    goal: null,
+    opportunities: [],
+    lanePatterns: [],
+  }),
+  stageOptions,
+);
+assert.match(opportunityPrompt, /do not invent them/i);
+assert.match(opportunityPrompt, /Goal: Not specified/);
+assert.match(opportunityPrompt, /do not ask the broker for one/i);
+assert.match(opportunityPrompt, /do not ask the broker to supply them/i);
+
+const frontDeskPrompt = buildOutreachUserPrompt(
+  source({ outreachType: "Front desk referral", goal: null, lanePatterns: [] }),
+  { ...stageOptions, communicationStyle: "Natural and conversational" },
+);
+assert.match(frontDeskPrompt, /does not know this recipient/i);
+assert.match(frontDeskPrompt, /Communication style: Natural and conversational/);
+assert.match(frontDeskPrompt, /Armstrong Transport Group/);
+
+const afterCallPrompt = buildOutreachUserPrompt(
+  source({ outreachType: "After-call thank-you", goal: null }),
+  stageOptions,
+);
+assert.match(afterCallPrompt, /Do not turn this into a request for a lane/);
+
+const automaticPrompt = buildOutreachUserPrompt(
+  source({ outreachType: "Automatic / next best follow-up", goal: null, lanePatterns: [] }),
+  stageOptions,
+);
+assert.match(automaticPrompt, /single next reasonable email/);
+assert.match(automaticPrompt, /Do not require a lane/);
+
+const varied = compactOutreachContext(
+  source({
+    commercialTimeline: [
+      {
+        kind: "activity",
+        status: "email",
+        title: "Thank you",
+        notes: "Thank you for the call yesterday.",
+        occurredAt: "2026-11-01",
+        contactName: null,
+      },
+      {
+        kind: "activity",
+        status: "email",
+        title: "Quote",
+        notes: "Sent the recorded quote and asked whether it still works.",
+        occurredAt: "2026-11-08",
+        contactName: null,
+      },
+      {
+        kind: "activity",
+        status: "note",
+        title: "Admin",
+        notes:
+          "Completed follow-up ID 8f52c294-d3aa-4c80-a037-da8784f2972\nBroker: camilo@armstrongtransport.com\nHellen asked for a future email.",
+        occurredAt: "2026-11-17",
+        contactName: "Hellen",
+      },
+    ],
+  }),
+);
+assert.equal(varied.followUpSequence.priorTouchCount, 3);
+assert.ok(varied.followUpSequence.anglesAlreadyUsed.includes("thank-or-recap-a-call"));
+assert.ok(varied.followUpSequence.anglesAlreadyUsed.includes("quote-or-mentioned-need"));
+assert.notEqual(varied.followUpSequence.nextAngle, "thank-or-recap-a-call");
+assert.notEqual(varied.followUpSequence.nextAngle, "quote-or-mentioned-need");
+const adminNotes = varied.commercialTimeline.find((item) => item.title === "Admin")?.notes ?? "";
+assert.match(adminNotes, /future email/);
+assert.doesNotMatch(adminNotes, /8f52c294/);
+assert.doesNotMatch(adminNotes, /camilo@/);
 
 console.log("outreach prompt checks passed");

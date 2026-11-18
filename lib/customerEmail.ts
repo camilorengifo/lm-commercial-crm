@@ -30,7 +30,7 @@ export interface CustomerEmailDraft {
 }
 
 const BANNED_SENTENCE =
-  /[^.!?\n]*\b(i hope this (?:email|message) finds you well|i wanted to take a moment(?: to reach out)?|we would love the opportunity|potential synergies|we greatly appreciate your consideration|just checking in|hope you are (?:doing|having) well|touching base|i am reaching out to explore)\b[^.!?\n]*[.!?]?/gi;
+  /[^.!?\n]*\b(i hope this (?:email|message) finds you well|i wanted to take a moment(?: to reach out)?|we would love the opportunity|potential synergies|we greatly appreciate your consideration|just checking in|following up on my last email|hope you are (?:doing|having) well|touching base|i am reaching out to explore)\b[^.!?\n]*[.!?]?/gi;
 
 const BANNED_HEADING =
   /^(?:subject alternatives|commercial (?:objective|intelligence summary|recommendation|strateg(?:y|ies))|suggested (?:objectives|next step)|ai (?:recommendations?|reasoning|explanations?)|market (?:intelligence|research|analysis|insight)|recommendations?|talking points|research methodology|email draft)\s*:?\s*$/i;
@@ -60,20 +60,54 @@ export function countWords(value: string): number {
 const ASKS_FOR_TRANSPORTATION_FACTS =
   /\b(?:what|which)\s+(?:equipment(?:\s+type)?|transportation mode|mode of transport|commodity|shipping lane)\b|\bplease (?:provide|confirm|send)\b[^.]{0,48}\b(?:equipment|commodity|lane|mode)\b/i;
 
-export function shouldRewriteOutreachDraft(draft: CustomerEmailDraft): boolean {
+const LANE_INQUIRY_STAGE = "Lane, capacity, commodity or equipment inquiry";
+
+export interface OutreachDraftShape {
+  outreachType?: string;
+  tone?: string;
+  communicationStyle?: string;
+}
+
+export function lengthBounds(shape: OutreachDraftShape = {}): {
+  min: number;
+  max: number;
+} {
+  if (shape.outreachType === "Front desk referral") return { min: 70, max: 210 };
+  if (
+    shape.outreachType === "After-call thank-you" ||
+    shape.outreachType === "Post-delivery"
+  ) {
+    return { min: 35, max: 150 };
+  }
+  if (
+    shape.tone === "Concise" ||
+    shape.communicationStyle === "Natural and conversational"
+  ) {
+    return { min: 40, max: 160 };
+  }
+  return { min: 50, max: 190 };
+}
+
+export function shouldRewriteOutreachDraft(
+  draft: CustomerEmailDraft,
+  shape: OutreachDraftShape = {},
+): boolean {
   const words = countWords(draft.body);
-  if (words < 60 || words > 180) return true;
+  const bounds = lengthBounds(shape);
+  if (words < bounds.min || words > bounds.max) return true;
+  if (shape.outreachType === LANE_INQUIRY_STAGE) return false;
   return ASKS_FOR_TRANSPORTATION_FACTS.test(draft.body);
 }
 
 export function chooseOutreachDraft(
   first: CustomerEmailDraft,
   second: CustomerEmailDraft | null,
+  shape: OutreachDraftShape = {},
 ): CustomerEmailDraft {
   if (!second || countWords(second.body) === 0) return first;
-  if (!shouldRewriteOutreachDraft(second)) return second;
+  if (!shouldRewriteOutreachDraft(second, shape)) return second;
   if (
-    shouldRewriteOutreachDraft(first) &&
+    shouldRewriteOutreachDraft(first, shape) &&
     countWords(second.body) > countWords(first.body)
   ) {
     return second;
