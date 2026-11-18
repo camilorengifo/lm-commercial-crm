@@ -1,5 +1,11 @@
 import type { AccountCrmSummary, BrokerCrmSummary } from "@/lib/aiCrmContext";
 import {
+  composePostPresentationEmail,
+  POST_PRESENTATION_OUTREACH_TYPE,
+  POST_PRESENTATION_THANK_YOU,
+  type PostPresentationLanguage,
+} from "./postPresentationEmail.ts";
+import {
   compactOutreachContext,
   type OutreachPromptSource,
 } from "./outreachContext.ts";
@@ -409,6 +415,7 @@ export const OUTREACH_TYPES = [
   "Quote Follow-up",
   "Re-engagement",
   "Opportunity Development",
+  POST_PRESENTATION_OUTREACH_TYPE,
 ] as const;
 
 export type OutreachType = (typeof OUTREACH_TYPES)[number];
@@ -528,6 +535,15 @@ Do not invent a new lane the customer has never requested.
 If no lane is recorded, the sections must say what is missing and ask discovery questions. Do not invent a lane.
 sections must be: Pattern in the CRM, Discovery questions, Email draft, Suggested next step.
 marketInsight is null.`;
+    case POST_PRESENTATION_OUTREACH_TYPE:
+      return `Objective: write a thank-you email after a call or presentation.
+The first sentence after the greeting must be exactly "${POST_PRESENTATION_THANK_YOU.en}" when the email language is English, or exactly "${POST_PRESENTATION_THANK_YOU.es}" when the email language is Spanish.
+After that sentence, mention the next step recorded for this contact in the Commercial Timeline. If they shared a quoting link, thank them for sharing it and copy the URL exactly.
+Close by saying you remain available, then sign with only the configured sender name and email. Never invent a phone number, job title, or email address.
+If the timeline has no notes, still write the complete thank-you. Do not ask the broker for a lane, commodity, equipment, or any other fact, and do not say those details are missing.
+sections must be: Email draft.
+marketInsight is null.
+emailDraft is only the customer email.`;
     default:
       return "Use the CRM records to write a specific draft. marketInsight is null.";
   }
@@ -536,13 +552,27 @@ marketInsight is null.`;
 export function buildOutreachUserPrompt(
   context: OutreachPromptSource,
   marketResearch: import("@/lib/marketResearchRules").MarketResearchResult | null,
+  options?: {
+    language?: PostPresentationLanguage;
+    sender?: { name: string | null; email: string | null } | null;
+  },
 ): string {
   const emailType = isEmailOutreachType(context.outreachType);
   const brief = compactOutreachContext(context);
+  const postPresentation = context.outreachType === POST_PRESENTATION_OUTREACH_TYPE;
+  const language = options?.language === "es" ? "es" : "en";
 
   return `Generate a ${context.outreachType} DRAFT for company "${context.company.name}".
 The broker will review this text and reach out manually. Do not imply that any message will be sent.
-If missingInformation is not empty, say what is not on file. Do not invent those facts.
+${
+  postPresentation
+    ? `Email language: ${language === "es" ? "Spanish" : "English"}.
+Write the thank-you even when lanes, commodities, or equipment are not on file. Do not ask the broker for those facts and do not put a missing-information warning in the customer email.
+Configured sender name: ${options?.sender?.name?.trim() || "not configured"}.
+Configured sender email: ${options?.sender?.email?.trim() || "not configured"}.
+A phone number is not configured. Do not invent one.`
+    : "If missingInformation is not empty, say what is not on file. Do not invent those facts."
+}
 
 Tone: ${context.tone}
 Broker goal: ${context.goal?.trim() || "Not specified. Use the outreach type's commercial objective."}
@@ -598,6 +628,13 @@ function uniqueSubjects(subjects: string[]): string[] {
 export function normalizeOutreachDraft(
   value: unknown,
   outreachType: string,
+  options?: {
+    language?: PostPresentationLanguage;
+    contactName?: string | null;
+    senderName?: string | null;
+    senderEmail?: string | null;
+    timelineNotes?: string[];
+  },
 ): OutreachDraftResponse {
   const record =
     value && typeof value === "object"
@@ -664,6 +701,27 @@ export function normalizeOutreachDraft(
       sections.map((section) => `${section.title}\n${section.content}`).join("\n\n"),
     ].filter(Boolean);
     fullDraft = parts.join("\n\n") || "No outreach draft was generated.";
+  }
+
+  if (outreachType === POST_PRESENTATION_OUTREACH_TYPE) {
+    const email = composePostPresentationEmail({
+      language: options?.language === "es" ? "es" : "en",
+      contactName: options?.contactName,
+      senderName: options?.senderName,
+      senderEmail: options?.senderEmail,
+      timelineNotes: options?.timelineNotes,
+    });
+    return {
+      subjectLine: email.subject,
+      subjectAlternatives: email.subjects,
+      commercialSummary: null,
+      marketInsight: null,
+      commercialRecommendation: null,
+      suggestedNextStep: null,
+      emailDraft: email.body,
+      sections: [{ title: "Email draft", content: email.body }],
+      fullDraft: `Subject: ${email.subject}\n\n${email.body}`,
+    };
   }
 
   return {

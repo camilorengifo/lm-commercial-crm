@@ -3,8 +3,12 @@ import {
   ACCOUNT_OUTREACH_QUICK_SYSTEM_PROMPT,
   buildAccountOutreachQuickUserPrompt,
   buildOutreachUserPrompt,
+  normalizeOutreachDraft,
   OUTREACH_SYSTEM_PROMPT,
+  OUTREACH_TYPES,
+  resolveOutreachType,
 } from "./aiPrompts.ts";
+import { POST_PRESENTATION_THANK_YOU } from "./postPresentationEmail.ts";
 import { compactOutreachContext, type OutreachPromptSource } from "./outreachContext.ts";
 
 function source(overrides: Partial<OutreachPromptSource> = {}): OutreachPromptSource {
@@ -200,5 +204,64 @@ assert.match(ACCOUNT_OUTREACH_QUICK_SYSTEM_PROMPT, /do NOT send email/i);
 assert.match(quick, /Valley Produce Co/);
 assert.match(quick, /Logistics Manager/);
 assert.match(quick, /Do not imply anything will be sent automatically/);
+
+assert.equal(
+  resolveOutreachType("Post-Presentation Call Follow-up"),
+  "Post-Presentation Call Follow-up",
+);
+assert.ok(OUTREACH_TYPES.includes("Post-Presentation Call Follow-up"));
+assert.deepEqual(OUTREACH_TYPES.slice(0, 6), [
+  "Call Script",
+  "Relationship Follow-up",
+  "Technical Follow-up",
+  "Quote Follow-up",
+  "Re-engagement",
+  "Opportunity Development",
+]);
+
+const postPresentationPrompt = buildOutreachUserPrompt(
+  source({
+    outreachType: "Post-Presentation Call Follow-up",
+    goal: null,
+    commercialTimeline: [
+      {
+        kind: "activity",
+        status: "call",
+        title: "Presentation call",
+        notes: "They shared the quoting link https://portal.example.com/quote/4821.",
+        occurredAt: "2026-11-18",
+      },
+    ],
+    opportunities: [],
+    lanePatterns: [],
+  }),
+  null,
+  { language: "en", sender: { name: "Camilo Rengifo", email: "camilo@armstrongtransport.com" } },
+);
+assert.match(postPresentationPrompt, /Post-Presentation Call Follow-up/);
+assert.match(postPresentationPrompt, /Thank you for taking my call today\./);
+assert.match(postPresentationPrompt, /Muchas gracias por atender mi llamada hoy\./);
+assert.match(postPresentationPrompt, /Do not ask the broker for a lane, commodity, equipment/);
+assert.match(postPresentationPrompt, /https:\/\/portal\.example\.com\/quote\/4821/);
+assert.match(postPresentationPrompt, /A phone number is not configured/);
+
+const shaped = normalizeOutreachDraft(
+  {
+    emailDraft: "Which lane, commodity, or equipment should I mention?",
+    sections: [{ title: "Email draft", content: "Need a lane before I write." }],
+    fullDraft: "Need a lane before I write.",
+  },
+  "Post-Presentation Call Follow-up",
+  {
+    language: "es",
+    contactName: "Hellen Martinez",
+    senderName: "Camilo Rengifo",
+    senderEmail: "camilo@armstrongtransport.com",
+    timelineNotes: [],
+  },
+);
+assert.equal(shaped.emailDraft?.split("\n").filter(Boolean)[1], POST_PRESENTATION_THANK_YOU.es);
+assert.doesNotMatch(shaped.emailDraft ?? "", /\b(lane|commodity|equipment)\b/i);
+assert.match(shaped.fullDraft, /Subject: Gracias por su tiempo/);
 
 console.log("outreach prompt checks passed");

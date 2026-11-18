@@ -24,6 +24,11 @@ import {
   fetchContactsForCompany,
   formatContactName,
 } from "@/lib/loadOpportunities";
+import {
+  POST_PRESENTATION_OUTREACH_TYPE,
+  resolvePostPresentationLanguage,
+  type PostPresentationLanguage,
+} from "@/lib/postPresentationEmail";
 import { companyDraftKey, usePersistentDraft } from "@/lib/usePersistentDraft";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -35,6 +40,7 @@ interface AiOutreachDraftState {
   contactId: string;
   tone: OutreachTone;
   goal: string;
+  language?: PostPresentationLanguage;
   draft: OutreachDraftResponse | null;
   intelligence: OutreachIntelligence | null;
   editedFullDraft: string;
@@ -52,6 +58,7 @@ function emptyOutreachDraft(): AiOutreachDraftState {
     contactId: "",
     tone: DEFAULT_TONE,
     goal: "",
+    language: "en",
     draft: null,
     intelligence: null,
     editedFullDraft: "",
@@ -177,6 +184,7 @@ export function AiOutreachAssistantSection({
       outreachType: form.outreachType,
       tone: form.tone,
       goal: form.goal.trim() || null,
+      language: resolvePostPresentationLanguage(form.language),
     });
 
     if (requestError || !data) {
@@ -358,7 +366,7 @@ export function AiOutreachAssistantSection({
             >
               {OUTREACH_TYPES.map((type) => (
                 <option key={type} value={type}>
-                  {type} (draft)
+                  {type === POST_PRESENTATION_OUTREACH_TYPE ? type : `${type} (draft)`}
                 </option>
               ))}
             </select>
@@ -423,6 +431,32 @@ export function AiOutreachAssistantSection({
               ))}
             </select>
           </div>
+
+          {form.outreachType === POST_PRESENTATION_OUTREACH_TYPE && (
+            <div>
+              <label
+                htmlFor="outreach-language"
+                className="mb-1.5 block text-sm font-medium text-zinc-700"
+              >
+                Email Language
+              </label>
+              <select
+                id="outreach-language"
+                value={resolvePostPresentationLanguage(form.language)}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    language: resolvePostPresentationLanguage(event.target.value),
+                  }))
+                }
+                disabled={loading}
+                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <option value="en">English</option>
+                <option value="es">Español</option>
+              </select>
+            </div>
+          )}
 
           <div className="md:col-span-2">
             <label
