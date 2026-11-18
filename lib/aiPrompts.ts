@@ -4,7 +4,14 @@ import {
   POST_PRESENTATION_OUTREACH_TYPE,
   POST_PRESENTATION_THANK_YOU,
   type PostPresentationLanguage,
+  type PostPresentationTimelineNote,
+  type RecordedFreight,
 } from "./postPresentationEmail.ts";
+import {
+  outreachToneInstructions,
+  OUTREACH_TONES,
+  type OutreachTone,
+} from "./outreachTone.ts";
 import {
   compactOutreachContext,
   type OutreachPromptSource,
@@ -245,19 +252,21 @@ Do not open with "just checking in", "hope you are doing well", or "touching bas
 
 How to think:
 1. Customer intelligence. Read the sales stage, priority, location, notes, contact roles, last communication, follow-ups, and load history. Judge whether the relationship is new, active, quoted, quiet, or in need of nurturing.
-2. Personalized outreach. Write natural, professional American business English. Use the customer's actual products, lanes, and equipment when they are on file. Match the requested tone. Vary the structure so it does not sound like a stock sales template. Do not repeat an approach the broker marked too generic, not relevant, or incorrect.
+2. Personalized outreach. Use the customer's actual products, lanes, and equipment when they are on file. Match the requested tone, including its length. The two-or-three-sentence note is only for Conversational. Vary the structure so it does not sound like a stock sales template. Do not repeat an approach the broker marked too generic, not relevant, or incorrect.
 3. Follow-up strategy. Recommend the next touch from the recorded history. Do not repeat an ask that earlier notes already made. When the account is quiet, early, or the last note shows resistance, recommend nurturing rather than a hard close.
 4. Sales intelligence. Name an objection only when a note records it, and suggest how the broker can respond without inventing a concession. Suggest a Logistics Masters service only where the recorded freight supports it. Offer discovery questions that are still unanswered, chosen from shipping volume, lanes, commodities, seasonality, and the customer's current broker or carrier setup. Recommend one next commercial action the broker can take.
 5. Freight judgment. You understand full truckload (FTL), refrigerated freight (reefer), dry van, flatbed, produce and fresh vegetables, fruit and vegetable transportation, shipping lanes, seasonal demand, carrier capacity, spot and contract rates, and shipper and receiver operations. Use that judgment to interpret the records. Do not use it to invent this customer's volume, lanes, or the market.
 
 The broker goal, when provided, refines the selected outreach type. It does not replace that type's objective.
+Outreach type sets the purpose. Tone sets how the draft is written. Language sets the language of the subject and the body.
 Prior draft feedback is the broker's judgment on earlier drafts for this company. Do not say the model was retrained.
-Write in English. Be specific, concise, and commercially useful.
+Be specific and commercially useful. Follow the language and the tone in the user message. Do not apply the Conversational length to any other tone.
 `.trim();
 
 export const ACCOUNT_OUTREACH_QUICK_SYSTEM_PROMPT = `
 You are a senior Business Development Director at Logistics Masters, a United States freight brokerage. You advise one broker inside the Logistics Masters AI Commercial Assistant.
 ${OUTREACH_GUARDRAILS}
+Write the customer-facing drafts in English.
 Return JSON with exactly these keys:
 - suggestedEmailSubject (string; specific to the recorded business, never "Checking in" or "Following up")
 - suggestedEmailBody (string; about 90 to 160 words, for the broker to copy)
@@ -454,15 +463,7 @@ export function isOutreachFeedbackRating(
   return OUTREACH_FEEDBACK_RATINGS.some((rating) => rating.id === value);
 }
 
-export const OUTREACH_TONES = [
-  "Professional",
-  "Friendly",
-  "Direct",
-  "Warm",
-  "Persistent but respectful",
-] as const;
-
-export type OutreachTone = (typeof OUTREACH_TONES)[number];
+export { OUTREACH_TONES, type OutreachTone };
 
 export interface OutreachDraftResponse {
   subjectLine: string | null;
@@ -479,7 +480,7 @@ export interface OutreachDraftResponse {
 export const OUTREACH_SYSTEM_PROMPT = `
 You are a senior Business Development Director at Logistics Masters, a United States freight brokerage. You advise one broker inside the Logistics Masters AI Commercial Assistant.
 ${OUTREACH_GUARDRAILS}
-Email bodies should usually be 90 to 160 words. Call scripts should stay short enough to use live.
+Email length follows the selected tone. Conversational emails are two or three sentences. Every other tone is a fuller note, usually two or three short paragraphs, and must not be collapsed into the Conversational form. Call scripts stay short enough to use live and still match the tone.
 Return JSON with these keys:
 - subjectLine (string or null; the strongest subject, null for Call Script)
 - subjectAlternatives (array of exactly 3 distinct strings for every type except Call Script; empty array for Call Script)
@@ -498,12 +499,13 @@ function outreachStrategy(type: string): string {
       return `Objective: prepare a live phone conversation.
 Sections must be: Opening line, Reason for calling, Discovery questions, Value proposition, Closing / next step.
 The reason for calling must come from a recorded lane, quote, follow-up, or note. Discovery questions must be an ordered list inside that section's content.
+Follow the selected tone in the wording. Keep the script short enough to say live.
 subjectLine is null. subjectAlternatives is empty. emailDraft is null. marketInsight is null.`;
     case "Relationship Follow-up":
       return `Objective: continue a real commercial relationship.
 Use a recorded interaction, open follow-up, quote, objection, or lane as the reason to reconnect.
-Match the tone to the relationship. If the last note shows resistance or the account is quiet, nurture it instead of pushing for an award.
-Write a natural note that can lead to more business over time.
+If the last note shows resistance or the account is quiet, nurture it instead of pushing for an award.
+Follow the selected tone for length and voice. Do not shorten a non-Conversational tone into a brief check-in.
 Do not send a generic check-in. If there is no recorded reason to write, say what is missing instead of inventing warmth.
 sections must be: Relationship context, Email draft, Suggested next step.
 marketInsight is null.`;
@@ -513,7 +515,7 @@ Every point must connect to a recorded lane, region, commodity, or equipment typ
 commercialSummary explains the freight pattern found in the CRM.
 marketInsight restates only the supplied market findings, with source name, publication date, and whether each item is verified or an observation. If research is unavailable, say so in marketInsight.
 commercialRecommendation explains why the finding matters to this customer and how the broker should open the conversation.
-emailDraft is a short professional email that shares that specific insight and invites a conversation. It must not fit any generic produce company.
+emailDraft shares that specific insight and invites a conversation. Its length follows the selected tone. It must not fit any generic produce company.
 suggestedNextStep is the broker's practical next action.
 sections must be: Commercial Intelligence Summary, Market Insight, Commercial Recommendation, Email Draft, Suggested Next Step.`;
     case "Quote Follow-up":
@@ -537,7 +539,9 @@ sections must be: Pattern in the CRM, Discovery questions, Email draft, Suggeste
 marketInsight is null.`;
     case POST_PRESENTATION_OUTREACH_TYPE:
       return `Objective: write a thank-you email after a call or presentation, from the broker to the contact.
-The first sentence after the greeting must be exactly "${POST_PRESENTATION_THANK_YOU.en}" when the email language is English, or exactly "${POST_PRESENTATION_THANK_YOU.es}" when the email language is Spanish.
+Follow the selected tone. Conversational stays to two or three sentences with a simple close. Every other tone uses two or three short paragraphs: why the broker is writing, one useful offer grounded in the recorded context, and one invitation that is easy to answer.
+If the latest timeline note shows a voicemail or an unanswered call, do not thank the contact for taking the call. Say that the broker reached voicemail or did not reach them.
+If the note shows a conversation, or it does not say the call was missed, the first sentence after the greeting must be exactly "${POST_PRESENTATION_THANK_YOU.en}" when the email language is English, or exactly "${POST_PRESENTATION_THANK_YOU.es}" when the email language is Spanish.
 Use the call note only as private context. Write the subject and body entirely in the selected language. Do not copy, translate word for word, or narrate the internal note.
 A completed action by the broker, such as already sending an email, is not a next step. Mention a future action only when the contact explicitly agreed to it, and say it in the selected language.
 If they shared a quoting link, thank them for sharing it and copy the URL exactly. If the call was only an introduction, thank them and leave a simple door open. Do not invent lanes, volumes, rates, dates, or commitments.
@@ -563,20 +567,37 @@ export function buildOutreachUserPrompt(
   const brief = compactOutreachContext(context);
   const postPresentation = context.outreachType === POST_PRESENTATION_OUTREACH_TYPE;
   const language = options?.language === "es" ? "es" : "en";
+  const senderName = options?.sender?.name?.trim() || "";
+  const senderEmail = options?.sender?.email?.trim() || "";
 
   return `Generate a ${context.outreachType} DRAFT for company "${context.company.name}".
 The broker will review this text and reach out manually. Do not imply that any message will be sent.
+Language: ${language === "es" ? "Spanish" : "English"}.
+Write the subject line, the subject alternatives, and the customer-facing draft in this language. Keep that language when the draft is regenerated.
+Outreach type sets the purpose. Tone sets how it is written. Language sets the language of the subject and the body.
+CRM notes may be in another language. Use them as internal context. Do not copy them into the customer draft.
+
+The commercial timeline is internal context for every tone.
+Preserve recorded facts. Distinguish an answered call from a voicemail or a missed call.
+Mention an agreement only when a note documents it.
+A completed action, such as an email the broker already sent, is not a next step for the customer.
+If the record is thin, develop one concrete offer the broker can make. Do not attribute needs, lanes, or preferences that are not on file.
+
 ${
   postPresentation
-    ? `Email language: ${language === "es" ? "Spanish" : "English"}.
-Write the thank-you even when lanes, commodities, or equipment are not on file. Do not ask the broker for those facts and do not put a missing-information warning in the customer email.
-Configured sender name: ${options?.sender?.name?.trim() || "not configured"}.
-Configured sender email: ${options?.sender?.email?.trim() || "not configured"}.
+    ? `Write the thank-you even when lanes, commodities, or equipment are not on file. Do not ask the broker for those facts and do not put a missing-information warning in the customer email.
 A phone number is not configured. Do not invent one.`
     : "If missingInformation is not empty, say what is not on file. Do not invent those facts."
 }
+${
+  emailType
+    ? `Configured sender name: ${senderName || "not configured"}.
+Configured sender email: ${senderEmail || "not configured"}.
+Close the customer email with only that configured name and email. Do not invent a phone number, job title, or email address.`
+    : ""
+}
 
-Tone: ${context.tone}
+${outreachToneInstructions(context.tone, context.outreachType)}
 Broker goal: ${context.goal?.trim() || "Not specified. Use the outreach type's commercial objective."}
 Selected contact: ${
     context.selectedContact
@@ -632,10 +653,12 @@ export function normalizeOutreachDraft(
   outreachType: string,
   options?: {
     language?: PostPresentationLanguage;
+    tone?: string | null;
     contactName?: string | null;
     senderName?: string | null;
     senderEmail?: string | null;
-    timelineNotes?: string[];
+    timelineNotes?: Array<string | PostPresentationTimelineNote>;
+    recordedFreight?: RecordedFreight | null;
   },
 ): OutreachDraftResponse {
   const record =
@@ -708,10 +731,12 @@ export function normalizeOutreachDraft(
   if (outreachType === POST_PRESENTATION_OUTREACH_TYPE) {
     const email = composePostPresentationEmail({
       language: options?.language === "es" ? "es" : "en",
+      tone: options?.tone,
       contactName: options?.contactName,
       senderName: options?.senderName,
       senderEmail: options?.senderEmail,
       timelineNotes: options?.timelineNotes,
+      recordedFreight: options?.recordedFreight,
     });
     return {
       subjectLine: email.subject,

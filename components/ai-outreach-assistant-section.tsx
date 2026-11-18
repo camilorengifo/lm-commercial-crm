@@ -29,6 +29,7 @@ import {
   resolvePostPresentationLanguage,
   type PostPresentationLanguage,
 } from "@/lib/postPresentationEmail";
+import { resolveOutreachTone } from "@/lib/outreachTone";
 import { companyDraftKey, usePersistentDraft } from "@/lib/usePersistentDraft";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -172,19 +173,30 @@ export function AiOutreachAssistantSection({
     }
   }, [form.outreachType, setForm]);
 
+  useEffect(() => {
+    const resolvedTone = resolveOutreachTone(form.tone);
+    if (resolvedTone && resolvedTone !== form.tone) {
+      setForm((prev) => ({ ...prev, tone: resolvedTone }));
+    }
+  }, [form.tone, setForm]);
+
   async function generateDraft() {
     setLoading(true);
     setError(null);
     setSaveMessage(null);
     setCopySuccess(false);
 
+    const outreachType = resolveOutreachType(form.outreachType) ?? form.outreachType;
+    const tone = resolveOutreachTone(form.tone) ?? DEFAULT_TONE;
+    const language = resolvePostPresentationLanguage(form.language);
+
     const { data, error: requestError } = await fetchOutreachDraft({
       companyId,
       contactId: form.contactId.trim() || null,
-      outreachType: form.outreachType,
-      tone: form.tone,
+      outreachType,
+      tone,
       goal: form.goal.trim() || null,
-      language: resolvePostPresentationLanguage(form.language),
+      language,
     });
 
     if (requestError || !data) {
@@ -193,7 +205,7 @@ export function AiOutreachAssistantSection({
       return;
     }
 
-    const requestedType = form.outreachType;
+    const requestedType = outreachType;
     setForm((prev) => {
       const nextForm: AiOutreachDraftState = {
         ...prev,
@@ -414,11 +426,11 @@ export function AiOutreachAssistantSection({
             </label>
             <select
               id="outreach-tone"
-              value={form.tone}
+              value={resolveOutreachTone(form.tone) ?? DEFAULT_TONE}
               onChange={(event) =>
                 setForm((prev) => ({
                   ...prev,
-                  tone: event.target.value as OutreachTone,
+                  tone: resolveOutreachTone(event.target.value) ?? DEFAULT_TONE,
                 }))
               }
               disabled={loading}
@@ -430,33 +442,37 @@ export function AiOutreachAssistantSection({
                 </option>
               ))}
             </select>
+            <p className="mt-1 text-xs text-zinc-500">
+              Conversational is a short personal note. Other tones write a fuller email with one specific offer.
+            </p>
           </div>
 
-          {form.outreachType === POST_PRESENTATION_OUTREACH_TYPE && (
-            <div>
-              <label
-                htmlFor="outreach-language"
-                className="mb-1.5 block text-sm font-medium text-zinc-700"
-              >
-                Email Language
-              </label>
-              <select
-                id="outreach-language"
-                value={resolvePostPresentationLanguage(form.language)}
-                onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    language: resolvePostPresentationLanguage(event.target.value),
-                  }))
-                }
-                disabled={loading}
-                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <option value="en">English</option>
-                <option value="es">Español</option>
-              </select>
-            </div>
-          )}
+          <div>
+            <label
+              htmlFor="outreach-language"
+              className="mb-1.5 block text-sm font-medium text-zinc-700"
+            >
+              Language
+            </label>
+            <select
+              id="outreach-language"
+              value={resolvePostPresentationLanguage(form.language)}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...prev,
+                  language: resolvePostPresentationLanguage(event.target.value),
+                }))
+              }
+              disabled={loading}
+              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <option value="en">English</option>
+              <option value="es">Español</option>
+            </select>
+            <p className="mt-1 text-xs text-zinc-500">
+              The subject and the draft are written in this language, including when you regenerate.
+            </p>
+          </div>
 
           <div className="md:col-span-2">
             <label

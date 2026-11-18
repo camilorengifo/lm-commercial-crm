@@ -5,9 +5,11 @@ import {
   buildOutreachUserPrompt,
   normalizeOutreachDraft,
   OUTREACH_SYSTEM_PROMPT,
+  OUTREACH_TONES,
   OUTREACH_TYPES,
   resolveOutreachType,
 } from "./aiPrompts.ts";
+import { resolveOutreachTone } from "./outreachTone.ts";
 import { POST_PRESENTATION_THANK_YOU } from "./postPresentationEmail.ts";
 import { compactOutreachContext, type OutreachPromptSource } from "./outreachContext.ts";
 
@@ -146,7 +148,23 @@ assert.ok(sparse.missingInformation.includes("company notes"));
 assert.ok(sparse.missingInformation.includes("commercial history"));
 assert.ok(sparse.missingInformation.includes("lanes, commodities, and equipment"));
 
+assert.equal(resolveOutreachTone("Natural"), "Conversational");
+assert.equal(resolveOutreachTone("Conversational / Natural"), "Conversational");
+assert.equal(resolveOutreachTone("conversational"), "Conversational");
+assert.equal(resolveOutreachTone("Professional"), "Professional");
+assert.equal(resolveOutreachTone("Warm"), "Warm");
+assert.equal(resolveOutreachTone(""), null);
+assert.ok(OUTREACH_TONES.includes("Conversational"));
+assert.equal((OUTREACH_TONES as readonly string[]).includes("Natural"), false);
+assert.ok(OUTREACH_TONES.includes("Direct"));
+assert.ok(OUTREACH_TONES.includes("Friendly"));
+assert.ok(OUTREACH_TONES.includes("Persistent but respectful"));
+
 assert.match(OUTREACH_SYSTEM_PROMPT, /senior Business Development Director/);
+assert.match(OUTREACH_SYSTEM_PROMPT, /Conversational emails are two or three sentences/);
+assert.match(OUTREACH_SYSTEM_PROMPT, /must not be collapsed into the Conversational form/);
+assert.doesNotMatch(OUTREACH_SYSTEM_PROMPT, /90 to 160/);
+assert.doesNotMatch(OUTREACH_SYSTEM_PROMPT, /Write in English/);
 assert.match(OUTREACH_SYSTEM_PROMPT, /Full truckload \(FTL\)/i);
 assert.match(OUTREACH_SYSTEM_PROMPT, /reefer/i);
 assert.match(OUTREACH_SYSTEM_PROMPT, /dry van/i);
@@ -265,5 +283,60 @@ assert.equal(shaped.emailDraft, shaped.fullDraft);
 assert.equal(shaped.sections[0]?.content, shaped.fullDraft);
 assert.doesNotMatch(shaped.emailDraft ?? "", /\b(lane|commodity|equipment)\b/i);
 assert.match(shaped.fullDraft, /Subject: Gracias por su tiempo/);
+assert.match(shaped.emailDraft ?? "", /Fue un gusto conversar/);
+
+const professionalPost = normalizeOutreachDraft(
+  {
+    emailDraft: "Short note for every tone.",
+    fullDraft: "Short note for every tone.",
+  },
+  "Post-Presentation Call Follow-up",
+  {
+    language: "en",
+    tone: "Professional",
+    contactName: "Gaby",
+    senderName: "Camilo Rengifo",
+    senderEmail: "camilo@armstrongtransport.com",
+    timelineNotes: ["Hablé con Gaby, me puse a sus órdenes y le envié un correo"],
+  },
+);
+assert.match(professionalPost.fullDraft, /After our call, I can prepare a quote/);
+assert.doesNotMatch(professionalPost.fullDraft, /Short note for every tone/);
+assert.doesNotMatch(professionalPost.fullDraft, /It was good to connect, and I am here whenever/);
+
+const spanishRelationship = buildOutreachUserPrompt(
+  source({ outreachType: "Relationship Follow-up", tone: "Warm" }),
+  null,
+  { language: "es" },
+);
+assert.match(spanishRelationship, /Relationship Follow-up/);
+assert.match(spanishRelationship, /Language: Spanish/);
+assert.match(spanishRelationship, /Selected tone: Warm/);
+assert.match(spanishRelationship, /two or three short paragraphs/i);
+assert.match(spanishRelationship, /Do not shorten this tone to two or three sentences/);
+assert.match(spanishRelationship, /too high/);
+assert.doesNotMatch(spanishRelationship, /90 to 160/);
+
+const spanishConversational = buildOutreachUserPrompt(
+  source({ outreachType: "Quote Follow-up", tone: "Conversational" }),
+  null,
+  { language: "es" },
+);
+assert.match(spanishConversational, /Quote Follow-up/);
+assert.match(spanishConversational, /Language: Spanish/);
+assert.match(spanishConversational, /Selected tone: Conversational/);
+assert.match(spanishConversational, /two or three sentences/);
+assert.doesNotMatch(spanishConversational, /Do not shorten this tone to two or three sentences/);
+assert.doesNotMatch(spanishConversational, /90 to 160/);
+
+const directEnglish = buildOutreachUserPrompt(
+  source({ outreachType: "Opportunity Development", tone: "Direct" }),
+  null,
+  { language: "en" },
+);
+assert.match(directEnglish, /Opportunity Development/);
+assert.match(directEnglish, /Language: English/);
+assert.match(directEnglish, /Selected tone: Direct/);
+assert.match(directEnglish, /reach the proposal in the first paragraph/);
 
 console.log("outreach prompt checks passed");

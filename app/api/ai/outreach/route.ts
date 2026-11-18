@@ -3,18 +3,19 @@ import { fetchProfileForUser } from "@/lib/authProfile";
 import { buildCrmFacts } from "@/lib/laneIntelligence";
 import { buildOutreachCrmContext } from "@/lib/aiCrmContext";
 import {
-  OUTREACH_TONES,
   OUTREACH_SYSTEM_PROMPT,
   buildOutreachUserPrompt,
   normalizeOutreachDraft,
   OUTREACH_DRAFT_JSON_SCHEMA,
+  isEmailOutreachType,
   resolveOutreachType,
   type OutreachDraftResponse,
-  type OutreachTone,
 } from "@/lib/aiPrompts";
+import { resolveOutreachTone } from "@/lib/outreachTone";
 import {
   POST_PRESENTATION_OUTREACH_TYPE,
   resolvePostPresentationLanguage,
+  selectRecordedFreight,
 } from "@/lib/postPresentationEmail";
 import {
   aiClientErrorResponse,
@@ -43,10 +44,6 @@ interface OutreachRequestBody {
   language?: string | null;
 }
 
-function isOutreachTone(value: string): value is OutreachTone {
-  return (OUTREACH_TONES as readonly string[]).includes(value);
-}
-
 export async function POST(request: Request) {
   const auth = await authenticateAiRequest(request);
 
@@ -66,7 +63,7 @@ export async function POST(request: Request) {
 
   const companyId = body.companyId?.trim();
   const outreachType = resolveOutreachType(body.outreachType?.trim() ?? "");
-  const tone = body.tone?.trim() ?? "";
+  const tone = resolveOutreachTone(body.tone);
 
   if (!companyId) {
     return aiClientErrorResponse("Company ID is required.", 400);
@@ -76,7 +73,7 @@ export async function POST(request: Request) {
     return aiClientErrorResponse("A valid outreach type is required.", 400);
   }
 
-  if (!isOutreachTone(tone)) {
+  if (!tone) {
     return aiClientErrorResponse("A valid tone is required.", 400);
   }
 
@@ -119,10 +116,11 @@ export async function POST(request: Request) {
     }
 
     const postPresentation = outreachType === POST_PRESENTATION_OUTREACH_TYPE;
+    const emailType = isEmailOutreachType(outreachType);
     const language = resolvePostPresentationLanguage(body.language);
     let senderName: string | null = null;
     let senderEmail: string | null = user.email?.trim() || null;
-    if (postPresentation) {
+    if (emailType) {
       const profile = await fetchProfileForUser(supabase, user.id);
       senderName = profile?.full_name?.trim() || null;
       senderEmail = profile?.email?.trim() || senderEmail;
@@ -133,14 +131,20 @@ export async function POST(request: Request) {
         const rightTime = right.occurredAt ? Date.parse(right.occurredAt) : 0;
         return (Number.isNaN(rightTime) ? 0 : rightTime) - (Number.isNaN(leftTime) ? 0 : leftTime);
       })
-      .map((item) => [item.title, item.notes].filter(Boolean).join(". "))
-      .filter(Boolean);
+      .map((item) => ({
+        status: item.status,
+        title: item.title,
+        notes: item.notes,
+      }))
+      .filter((item) => [item.title, item.notes].some((part) => part?.trim()));
     const draftOptions = {
       language,
+      tone,
       contactName: context.selectedContact?.name ?? null,
       senderName,
       senderEmail,
       timelineNotes,
+      recordedFreight: selectRecordedFreight(context.opportunities),
     };
 
     let marketResearch: MarketResearchResult | null = null;
@@ -159,13 +163,10 @@ export async function POST(request: Request) {
 
     const { data, error } = await generateOutreachJson<OutreachDraftResponse>({
       systemPrompt: OUTREACH_SYSTEM_PROMPT,
-      userPrompt: buildOutreachUserPrompt(
-        context,
-        marketResearch,
-        postPresentation
-          ? { language, sender: { name: senderName, email: senderEmail } }
-          : undefined,
-      ),
+      userPrompt: buildOutreachUserPrompt(context, marketResearch, {
+        language,
+        sender: emailType ? { name: senderName, email: senderEmail } : undefined,
+      }),
       schemaName: "outreach_draft",
       schema: OUTREACH_DRAFT_JSON_SCHEMA,
       promptCacheKey: OUTREACH_PROMPT_CACHE_KEY,

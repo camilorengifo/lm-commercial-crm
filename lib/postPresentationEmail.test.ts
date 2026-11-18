@@ -3,6 +3,7 @@ import {
   composePostPresentationEmail,
   firstSentenceAfterGreeting,
   POST_PRESENTATION_THANK_YOU,
+  selectRecordedFreight,
 } from "./postPresentationEmail.ts";
 
 const sender = {
@@ -103,10 +104,159 @@ assert.doesNotMatch(withTimeline.body, /Please send the documents they requested
 assert.match(withTimeline.body, /Best,\ncamilo@armstrongtransport\.com$/);
 assert.doesNotMatch(withTimeline.body, /Camilo Rengifo/);
 
-console.log("\n--- Gaby note, English ---");
-console.log(gabyEnglish.visible);
-console.log("\n--- Gaby note, Spanish ---");
-console.log(gabySpanish.visible);
+const gabyConversational = composePostPresentationEmail({
+  language: "en",
+  tone: "Conversational",
+  contactName: "Gaby",
+  ...sender,
+  timelineNotes: [gabyNote],
+});
+assert.equal(gabyConversational.body, gabyEnglish.body);
+assert.equal(
+  composePostPresentationEmail({
+    language: "en",
+    tone: "Natural",
+    contactName: "Gaby",
+    ...sender,
+    timelineNotes: [gabyNote],
+  }).body,
+  gabyEnglish.body,
+);
+
+const gabyProfessional = composePostPresentationEmail({
+  language: "en",
+  tone: "Professional",
+  contactName: "Gaby",
+  ...sender,
+  timelineNotes: [gabyNote],
+});
+assert.equal(firstSentenceAfterGreeting(gabyProfessional.body), POST_PRESENTATION_THANK_YOU.en);
+assert.match(gabyProfessional.body, /After our call, I can prepare a quote for you to review/);
+assert.match(gabyProfessional.body, /Reply with those details, or with a time for a short call/);
+assert.match(gabyProfessional.body, /Best,\nCamilo Rengifo\ncamilo@armstrongtransport\.com$/);
+assert.doesNotMatch(gabyProfessional.body, /It was good to connect, and I am here whenever/);
+assert.doesNotMatch(gabyProfessional.visible, /Hablé|órdenes|envié|correo|The next step/);
+assert.doesNotMatch(gabyProfessional.body, /Thursday|documents you asked for|https?:\/\//);
+assert.notEqual(coreDraft(gabyProfessional.body), coreDraft(gabyConversational.body));
+
+const gabyDirect = composePostPresentationEmail({
+  language: "en",
+  tone: "Direct",
+  contactName: "Gaby",
+  ...sender,
+  timelineNotes: [gabyNote],
+});
+const gabyWarm = composePostPresentationEmail({
+  language: "en",
+  tone: "Warm",
+  contactName: "Gaby",
+  ...sender,
+  timelineNotes: [gabyNote],
+});
+assert.notEqual(gabyDirect.body, gabyProfessional.body);
+assert.notEqual(gabyWarm.body, gabyProfessional.body);
+assert.match(gabyDirect.body, /I can prepare a quote from the origin/);
+assert.match(gabyWarm.body, /I enjoyed the conversation/);
+assert.ok(gabyWarm.body.length > gabyDirect.body.length);
+
+const gabySpanishProfessional = composePostPresentationEmail({
+  language: "es",
+  tone: "Professional",
+  contactName: "Gaby",
+  ...sender,
+  timelineNotes: [gabyNote],
+});
+assert.equal(firstSentenceAfterGreeting(gabySpanishProfessional.body), POST_PRESENTATION_THANK_YOU.es);
+assert.match(gabySpanishProfessional.body, /puedo prepararle una cotización/i);
+assert.match(gabySpanishProfessional.body, /Saludos,\nCamilo Rengifo\ncamilo@armstrongtransport\.com$/);
+assert.doesNotMatch(gabySpanishProfessional.visible, /Thank you for taking|It was good to connect|Hablé con Gaby/);
+assert.notEqual(coreDraft(gabySpanishProfessional.body), coreDraft(gabySpanish.body));
+
+const voicemail = composePostPresentationEmail({
+  language: "en",
+  tone: "Professional",
+  contactName: "Gaby",
+  ...sender,
+  timelineNotes: [{ status: "call", title: "Call", notes: "Left a voicemail for Gaby." }],
+});
+assert.match(voicemail.body, /I called today and reached your voicemail/);
+assert.doesNotMatch(voicemail.body, /Thank you for taking my call today/);
+assert.doesNotMatch(voicemail.body, /It was good to connect|I enjoyed the conversation/);
+
+const unanswered = composePostPresentationEmail({
+  language: "en",
+  tone: "Conversational",
+  contactName: "Gaby",
+  ...sender,
+  timelineNotes: [{ status: "follow_up_no_response", title: "Call", notes: "No answer." }],
+});
+assert.match(unanswered.body, /I called today and was not able to reach you/);
+assert.doesNotMatch(unanswered.body, /Thank you for taking my call today/);
+
+const thursdayProfessional = composePostPresentationEmail({
+  language: "en",
+  tone: "Professional",
+  contactName: "Gaby",
+  ...sender,
+  timelineNotes: [thursdayNote],
+});
+assert.match(thursdayProfessional.body, /I'll give you a call on Thursday\./);
+assert.match(thursdayProfessional.body, /If that time changes, reply with another one/);
+assert.doesNotMatch(thursdayProfessional.body, /or with a time for a short call/);
+
+const withLane = composePostPresentationEmail({
+  language: "en",
+  tone: "Professional",
+  contactName: "Gaby",
+  ...sender,
+  timelineNotes: [gabyNote],
+  recordedFreight: {
+    lane: "McAllen, TX → Bronx, NY",
+    equipment: "Reefer",
+    commodity: "Avocados",
+  },
+});
+assert.match(withLane.body, /McAllen, TX → Bronx, NY, Reefer, Avocados/);
+assert.doesNotMatch(withLane.body, /4500|target rate|\$/);
+const conversationalWithLane = composePostPresentationEmail({
+  language: "en",
+  tone: "Conversational",
+  contactName: "Gaby",
+  ...sender,
+  timelineNotes: [gabyNote],
+  recordedFreight: {
+    lane: "McAllen, TX → Bronx, NY",
+    equipment: "Reefer",
+    commodity: "Avocados",
+  },
+});
+assert.equal(conversationalWithLane.body, gabyConversational.body);
+assert.doesNotMatch(conversationalWithLane.body, /McAllen/);
+
+assert.deepEqual(
+  selectRecordedFreight([
+    { lane: "— → —", equipmentType: "Dry Van", commodity: "Limes", updatedAt: "2026-11-18" },
+    { lane: "McAllen, TX → Bronx, NY", equipmentType: "Reefer", commodity: "Avocados", updatedAt: "2026-10-02" },
+  ]),
+  { lane: "McAllen, TX → Bronx, NY", equipment: "Reefer", commodity: "Avocados" },
+);
+
+function coreDraft(body: string): string {
+  return body
+    .split("\n")
+    .filter((line) => !/^(hi|hello|hola)\b/i.test(line.trim()))
+    .join("\n")
+    .replace(POST_PRESENTATION_THANK_YOU.en, "")
+    .replace(POST_PRESENTATION_THANK_YOU.es, "")
+    .trim();
+}
+
+console.log("\n--- Gaby note, English, Conversational ---");
+console.log(gabyConversational.visible);
+console.log("\n--- Gaby note, English, Professional ---");
+console.log(gabyProfessional.visible);
+console.log("\n--- Gaby note, Spanish, Professional ---");
+console.log(gabySpanishProfessional.visible);
 console.log("\n--- Agreed call on Thursday, English ---");
 console.log(thursdayEnglish.visible);
 console.log("\n--- Agreed call on Thursday, Spanish ---");
