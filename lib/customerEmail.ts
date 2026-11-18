@@ -78,7 +78,8 @@ export function lengthBounds(shape: OutreachDraftShape = {}): {
   if (shape.outreachType === "Front desk referral") return { min: 70, max: 210 };
   if (
     shape.outreachType === "After-call thank-you" ||
-    shape.outreachType === "Post-delivery"
+    shape.outreachType === "Post-delivery" ||
+    shape.outreachType === "Post-Presentation Call Follow-up"
   ) {
     return { min: 35, max: 150 };
   }
@@ -106,8 +107,96 @@ export function shouldRewriteOutreachDraft(
   const bounds = lengthBounds(shape);
   if (words < bounds.min || words > bounds.max) return true;
   if (shape.outreachType === LANE_INQUIRY_STAGE) return false;
-  if (shape.outreachType === "Opportunity Development") return false;
+  if (
+    shape.outreachType === "Opportunity Development" ||
+    shape.outreachType === "Post-Presentation Call Follow-up"
+  ) {
+    return false;
+  }
   return ASKS_FOR_TRANSPORTATION_FACTS.test(draft.body);
+}
+
+export function timelineReferenceUrls(
+  texts: Array<string | null | undefined>,
+): string[] {
+  const found: string[] = [];
+  for (const text of texts) {
+    if (!text) continue;
+    for (const match of text.matchAll(/https?:\/\/[^\s<>"')]+/gi)) {
+      const url = match[0].replace(/[.,;]+$/, "");
+      const around = text.slice(
+        Math.max(0, (match.index ?? 0) - 80),
+        (match.index ?? 0) + url.length + 80,
+      );
+      const relevant = /quote|cotiz|portal|enlace|link/i.test(`${around} ${url}`);
+      if (relevant && !found.includes(url)) found.push(url);
+    }
+  }
+  return found.slice(0, 4);
+}
+
+export function keepQuoteLinks(
+  draft: CustomerEmailDraft,
+  urls: string[],
+  language: OutreachLanguage,
+): CustomerEmailDraft {
+  const missing = urls.filter((url) => url && !draft.body.includes(url));
+  if (!draft.body.trim() || missing.length === 0) return draft;
+  const lines = missing
+    .map((url) =>
+      language === "es"
+        ? `El enlace para cotizar que quedó de la conversación es ${url}.`
+        : `The quoting link from our conversation is ${url}.`,
+    )
+    .join("\n");
+  const marker = language === "es" ? "Saludos," : "Best,";
+  const body = draft.body.includes(marker)
+    ? draft.body.replace(marker, `${lines}\n\n${marker}`)
+    : `${draft.body}\n\n${lines}`;
+  return { ...draft, body };
+}
+
+export function postPresentationCallFallback(input: {
+  contactName: string | null;
+  language: OutreachLanguage;
+  senderName?: string | null;
+  senderEmail?: string | null;
+  referenceUrl?: string | null;
+}): CustomerEmailDraft {
+  const name = input.contactName?.trim();
+  const senderName = input.senderName?.trim() || "";
+  const senderEmail = input.senderEmail?.trim() || "";
+  const referenceUrl = input.referenceUrl?.trim() || "";
+  const senderLines = [senderName, senderEmail].filter(Boolean).join("\n");
+  const draft =
+    input.language === "es"
+      ? presentCustomerEmail(
+          {
+            subject: "Gracias por su tiempo",
+            body: `${name ? `Hola ${name},` : "Hola,"}\n\nGracias por su tiempo y por atender la llamada. Le agradezco la conversación.\n\nQuedo atento a sus necesidades de transporte y con gusto le ayudo cuando lo necesite.\n\nMis datos de contacto aparecen abajo.${senderLines ? `\n${senderLines}` : ""}`,
+          },
+          "es",
+        )
+      : presentCustomerEmail(
+          {
+            subject: "Thank you for your time",
+            body: `${name ? `Hi ${name},` : "Hi,"}\n\nThank you for your time and for taking the call. I appreciate the conversation.\n\nI will stay available if you need help with transportation.\n\nMy contact details are below.${senderLines ? `\n${senderLines}` : ""}`,
+          },
+          "en",
+        );
+  if (!referenceUrl) return draft;
+  const linkLine =
+    input.language === "es"
+      ? `El enlace para cotizar que quedó de la conversación es ${referenceUrl}.`
+      : `The quoting link from our conversation is ${referenceUrl}.`;
+  const marker =
+    input.language === "es"
+      ? "Mis datos de contacto aparecen abajo."
+      : "My contact details are below.";
+  return {
+    ...draft,
+    body: draft.body.replace(marker, `${linkLine}\n\n${marker}`),
+  };
 }
 
 export function generalOutreachFallback(input: {

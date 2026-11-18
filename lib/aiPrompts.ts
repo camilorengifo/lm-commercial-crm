@@ -421,6 +421,7 @@ export const OUTREACH_TYPES = [
   "Front desk referral",
   "Opportunity Development",
   "After-call thank-you",
+  "Post-Presentation Call Follow-up",
   "Follow-up after introduction",
   "Quote Follow-up",
   "No-response follow-up",
@@ -595,6 +596,8 @@ function outreachPurpose(type: string): string {
       return "Open a relevant commercial conversation even when no lane, commodity, equipment, or goal is recorded. Explain how Armstrong Transport Group could help and propose one simple next step. You may ask the customer one broad question about their transportation needs or plans inside the email. Do not invent lanes, commodities, equipment, calls, or referrals. Mention a call or referral only when the timeline records it. Do not ask the broker what to write.";
     case "After-call thank-you":
       return "Thank them for taking the call. Use the actual call notes. Leave a natural next step. Do not turn this into a request for a lane, commodity, or equipment.";
+    case "Post-Presentation Call Follow-up":
+      return "Write a follow-up after a call or presentation. Thank them for their time and for taking the call. Sound human, cordial, and professional, not insistent or overly effusive. Say you remain available for their transportation needs. Include one natural sentence that your contact details appear below. Use only the configured sender details supplied in this prompt. Never invent a phone number, email address, job title, or personal name. Use call details from the Commercial Timeline, especially notes from the same day: a quoting portal or link, instructions for sending quotes, documents they asked for, and agreed next steps. If a quoting URL is recorded, copy it exactly. Do not say a quote was sent or that an action was completed unless the timeline confirms it. If the timeline has no specific call detail, still write a complete thank-you. Do not ask the broker for a lane, commodity, equipment, or any other fact.";
     case "Follow-up after introduction":
       return "Thank them for the introduction or referral. Briefly explain why the broker is reaching out and open the conversation. Do not pretend the broker already knows their freight.";
     case "Quote Follow-up":
@@ -641,6 +644,8 @@ export function buildOutreachUserPrompt(
       commodities: string[];
     } | null;
     laneChosenByBroker: boolean;
+    sender?: { name: string | null; email: string | null } | null;
+    referenceUrls?: string[];
   },
 ): string {
   const respectPreview = compactOutreachContext(context);
@@ -671,6 +676,18 @@ export function buildOutreachUserPrompt(
     .join("\n");
   const laneInquiry =
     context.outreachType === "Lane, capacity, commodity or equipment inquiry";
+  const postPresentation = context.outreachType === "Post-Presentation Call Follow-up";
+  const senderName = options.sender?.name?.trim() || "";
+  const senderEmail = options.sender?.email?.trim() || "";
+  const referenceUrls = (options.referenceUrls ?? []).filter((url) => /^https?:\/\//i.test(url));
+  const postPresentationNote = postPresentation
+    ? `Post-presentation instructions: thank them for their time and for taking the call. Stay cordial and professional. Say you are available for their transportation needs. Include one natural sentence, in the selected language, that your contact details appear below.
+Configured sender name: ${senderName || "not configured"}.
+Configured sender email: ${senderEmail || "not configured"}.
+Phone: not configured. Job title: not configured. Do not invent either one, and do not invent a name or email when it says not configured.
+Quoting or reference URLs from the timeline, copy exactly when one belongs in the email: ${referenceUrls.length ? referenceUrls.join(" | ") : "none"}.
+Do not claim a quote was sent or a step was completed unless the timeline says so.`
+    : "";
   const sequenceSteersStage = new Set<string>([
     "Automatic / next best follow-up",
     "No-response follow-up",
@@ -689,6 +706,7 @@ Communication style: ${style}
 Tone: ${context.tone}
 Goal: ${context.goal?.trim() || "Not specified. Infer it from this stage and the Commercial Timeline. Do not ask the broker for a goal."}
 ${stageDirection}
+${postPresentationNote}
 ${brief.relationship.internalWritingDirection}
 ${sequenceNote}
 Selected contact: ${

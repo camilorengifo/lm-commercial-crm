@@ -15,8 +15,11 @@ import {
   draftAsksBrokerBeforeWriting,
   emailCopyText,
   generalOutreachFallback,
+  keepQuoteLinks,
+  postPresentationCallFallback,
   resolveOutreachLanguage,
   shouldRewriteOutreachDraft,
+  timelineReferenceUrls,
 } from "@/lib/customerEmail";
 import { findLaneByKey, rankLanesForOutreach } from "@/lib/laneIntelligence";
 import { extractCommercialFacts } from "@/lib/outreachContext";
@@ -175,6 +178,38 @@ export async function POST(request: Request) {
     }
 
     const draftShape = { outreachType, tone, communicationStyle };
+    const postPresentation = outreachType === "Post-Presentation Call Follow-up";
+    let senderName: string | null = null;
+    let senderEmail: string | null = user.email?.trim() || null;
+    if (postPresentation) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name, email")
+        .eq("id", user.id)
+        .maybeSingle();
+      senderName = profile?.full_name?.trim() || null;
+      senderEmail = profile?.email?.trim() || senderEmail;
+    }
+    const referenceUrls = postPresentation
+      ? timelineReferenceUrls([
+          ...context.commercialTimeline.map((item) => item.notes),
+          ...context.completedFollowUps.map((item) => item.notes),
+        ])
+      : [];
+    const stageFallback = () =>
+      postPresentation
+        ? postPresentationCallFallback({
+            contactName: context.selectedContact?.name ?? null,
+            language,
+            senderName,
+            senderEmail,
+            referenceUrl: referenceUrls[0] ?? null,
+          })
+        : generalOutreachFallback({
+            companyName: context.company.name,
+            contactName: context.selectedContact?.name ?? null,
+            language,
+          });
     const userPrompt = buildOutreachUserPrompt(context, {
       language,
       communicationStyle,
@@ -188,6 +223,8 @@ export async function POST(request: Request) {
           }
         : null,
       laneChosenByBroker: Boolean(selectedLane),
+      sender: postPresentation ? { name: senderName, email: senderEmail } : null,
+      referenceUrls,
     });
     const generationInput = {
       systemPrompt: OUTREACH_SYSTEM_PROMPT,
@@ -204,10 +241,23 @@ export async function POST(request: Request) {
 
     if (error || !data) {
       logAiFailed(logContext, new Error(error ?? "openai_generation_failed"));
+      if (postPresentation) {
+        const fallback = stageFallback();
+        return aiSuccessResponse({
+          draft: fallback,
+          message: emailCopyText(fallback),
+          companyName: context.company.name,
+          generatedAt: new Date().toISOString(),
+        });
+      }
       return aiGenerationErrorResponse(error);
     }
 
-    let draft = normalizeOutreachDraft(data, language);
+    let draft = keepQuoteLinks(
+      normalizeOutreachDraft(data, language),
+      referenceUrls,
+      language,
+    );
     if (shouldRewriteOutreachDraft(draft, draftShape)) {
       const retry = await generateOutreachJson<OutreachDraftResponse>({
         ...generationInput,
@@ -219,18 +269,18 @@ The previous draft asked the broker which lane, commodity, or equipment to menti
       if (retry.data) {
         draft = chooseOutreachDraft(
           draft,
-          normalizeOutreachDraft(retry.data, language),
+          keepQuoteLinks(
+            normalizeOutreachDraft(retry.data, language),
+            referenceUrls,
+            language,
+          ),
           draftShape,
         );
       }
     }
 
     if (!draft.body.trim() || draftAsksBrokerBeforeWriting(draft)) {
-      draft = generalOutreachFallback({
-        companyName: context.company.name,
-        contactName: context.selectedContact?.name ?? null,
-        language,
-      });
+      draft = stageFallback();
     }
 
     logAiSuccess(logContext, {

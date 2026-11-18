@@ -10,7 +10,9 @@ import {
   resolveOutreachLanguage,
   draftAsksBrokerBeforeWriting,
   generalOutreachFallback,
+  postPresentationCallFallback,
   shouldRewriteOutreachDraft,
+  timelineReferenceUrls,
 } from "./customerEmail.ts";
 import {
   buildMarketAssessment,
@@ -185,6 +187,31 @@ assert.match(fallback.body, /Hi Maria Alvarez/);
 assert.match(fallback.body, /Valley Produce/);
 assert.doesNotMatch(fallback.body, /what lane/i);
 assert.equal(fallback.clarificationQuestion, null);
+const postCall = postPresentationCallFallback({
+  contactName: "Maria Alvarez",
+  language: "en",
+  senderName: "Camilo Rengifo",
+  senderEmail: "camilo@armstrongtransport.com",
+  referenceUrl: "https://portal.example.com/quote/abc",
+});
+assert.equal(postCall.subject, "Thank you for your time");
+assert.match(postCall.body, /Hi Maria Alvarez/);
+assert.match(postCall.body, /taking the call/i);
+assert.match(postCall.body, /contact details are below/i);
+assert.match(postCall.body, /https:\/\/portal\.example\.com\/quote\/abc/);
+assert.match(postCall.body, /camilo@armstrongtransport.com/);
+assert.doesNotMatch(postCall.body, /\+1|\b\d{3}[-.\s]\d{3}/);
+const postCallSpanish = postPresentationCallFallback({
+  contactName: "Maria",
+  language: "es",
+});
+assert.match(postCallSpanish.body, /Hola Maria/);
+assert.match(postCallSpanish.body, /datos de contacto aparecen abajo/i);
+assert.doesNotMatch(postCallSpanish.body, /@/);
+assert.deepEqual(
+  timelineReferenceUrls(["Quote here: https://portal.example.com/quote/abc."]),
+  ["https://portal.example.com/quote/abc"],
+);
 const rewritten = chooseOutreachDraft(
   { ...kept, body: "Too short." },
   kept,
@@ -383,6 +410,7 @@ assert.match(prompts, /Direct but persistent/);
 assert.match(prompts, /Opportunity Development/);
 assert.match(prompts, /Front desk referral/);
 assert.match(prompts, /After-call thank-you/);
+assert.match(prompts, /Post-Presentation Call Follow-up/);
 assert.match(prompts, /Español|language is "es"/);
 assert.match(assistant, /language: current\.language/);
 assert.match(assistant, /language: "en"/);

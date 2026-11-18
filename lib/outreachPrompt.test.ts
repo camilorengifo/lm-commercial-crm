@@ -482,6 +482,11 @@ assert.equal(resolveOutreachStyle(""), null);
 assert.ok(OUTREACH_TYPES.includes("Opportunity Development"));
 assert.ok(OUTREACH_TYPES.includes("Front desk referral"));
 assert.ok(OUTREACH_TYPES.includes("After-call thank-you"));
+assert.ok(OUTREACH_TYPES.includes("Post-Presentation Call Follow-up"));
+assert.equal(
+  resolveOutreachType("Post-Presentation Call Follow-up"),
+  "Post-Presentation Call Follow-up",
+);
 assert.ok(OUTREACH_TYPES.includes("Automatic / next best follow-up"));
 assert.ok(OUTREACH_TYPES.includes("Call Script"));
 assert.ok(OUTREACH_STYLES.includes("Standard commercial email"));
@@ -518,6 +523,34 @@ const frontDeskPrompt = buildOutreachUserPrompt(
 assert.match(frontDeskPrompt, /does not know this recipient/i);
 assert.match(frontDeskPrompt, /Communication style: Natural and conversational/);
 assert.match(frontDeskPrompt, /Armstrong Transport Group/);
+
+const postPresentationPrompt = buildOutreachUserPrompt(
+  source({
+    outreachType: "Post-Presentation Call Follow-up",
+    goal: null,
+    commercialTimeline: [
+      {
+        kind: "activity",
+        status: "call",
+        title: "Presentation call",
+        notes: "Asked us to quote through https://portal.example.com/quote/abc. Do not treat the quote as sent.",
+        occurredAt: "2026-11-18",
+        contactName: "Maria Alvarez",
+      },
+    ],
+  }),
+  {
+    ...stageOptions,
+    sender: { name: "Camilo Rengifo", email: "camilo@armstrongtransport.com" },
+    referenceUrls: ["https://portal.example.com/quote/abc"],
+  },
+);
+assert.match(postPresentationPrompt, /Post-Presentation Call Follow-up/);
+assert.match(postPresentationPrompt, /contact details appear below/i);
+assert.match(postPresentationPrompt, /https:\/\/portal\.example\.com\/quote\/abc/);
+assert.match(postPresentationPrompt, /Do not invent either one/);
+assert.match(postPresentationPrompt, /camilo@armstrongtransport.com/);
+assert.match(postPresentationPrompt, /Do not ask the broker for a lane, commodity, equipment/);
 
 const afterCallPrompt = buildOutreachUserPrompt(
   source({ outreachType: "After-call thank-you", goal: null }),
