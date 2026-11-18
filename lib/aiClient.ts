@@ -115,6 +115,7 @@ export async function fetchOutreachDraft(input: {
   outreachType: OutreachType;
   tone: OutreachTone;
   goal: string | null;
+  language?: "en" | "es";
 }) {
   return postAiRequest<{
     success: true;
@@ -129,6 +130,7 @@ export async function fetchOutreachDraft(input: {
     outreachType: input.outreachType,
     tone: input.tone,
     goal: input.goal,
+    language: input.language ?? "en",
   });
 }
 

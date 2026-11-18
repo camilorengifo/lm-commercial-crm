@@ -1,4 +1,5 @@
 // Assistive only: returns draft text. No sending or automated outreach.
+import { fetchProfileForUser } from "@/lib/authProfile";
 import { buildCrmFacts } from "@/lib/laneIntelligence";
 import { buildOutreachCrmContext } from "@/lib/aiCrmContext";
 import {
@@ -11,6 +12,10 @@ import {
   type OutreachDraftResponse,
   type OutreachTone,
 } from "@/lib/aiPrompts";
+import {
+  POST_PRESENTATION_OUTREACH_TYPE,
+  resolvePostPresentationLanguage,
+} from "@/lib/postPresentationEmail";
 import {
   aiClientErrorResponse,
   aiGenerationErrorResponse,
@@ -35,6 +40,7 @@ interface OutreachRequestBody {
   outreachType?: string;
   tone?: string;
   goal?: string | null;
+  language?: string | null;
 }
 
 function isOutreachTone(value: string): value is OutreachTone {
@@ -112,6 +118,31 @@ export async function POST(request: Request) {
       return aiClientErrorResponse(context.outreachBlockedReason, 409);
     }
 
+    const postPresentation = outreachType === POST_PRESENTATION_OUTREACH_TYPE;
+    const language = resolvePostPresentationLanguage(body.language);
+    let senderName: string | null = null;
+    let senderEmail: string | null = user.email?.trim() || null;
+    if (postPresentation) {
+      const profile = await fetchProfileForUser(supabase, user.id);
+      senderName = profile?.full_name?.trim() || null;
+      senderEmail = profile?.email?.trim() || senderEmail;
+    }
+    const timelineNotes = [...context.commercialTimeline]
+      .sort((left, right) => {
+        const leftTime = left.occurredAt ? Date.parse(left.occurredAt) : 0;
+        const rightTime = right.occurredAt ? Date.parse(right.occurredAt) : 0;
+        return (Number.isNaN(rightTime) ? 0 : rightTime) - (Number.isNaN(leftTime) ? 0 : leftTime);
+      })
+      .map((item) => [item.title, item.notes].filter(Boolean).join(". "))
+      .filter(Boolean);
+    const draftOptions = {
+      language,
+      contactName: context.selectedContact?.name ?? null,
+      senderName,
+      senderEmail,
+      timelineNotes,
+    };
+
     let marketResearch: MarketResearchResult | null = null;
     if (outreachType === "Technical Follow-up") {
       const location = [context.company.city, context.company.state, context.company.country]
@@ -128,7 +159,13 @@ export async function POST(request: Request) {
 
     const { data, error } = await generateOutreachJson<OutreachDraftResponse>({
       systemPrompt: OUTREACH_SYSTEM_PROMPT,
-      userPrompt: buildOutreachUserPrompt(context, marketResearch),
+      userPrompt: buildOutreachUserPrompt(
+        context,
+        marketResearch,
+        postPresentation
+          ? { language, sender: { name: senderName, email: senderEmail } }
+          : undefined,
+      ),
       schemaName: "outreach_draft",
       schema: OUTREACH_DRAFT_JSON_SCHEMA,
       promptCacheKey: OUTREACH_PROMPT_CACHE_KEY,
@@ -138,10 +175,12 @@ export async function POST(request: Request) {
 
     if (error || !data) {
       logAiFailed(logContext, new Error(error ?? "openai_generation_failed"));
-      return aiGenerationErrorResponse(error);
+      if (!postPresentation) {
+        return aiGenerationErrorResponse(error);
+      }
     }
 
-    const draft = normalizeOutreachDraft(data, outreachType);
+    const draft = normalizeOutreachDraft(postPresentation && (error || !data) ? {} : data, outreachType, draftOptions);
     const intelligence = {
       crmFacts: buildCrmFacts({
         companyName: context.company.name,
