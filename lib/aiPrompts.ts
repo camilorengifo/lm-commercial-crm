@@ -536,11 +536,13 @@ If no lane is recorded, the sections must say what is missing and ask discovery 
 sections must be: Pattern in the CRM, Discovery questions, Email draft, Suggested next step.
 marketInsight is null.`;
     case POST_PRESENTATION_OUTREACH_TYPE:
-      return `Objective: write a thank-you email after a call or presentation.
+      return `Objective: write a thank-you email after a call or presentation, from the broker to the contact.
 The first sentence after the greeting must be exactly "${POST_PRESENTATION_THANK_YOU.en}" when the email language is English, or exactly "${POST_PRESENTATION_THANK_YOU.es}" when the email language is Spanish.
-After that sentence, mention the next step recorded for this contact in the Commercial Timeline. If they shared a quoting link, thank them for sharing it and copy the URL exactly.
-Close by saying you remain available, then sign with only the configured sender name and email. Never invent a phone number, job title, or email address.
-If the timeline has no notes, still write the complete thank-you. Do not ask the broker for a lane, commodity, equipment, or any other fact, and do not say those details are missing.
+Use the call note only as private context. Write the subject and body entirely in the selected language. Do not copy, translate word for word, or narrate the internal note.
+A completed action by the broker, such as already sending an email, is not a next step. Mention a future action only when the contact explicitly agreed to it, and say it in the selected language.
+If they shared a quoting link, thank them for sharing it and copy the URL exactly. If the call was only an introduction, thank them and leave a simple door open. Do not invent lanes, volumes, rates, dates, or commitments.
+Close with only the configured sender name and email. Never invent a phone number, job title, or email address.
+If the timeline has no notes, still write the complete thank-you. Do not ask the broker for a lane, commodity, equipment, or any other fact.
 sections must be: Email draft.
 marketInsight is null.
 emailDraft is only the customer email.`;
@@ -718,9 +720,9 @@ export function normalizeOutreachDraft(
       marketInsight: null,
       commercialRecommendation: null,
       suggestedNextStep: null,
-      emailDraft: email.body,
-      sections: [{ title: "Email draft", content: email.body }],
-      fullDraft: `Subject: ${email.subject}\n\n${email.body}`,
+      emailDraft: email.visible,
+      sections: [{ title: "Email draft", content: email.visible }],
+      fullDraft: email.visible,
     };
   }
 
