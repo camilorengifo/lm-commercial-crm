@@ -94,6 +94,8 @@ export async function researchFreightMarket(input: {
   location: string | null;
   lanePatterns: LanePattern[];
   focusLane?: LanePattern | null;
+  commodities?: string[];
+  equipment?: string | null;
   model?: string;
   reasoningEffort?: "low" | "medium" | "high";
   fetchImpl?: typeof fetch;
@@ -101,18 +103,25 @@ export async function researchFreightMarket(input: {
   const searchedAt = new Date().toISOString();
   const ranked = rankLanesForOutreach(input.lanePatterns);
   const lane = input.focusLane ?? ranked[0] ?? null;
+  const commodities = [
+    ...new Set([...(lane?.commodities ?? []), ...(input.commodities ?? [])].filter(Boolean)),
+  ];
+  const equipment = lane?.equipmentType ?? input.equipment ?? null;
+  const hasResearchContext = Boolean(
+    lane || input.location || commodities.length > 0 || equipment,
+  );
 
-  if (!lane) {
+  if (!hasResearchContext) {
     return emptyAssessment(
       searchedAt,
-      "This company has no recorded origin and destination, so lane-specific market research was not run.",
+      "No location, commodity, equipment, or lane was available, so market research was not run.",
       null,
     );
   }
 
   const states = [
-    ...stateCodesFromPlace(lane.origin),
-    ...stateCodesFromPlace(lane.destination),
+    ...(lane ? stateCodesFromPlace(lane.origin) : []),
+    ...(lane ? stateCodesFromPlace(lane.destination) : []),
     ...stateCodesFromPlace(input.location),
   ];
   const locationParts = (input.location ?? "")
@@ -123,19 +132,17 @@ export async function researchFreightMarket(input: {
   const [web, official] = await Promise.all([
     createWebSearchResponse({
       systemPrompt: RESEARCH_SYSTEM_PROMPT,
-      userPrompt: `Research freight conditions for the current week.
+      userPrompt: `Research current public freight conditions that fit this customer.
 Company: ${input.companyName}.
 Company location on file: ${input.location || "not on file"}.
-Lane: ${lane.origin} to ${lane.destination}.
-Equipment: ${lane.equipmentType || "not on file"}.
-Commodity: ${lane.commodities.join(", ") || "not on file"}.
+Lane: ${lane ? `${lane.origin} to ${lane.destination}` : "No origin-destination lane is recorded. Do not invent one."}.
+Equipment: ${equipment || "not on file"}.
+Commodity: ${commodities.join(", ") || "not on file"}.
 Today is ${searchedAt.slice(0, 10)}.
 
-Look for:
-- DAT or other published spot-rate and capacity indicators for this equipment in the origin region and the destination region
-- USDA specialty-crops truck rates, shipping-point trends, and movement reports when the commodity is produce
-- Operational weather or corridor disruptions
-Do not use a national average as this lane's rate.
+Look for seasonal shipping patterns, produce seasons, regional capacity, weather disruptions, and transportation demand that match the location, commodity, or equipment above.
+Do not invent rates, capacity shortages, or a lane.
+Do not use a national average as a customer-specific condition.
 Ignore material older than 45 days when deciding what is current.
 If the only material is national or undated, say that in limitation.`,
       context: "AI_MARKET_RESEARCH",
@@ -181,6 +188,13 @@ If the only material is national or undated, say that in limitation.`,
 
   return buildMarketAssessment({
     lane,
+    focus: {
+      regions: [input.location, lane?.origin, lane?.destination].filter(
+        (value): value is string => Boolean(value),
+      ),
+      commodities,
+      equipment,
+    },
     unavailable: official.unavailable,
     research: mergeResearch([webResearch, officialResearch], searchedAt),
   });

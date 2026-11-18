@@ -43,7 +43,7 @@ import {
 import { companyDraftKey, usePersistentDraft } from "@/lib/usePersistentDraft";
 import { supabase } from "@/lib/supabaseClient";
 
-const DEFAULT_OUTREACH_TYPE: OutreachType = "Automatic / next best follow-up";
+const DEFAULT_OUTREACH_TYPE: OutreachType = "Technical Follow-up";
 const DEFAULT_STYLE: OutreachStyle = "Standard commercial email";
 const DEFAULT_TONE: OutreachTone = "Professional and polished";
 
@@ -108,7 +108,7 @@ function withDraftDefaults(value: Partial<AiOutreachDraftState>): AiOutreachDraf
     editedSubject: value.editedSubject ?? draft?.subject ?? "",
     editedBody:
       value.editedBody ??
-      (draft ? `${draft.body}\n${draft.signature}`.trim() : ""),
+      (draft?.body ?? ""),
   };
 }
 
@@ -270,7 +270,7 @@ export function AiOutreachAssistantSection({
       ...withDraftDefaults(prev),
       draft: email,
       editedSubject: email.subject,
-      editedBody: `${email.body}\n${CUSTOMER_FACING_COMPANY}`.trim(),
+      editedBody: email.body,
     }));
     setFeedbackMessage(null);
     setLoading(false);
@@ -452,7 +452,7 @@ export function AiOutreachAssistantSection({
 
           <div className="md:col-start-1">
             <label htmlFor="outreach-language" className="mb-1.5 block text-sm font-medium text-zinc-700">
-              Language
+              Email Language
             </label>
             <select
               id="outreach-language"
@@ -552,7 +552,7 @@ export function AiOutreachAssistantSection({
 
           <div className="md:col-span-2">
             <label htmlFor="outreach-goal" className="mb-1.5 block text-sm font-medium text-zinc-700">
-              Goal <span className="font-normal text-zinc-500">(optional)</span>
+              Additional Instructions <span className="font-normal text-zinc-500">(optional)</span>
             </label>
             <input
               id="outreach-goal"
@@ -599,7 +599,7 @@ export function AiOutreachAssistantSection({
             disabled={loading}
             className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loading ? "Writing draft..." : "Generate Draft"}
+            {loading ? "Writing email..." : "Generate Email"}
           </button>
           {!isOutreachDraftEmpty(draftState) && (
             <button
@@ -646,7 +646,7 @@ export function AiOutreachAssistantSection({
                 onClick={handleCopy}
                 className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
               >
-                {copySuccess ? "Copied" : "Copy"}
+                {copySuccess ? "Copied" : "Copy Email"}
               </button>
               <button
                 type="button"

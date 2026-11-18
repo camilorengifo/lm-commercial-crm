@@ -217,7 +217,5 @@ export function presentCustomerEmail(
 
 export function emailCopyText(draft: CustomerEmailDraft): string {
   if (!draft.body.trim()) return "";
-  return [`Subject: ${draft.subject}`, "", draft.body, draft.signature]
-    .filter((part) => part !== "")
-    .join("\n");
+  return [`Subject: ${draft.subject}`, "", draft.body].filter((part) => part !== "").join("\n");
 }

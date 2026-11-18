@@ -19,6 +19,7 @@ import {
   shouldRewriteOutreachDraft,
 } from "@/lib/customerEmail";
 import { findLaneByKey, rankLanesForOutreach } from "@/lib/laneIntelligence";
+import { extractCommercialFacts } from "@/lib/outreachContext";
 import { saveMarketResearchReport } from "@/lib/freightMarket/store";
 import {
   aiClientErrorResponse,
@@ -141,11 +142,23 @@ export async function POST(request: Request) {
         const location = [context.company.city, context.company.state, context.company.country]
           .filter(Boolean)
           .join(", ");
+        const noted = extractCommercialFacts([
+          context.company.generalNotes,
+          ...context.commercialTimeline.map(
+            (item) => `${item.title ?? ""}\n${item.notes ?? ""}`,
+          ),
+          ...context.opportunities.map(
+            (opportunity) =>
+              `${opportunity.commodity ?? ""} ${opportunity.equipmentType ?? ""} ${opportunity.notes ?? ""}`,
+          ),
+        ]);
         const assessment = await researchFreightMarket({
           companyName: context.company.name,
           location: location || null,
           lanePatterns: context.lanePatterns,
           focusLane,
+          commodities: noted.commodities,
+          equipment: noted.equipment[0] ?? null,
           model: getOutreachModel(),
           reasoningEffort: OUTREACH_REASONING_EFFORT,
         });

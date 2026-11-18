@@ -2,6 +2,7 @@
 import { buildOutreachCrmContext } from "@/lib/aiCrmContext";
 import { saveMarketResearchReport } from "@/lib/freightMarket/store";
 import { findLaneByKey, rankLanesForOutreach } from "@/lib/laneIntelligence";
+import { extractCommercialFacts } from "@/lib/outreachContext";
 import {
   aiClientErrorResponse,
   aiGenerationErrorResponse,
@@ -66,9 +67,10 @@ export async function POST(request: Request) {
 
     const ranked = rankLanesForOutreach(context.lanePatterns);
     const selected = findLaneByKey(ranked, body.laneKey);
-    if (body.laneKey?.trim() && !selected) {
-      return aiClientErrorResponse("Select a lane recorded on this company.", 400);
-    }
+    const noted = extractCommercialFacts([
+      context.company.generalNotes,
+      ...context.commercialTimeline.map((item) => `${item.title ?? ""}\n${item.notes ?? ""}`),
+    ]);
 
     const location = [context.company.city, context.company.state, context.company.country]
       .filter(Boolean)
@@ -77,7 +79,9 @@ export async function POST(request: Request) {
       companyName: context.company.name,
       location: location || null,
       lanePatterns: context.lanePatterns,
-      focusLane: selected ?? ranked[0] ?? null,
+      focusLane: selected ?? (body.laneKey?.trim() ? null : ranked[0] ?? null),
+      commodities: noted.commodities,
+      equipment: noted.equipment[0] ?? null,
       model: getOutreachModel(),
       reasoningEffort: OUTREACH_REASONING_EFFORT,
     });

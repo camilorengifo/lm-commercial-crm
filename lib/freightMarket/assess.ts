@@ -55,21 +55,38 @@ function hayHasHint(hay: string, hint: string): boolean {
   return hay.includes(hint);
 }
 
-function relevantToLane(finding: MarketFinding, lane: LanePattern | null): boolean {
-  if (!lane) return false;
+export interface MarketRelevanceFocus {
+  regions?: string[];
+  commodities?: string[];
+  equipment?: string | null;
+}
+
+function relevantToCustomer(
+  finding: MarketFinding,
+  lane: LanePattern | null,
+  focus?: MarketRelevanceFocus | null,
+): boolean {
   const hay = `${finding.relevance} ${finding.insight}`.toLowerCase();
-  const hints = [
-    ...regionHintsForPlace(lane.origin),
-    ...regionHintsForPlace(lane.destination),
+  const regionHints = [
+    ...(lane ? regionHintsForPlace(lane.origin) : []),
+    ...(lane ? regionHintsForPlace(lane.destination) : []),
+    ...(focus?.regions ?? []).flatMap((region) => regionHintsForPlace(region)),
   ];
-  const namesRegion = hints.some((hint) => hayHasHint(hay, hint));
-  if (
-    /\bnational\b|\bnationwide\b|\bunited states\b|\bu\.s\.\b/.test(hay) &&
-    !namesRegion
-  ) {
-    return false;
-  }
-  return namesRegion;
+  const topicHints = [
+    ...(focus?.commodities ?? []).map((commodity) => commodity.toLowerCase()),
+    ...(focus?.equipment ? [focus.equipment.toLowerCase()] : []),
+    ...(lane?.commodities ?? []).map((commodity) => commodity.toLowerCase()),
+    ...(lane?.equipmentType ? [lane.equipmentType.toLowerCase()] : []),
+  ];
+  const namesRegion = regionHints.some((hint) => hayHasHint(hay, hint));
+  const namesTopic = topicHints.some((hint) => hayHasHint(hay, hint));
+  const national = /\bnational\b|\bnationwide\b|\bunited states\b|\bu\.s\.\b/.test(hay);
+  if (national && !namesRegion) return false;
+  const seasonalFit =
+    !national &&
+    SEASONAL.test(hay) &&
+    topicHints.some((hint) => /produce|avocado|tomato|fruit|vegetable|reefer|refrigerat/.test(hint));
+  return namesRegion || (!national && namesTopic) || seasonalFit;
 }
 
 export function stripMarketStatistics(value: string): string {
@@ -140,9 +157,10 @@ export function selectEmailGuidance(
   findings: MarketFinding[],
   lane: LanePattern | null,
   direction: MarketDirection,
+  focus?: MarketRelevanceFocus | null,
 ): string[] {
   const ranked = findings
-    .filter((finding) => relevantToLane(finding, lane))
+    .filter((finding) => relevantToCustomer(finding, lane, focus))
     .map((finding) => ({ finding, text: guidanceFrom(finding) }))
     .filter((item): item is { finding: MarketFinding; text: string } => Boolean(item.text))
     .sort((left, right) => {
@@ -168,12 +186,13 @@ export function selectEmailGuidance(
 export function buildMarketAssessment(input: {
   research: MarketResearchResult;
   lane: LanePattern | null;
+  focus?: MarketRelevanceFocus | null;
   unavailable?: string[];
   now?: Date;
 }): FreightMarketAssessment {
   const period = currentResearchPeriod(input.now);
   const classified = classifyMarketDirection(input.research.findings);
-  const commodity = input.lane?.commodities[0] ?? null;
+  const commodity = input.lane?.commodities[0] ?? input.focus?.commodities?.[0] ?? null;
   return {
     ...input.research,
     direction: classified.direction,
@@ -182,6 +201,7 @@ export function buildMarketAssessment(input: {
       input.research.findings,
       input.lane,
       classified.direction,
+      input.focus,
     ),
     origin: input.lane?.origin ?? null,
     destination: input.lane?.destination ?? null,

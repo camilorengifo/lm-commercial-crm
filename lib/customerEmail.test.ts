@@ -90,7 +90,11 @@ for (const [index, [subject, body]] of scenarios.entries()) {
   assert.doesNotMatch(copy, /Logistics Masters/i);
   assert.doesNotMatch(copy, /Commercial Objective|Market Intelligence|AI Recommendations|commercialSummary/i);
   assert.doesNotMatch(copy, /I hope this email finds you well/i);
-  assert.match(copy, new RegExp(CUSTOMER_FACING_COMPANY));
+  assert.doesNotMatch(copy, new RegExp(CUSTOMER_FACING_COMPANY));
+  assert.doesNotMatch(
+    copy,
+    /Commercial Recommendation|Suggested Next Step|Missing Information|Subject Alternatives|Discovery Questions/,
+  );
   assert.match(copy, /^Subject:/);
   if (language === "en") assert.match(presented.body, /Best,/);
   if (language === "es") {
@@ -365,11 +369,14 @@ const sql = readFileSync(
   join(here, "../supabase/migrations/046_market_research_reports.sql"),
   "utf8",
 );
-assert.match(assistant, />\s*Language\s*</);
+assert.match(assistant, /Email Language/);
 assert.match(assistant, /Communication style/);
 assert.match(assistant, /Natural and conversational/);
 assert.match(assistant, /Standard commercial email/);
-assert.match(assistant, />\s*Goal\s*</);
+assert.match(assistant, /Additional Instructions/);
+assert.match(assistant, /Generate Email/);
+assert.match(assistant, /Copy Email/);
+assert.match(assistant, /Technical Follow-up/);
 assert.match(assistant, /Automatic \/ next best follow-up/);
 const prompts = readFileSync(join(here, "../lib/aiPrompts.ts"), "utf8");
 assert.match(prompts, /Direct but persistent/);

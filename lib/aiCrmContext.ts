@@ -539,7 +539,7 @@ export async function buildAccountCrmSummary(
         .eq("company_id", companyId)
         .eq("user_id", dataOwnerUserId)
         .order("activity_at", { ascending: false })
-        .limit(12),
+        .limit(48),
       supabase
         .from("load_opportunities")
         .select(
@@ -757,14 +757,14 @@ export async function buildOutreachCrmContext(
       .eq("company_id", companyId)
       .eq("user_id", dataOwnerUserId)
       .order("due_at", { ascending: false })
-      .limit(24),
+      .limit(48),
     supabase
       .from("activities")
       .select("activity_type, subject, notes, activity_at, contact_id")
       .eq("company_id", companyId)
       .eq("user_id", dataOwnerUserId)
       .order("activity_at", { ascending: false })
-      .limit(24),
+      .limit(48),
     supabase
       .from("outreach_draft_feedback")
       .select("rating, outreach_type, created_at")
@@ -823,7 +823,6 @@ export async function buildOutreachCrmContext(
 
   const completedFollowUps = allFollowUps
     .filter((followUp) => followUp.status === "completed")
-    .slice(0, 12)
     .map((followUp) => ({
       title: followUp.title,
       completedAt: formatDateLabel(followUp.completed_at),
