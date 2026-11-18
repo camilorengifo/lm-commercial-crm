@@ -366,7 +366,7 @@ export function AiOutreachAssistantSection({
             >
               {OUTREACH_TYPES.map((type) => (
                 <option key={type} value={type}>
-                  {type} (draft)
+                  {type === POST_PRESENTATION_OUTREACH_TYPE ? type : `${type} (draft)`}
                 </option>
               ))}
             </select>
