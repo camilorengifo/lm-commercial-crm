@@ -132,35 +132,25 @@ function ScheduleNextFollowUpModal({
 }) {
   const [scheduleMode, setScheduleMode] =
     useState<ScheduleNextMode>("automatic_week");
-  const [dueAt, setDueAt] = useState(() => {
-    try {
-      return toDatetimeLocalValue(
-        addCalendarDaysPreservingLocalTime(followUp.due_at, 7),
-      );
-    } catch {
-      return toDatetimeLocalValue(followUp.due_at);
-    }
-  });
+  const [dueAt, setDueAt] = useState(() =>
+    toDatetimeLocalValue(addCalendarDaysPreservingLocalTime(new Date().toISOString(), 7)),
+  );
   const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
     setScheduleMode("automatic_week");
-    try {
-      setDueAt(
-        toDatetimeLocalValue(
-          addCalendarDaysPreservingLocalTime(followUp.due_at, 7),
-        ),
-      );
-    } catch {
-      setDueAt(toDatetimeLocalValue(followUp.due_at));
-    }
+    setDueAt(
+      toDatetimeLocalValue(
+        addCalendarDaysPreservingLocalTime(new Date().toISOString(), 7),
+      ),
+    );
     setLocalError(null);
   }, [followUp]);
 
   const isNoResponse = outcome === "no_response";
   const description = isNoResponse
-    ? "This follow-up will be completed as no response and a new pending follow-up will be created. Cancel keeps the current follow-up open."
-    : "This follow-up will be completed as a successful contact and a new pending follow-up will be created. Cancel keeps the current follow-up open.";
+    ? "This follow-up will be completed as no response. The company keeps one open follow-up. Earlier open duplicates are removed from the queue and are not counted. Cancel keeps the current follow-up open."
+    : "This follow-up will be completed as a successful contact. The company keeps one open follow-up. Earlier open duplicates are removed from the queue and are not counted. Cancel keeps the current follow-up open.";
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -170,7 +160,7 @@ function ScheduleNextFollowUpModal({
     if (scheduleMode === "automatic_week") {
       try {
         const automaticDueAt = addCalendarDaysPreservingLocalTime(
-          followUp.due_at,
+          new Date().toISOString(),
           7,
         );
         onConfirm({ scheduleMode, newDueAt: automaticDueAt });
@@ -223,7 +213,7 @@ function ScheduleNextFollowUpModal({
                   Automatic – 1 Week
                 </span>
                 <span className="block text-xs text-zinc-500">
-                  Exactly 7 calendar days after the current due date, same local
+                  Exactly 7 calendar days after this action, at the same local
                   time.
                 </span>
               </span>

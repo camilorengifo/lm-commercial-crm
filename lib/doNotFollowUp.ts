@@ -1,5 +1,6 @@
 import { formatDateTime } from "@/lib/crmFormat";
 import {
+  collapseCompanyPendingFollowUps,
   syncCompanyCommercialDates,
   syncCompanyNextFollowUpAt,
 } from "@/lib/followUps";
@@ -42,6 +43,13 @@ async function revertStop(input: {
   previousContactId: string | null;
   activityId?: string | null;
 }): Promise<void> {
+  await supabase
+    .from("follow_ups")
+    .update({ status: "cancelled", source_follow_up_id: null })
+    .eq("company_id", input.companyId)
+    .eq("status", "pending")
+    .neq("id", input.followUpId);
+
   let revertQuery = supabase
     .from("follow_ups")
     .update({
@@ -248,6 +256,7 @@ export async function stopFollowUp(
     }
   }
 
+  await collapseCompanyPendingFollowUps(input.companyId, input.ownerUserId);
   await syncCompanyNextFollowUpAt(input.companyId, input.ownerUserId);
   await syncCompanyCommercialDates(input.companyId, input.ownerUserId);
 

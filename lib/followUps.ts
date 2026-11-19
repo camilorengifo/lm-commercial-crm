@@ -19,6 +19,11 @@ import {
   isMissingColumnError,
   isUniqueViolation,
 } from "@/lib/followUpIdempotency";
+import {
+  planSinglePendingFollowUp,
+  sameFollowUpInstant,
+  type PendingFollowUpCandidate,
+} from "@/lib/singleCompanyFollowUp";
 import { insertActivityOnce } from "@/lib/idempotentActivityInsert";
 import {
   resolveFollowUpSeasonalFields,
@@ -360,6 +365,7 @@ function enrichFollowUpRows(
   rows: FollowUpRecord[],
   companyById: Map<string, CompanyJoinRow>,
   primaryContactByCompany: Map<string, { id: string; name: string }>,
+  contactById: Map<string, { id: string; name: string }>,
   profileById: Map<string, ProfileJoinRow>,
 ): FollowUpEnriched[] {
   return rows.map((row) => {
@@ -369,12 +375,15 @@ function enrichFollowUpRows(
       ? profileById.get(companyOwnerUserId)
       : null;
     const primaryContact = primaryContactByCompany.get(row.company_id);
+    const linkedContact = row.contact_id
+      ? contactById.get(row.contact_id)
+      : undefined;
 
     return {
       ...row,
       companyName: company?.name ?? "Unknown company",
-      contactName: primaryContact?.name ?? null,
-      contactId: primaryContact?.id ?? null,
+      contactName: linkedContact?.name ?? primaryContact?.name ?? null,
+      contactId: linkedContact?.id ?? primaryContact?.id ?? null,
       companyPriority: company?.priority ?? ("Medium" as CompanyPriority),
       companyAccountStatus: normalizeAccountStatus(company?.account_status),
       companyOwnerUserId,
@@ -435,6 +444,15 @@ async function enrichFollowUpRecords(
   const primaryContactByCompany = buildPrimaryContactByCompany(
     contactsResult.data,
   );
+  const contactById = new Map(
+    contactsResult.data.map((contact) => [
+      contact.id,
+      {
+        id: contact.id,
+        name: formatContactName(contact.first_name, contact.last_name),
+      },
+    ]),
+  );
   const profileById = new Map(
     ownerProfiles.map((profile) => [profile.id, profile]),
   );
@@ -443,6 +461,7 @@ async function enrichFollowUpRecords(
     rows,
     companyById,
     primaryContactByCompany,
+    contactById,
     profileById,
   );
 
@@ -601,9 +620,15 @@ export async function fetchPendingFollowUpsForCompany(
 
   const { data, error } = await query;
 
+  if (error) {
+    return { data: [], error };
+  }
+
   return {
-    data: (data as FollowUpRecord[]) ?? [],
-    error,
+    data: await reconcileDuplicatePendingFollowUps(
+      (data as FollowUpRecord[]) ?? [],
+    ),
+    error: null,
   };
 }
 
@@ -782,13 +807,15 @@ export async function fetchPendingFollowUpsForUser(
     return result;
   }
 
+  const reconciled = await reconcileDuplicatePendingFollowUps(result.data);
+
   const suppression = await fetchSuppressionIndex(supabase, { userId });
   if (suppression.error) {
     return { data: [], error: suppression.error };
   }
 
   return {
-    data: result.data.filter(
+    data: reconciled.filter(
       (followUp) => !isFollowUpOutreachSuppressed(suppression.index, followUp),
     ),
     error: null,
@@ -1032,6 +1059,7 @@ async function findSuccessorFollowUpRow(
     .from("follow_ups")
     .select("id, due_at")
     .eq("source_follow_up_id", sourceFollowUpId)
+    .eq("status", "pending")
     .order("created_at", { ascending: true })
     .limit(1);
 
@@ -1070,6 +1098,292 @@ async function findFollowUpByCreationKey(creationKey: string): Promise<{
   };
 }
 
+function toPendingCandidate(row: {
+  id: string;
+  company_id: string;
+  due_at: string;
+  created_at: string;
+}): PendingFollowUpCandidate {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    dueAt: row.due_at,
+    createdAt: row.created_at,
+  };
+}
+
+async function listPendingCandidates(companyId: string): Promise<{
+  data: PendingFollowUpCandidate[];
+  error: { message?: string; code?: string } | null;
+}> {
+  const { data, error } = await supabase
+    .from("follow_ups")
+    .select("id, company_id, due_at, created_at")
+    .eq("company_id", companyId)
+    .eq("status", "pending");
+
+  if (error) {
+    return { data: [], error };
+  }
+
+  return {
+    data: ((data ?? []) as Array<{
+      id: string;
+      company_id: string;
+      due_at: string;
+      created_at: string;
+    }>).map(toPendingCandidate),
+    error: null,
+  };
+}
+
+async function latestExplicitDueAt(companyId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("activities")
+    .select("scheduled_follow_up_at")
+    .eq("company_id", companyId)
+    .not("scheduled_follow_up_at", "is", null)
+    .order("activity_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data?.scheduled_follow_up_at) {
+    return null;
+  }
+
+  return data.scheduled_follow_up_at as string;
+}
+
+async function updatePendingFollowUp(
+  followUpId: string,
+  updates: Record<string, unknown>,
+): Promise<{ error: { message?: string; code?: string } | null }> {
+  const payload = { ...updates };
+  let { error } = await supabase
+    .from("follow_ups")
+    .update(payload)
+    .eq("id", followUpId)
+    .eq("status", "pending");
+
+  if (error && "creation_key" in payload && isMissingColumnError(error, "creation_key")) {
+    delete payload.creation_key;
+    const retry = await supabase
+      .from("follow_ups")
+      .update(payload)
+      .eq("id", followUpId)
+      .eq("status", "pending");
+    error = retry.error;
+  }
+
+  return { error };
+}
+
+export async function consolidateCompanyPendingFollowUps(input: {
+  companyId: string;
+  ownerUserId: string;
+  pending: PendingFollowUpCandidate[];
+  preferId?: string | null;
+  requestedDueAt?: string | null;
+  explicitDueAt?: string | null;
+  patch?: Record<string, unknown> | null;
+}): Promise<{
+  error: { message?: string; code?: string } | null;
+  followUpId: string | null;
+  dueAt: string | null;
+  cancelledIds: string[];
+}> {
+  const plan = planSinglePendingFollowUp({
+    pending: input.pending,
+    preferId: input.preferId,
+    requestedDueAt: input.requestedDueAt,
+    explicitDueAt: input.explicitDueAt,
+  });
+
+  if (!plan.keepId) {
+    const syncResult = await syncCompanyNextFollowUpAt(
+      input.companyId,
+      input.ownerUserId,
+    );
+    return {
+      error: syncResult.error,
+      followUpId: null,
+      dueAt: null,
+      cancelledIds: [],
+    };
+  }
+
+  const updates: Record<string, unknown> = { ...(input.patch ?? {}) };
+  if (plan.dueAt) {
+    updates.due_at = plan.dueAt;
+  }
+
+  if (Object.keys(updates).length > 0) {
+    const updateResult = await updatePendingFollowUp(plan.keepId, updates);
+    if (updateResult.error) {
+      return {
+        error: updateResult.error,
+        followUpId: null,
+        dueAt: null,
+        cancelledIds: [],
+      };
+    }
+  }
+
+  if (plan.cancelIds.length > 0) {
+    const { error } = await supabase
+      .from("follow_ups")
+      .update({ status: "cancelled", source_follow_up_id: null })
+      .in("id", plan.cancelIds)
+      .eq("company_id", input.companyId)
+      .eq("status", "pending");
+
+    if (error) {
+      return {
+        error,
+        followUpId: plan.keepId,
+        dueAt: plan.dueAt,
+        cancelledIds: [],
+      };
+    }
+  }
+
+  const syncResult = await syncCompanyNextFollowUpAt(
+    input.companyId,
+    input.ownerUserId,
+  );
+
+  return {
+    error: syncResult.error,
+    followUpId: plan.keepId,
+    dueAt: plan.dueAt,
+    cancelledIds: plan.cancelIds,
+  };
+}
+
+export async function collapseCompanyPendingFollowUps(
+  companyId: string,
+  ownerUserId: string,
+  options?: {
+    preferId?: string | null;
+    requestedDueAt?: string | null;
+    patch?: Record<string, unknown> | null;
+  },
+): Promise<{
+  error: { message?: string; code?: string } | null;
+  followUpId: string | null;
+  dueAt: string | null;
+}> {
+  const pending = await listPendingCandidates(companyId);
+  if (pending.error) {
+    return { error: pending.error, followUpId: null, dueAt: null };
+  }
+
+  if (
+    pending.data.length <= 1 &&
+    !options?.requestedDueAt &&
+    !options?.patch
+  ) {
+    const syncResult = await syncCompanyNextFollowUpAt(companyId, ownerUserId);
+    const only = pending.data[0];
+    return {
+      error: syncResult.error,
+      followUpId: only?.id ?? options?.preferId ?? null,
+      dueAt: only?.dueAt ?? null,
+    };
+  }
+
+  const explicitDueAt = options?.requestedDueAt
+    ? null
+    : await latestExplicitDueAt(companyId);
+
+  const consolidated = await consolidateCompanyPendingFollowUps({
+    companyId,
+    ownerUserId,
+    pending: pending.data,
+    preferId: options?.preferId,
+    requestedDueAt: options?.requestedDueAt,
+    explicitDueAt,
+    patch: options?.patch,
+  });
+
+  return {
+    error: consolidated.error,
+    followUpId: consolidated.followUpId,
+    dueAt: consolidated.dueAt,
+  };
+}
+
+async function reconcileDuplicatePendingFollowUps(
+  rows: FollowUpRecord[],
+): Promise<FollowUpRecord[]> {
+  const groups = new Map<string, FollowUpRecord[]>();
+  for (const row of rows) {
+    const group = groups.get(row.company_id) ?? [];
+    group.push(row);
+    groups.set(row.company_id, group);
+  }
+
+  const duplicateCompanyIds = [...groups.entries()]
+    .filter(([, group]) => group.length > 1)
+    .map(([companyId]) => companyId);
+
+  if (duplicateCompanyIds.length === 0) {
+    return rows;
+  }
+
+  const removed = new Set<string>();
+  const dueOverride = new Map<string, string>();
+
+  for (const companyId of duplicateCompanyIds) {
+    const group = groups.get(companyId) ?? [];
+    const ownerUserId = group[0]?.user_id;
+    if (!ownerUserId) continue;
+
+    const explicitDueAt = await latestExplicitDueAt(companyId);
+    const plan = planSinglePendingFollowUp({
+      pending: group.map((row) =>
+        toPendingCandidate({
+          id: row.id,
+          company_id: row.company_id,
+          due_at: row.due_at,
+          created_at: row.created_at,
+        }),
+      ),
+      explicitDueAt,
+    });
+
+    if (plan.keepId && plan.dueAt) {
+      dueOverride.set(plan.keepId, plan.dueAt);
+    }
+    for (const cancelId of plan.cancelIds) {
+      removed.add(cancelId);
+    }
+
+    if (!plan.keepId) continue;
+
+    await consolidateCompanyPendingFollowUps({
+      companyId,
+      ownerUserId,
+      pending: group.map((row) =>
+        toPendingCandidate({
+          id: row.id,
+          company_id: row.company_id,
+          due_at: row.due_at,
+          created_at: row.created_at,
+        }),
+      ),
+      explicitDueAt,
+    });
+  }
+
+  return rows
+    .filter((row) => !removed.has(row.id))
+    .map((row) => {
+      const dueAt = dueOverride.get(row.id);
+      return dueAt ? { ...row, due_at: dueAt } : row;
+    });
+}
+
 async function returnExistingFollowUp(
   companyId: string,
   ownerUserId: string,
@@ -1079,16 +1393,25 @@ async function returnExistingFollowUp(
   followUpId: string | null;
   dueAt: string | null;
 }> {
-  const syncResult = await syncCompanyNextFollowUpAt(companyId, ownerUserId);
-  if (syncResult.error) {
+  const collapsed = await collapseCompanyPendingFollowUps(
+    companyId,
+    ownerUserId,
+    { preferId: row.id },
+  );
+
+  if (collapsed.error) {
     return {
-      error: syncResult.error,
+      error: collapsed.error,
       followUpId: row.id,
       dueAt: row.due_at,
     };
   }
 
-  return { error: null, followUpId: row.id, dueAt: row.due_at };
+  return {
+    error: null,
+    followUpId: collapsed.followUpId ?? row.id,
+    dueAt: collapsed.dueAt ?? row.due_at,
+  };
 }
 
 export async function createFollowUp(
@@ -1196,6 +1519,71 @@ export async function createFollowUp(
         input.dueAt,
       );
 
+  const pendingPatch: Record<string, unknown> = {
+    contact_id: contactId,
+    title: input.title,
+    notes: input.notes ?? null,
+    ...seasonalFields,
+  };
+
+  if (input.sourceFollowUpId) {
+    pendingPatch.source_follow_up_id = input.sourceFollowUpId;
+  }
+
+  if (includeCreationKey && creationKey) {
+    pendingPatch.creation_key = creationKey;
+  }
+
+  const pendingBefore = await listPendingCandidates(input.companyId);
+  if (pendingBefore.error) {
+    return { error: pendingBefore.error, followUpId: null, dueAt: null };
+  }
+
+  const matchingPending = pendingBefore.data.filter((row) =>
+    sameFollowUpInstant(row.dueAt, input.dueAt),
+  );
+
+  if (pendingBefore.data.length > 0 && matchingPending.length === 0) {
+    const { error: cancelError } = await supabase
+      .from("follow_ups")
+      .update({ status: "cancelled", source_follow_up_id: null })
+      .in(
+        "id",
+        pendingBefore.data.map((row) => row.id),
+      )
+      .eq("company_id", input.companyId)
+      .eq("status", "pending");
+
+    if (cancelError) {
+      return { error: cancelError, followUpId: null, dueAt: null };
+    }
+  } else if (matchingPending.length > 0) {
+    const placed = await consolidateCompanyPendingFollowUps({
+      companyId: input.companyId,
+      ownerUserId,
+      pending: pendingBefore.data,
+      requestedDueAt: input.dueAt,
+      patch: pendingPatch,
+    });
+
+    if (placed.error && isUniqueViolation(placed.error) && input.sourceFollowUpId) {
+      const racedSource = await findSuccessorFollowUpRow(input.sourceFollowUpId);
+      if (racedSource.row) {
+        return returnExistingFollowUp(
+          input.companyId,
+          ownerUserId,
+          racedSource.row,
+        );
+      }
+    }
+
+    return {
+      error: placed.error,
+      followUpId: placed.followUpId,
+      dueAt: placed.dueAt,
+    };
+  }
+
   const insertValues: Record<string, unknown> = {
     user_id: ownerUserId,
     company_id: input.companyId,
@@ -1251,6 +1639,24 @@ export async function createFollowUp(
         );
       }
     }
+
+    const racedPending = await listPendingCandidates(input.companyId);
+    if (!racedPending.error && racedPending.data.length > 0) {
+      const placed = await consolidateCompanyPendingFollowUps({
+        companyId: input.companyId,
+        ownerUserId,
+        pending: racedPending.data,
+        requestedDueAt: input.dueAt,
+        patch: pendingPatch,
+      });
+      if (!placed.error || placed.followUpId) {
+        return {
+          error: placed.error,
+          followUpId: placed.followUpId,
+          dueAt: placed.dueAt,
+        };
+      }
+    }
   }
 
   if (error) {
@@ -1258,6 +1664,22 @@ export async function createFollowUp(
   }
 
   const created = data as FollowUpIdentityRow | null;
+  const pendingAfter = await listPendingCandidates(input.companyId);
+  if (!pendingAfter.error && pendingAfter.data.length > 1) {
+    const placed = await consolidateCompanyPendingFollowUps({
+      companyId: input.companyId,
+      ownerUserId,
+      pending: pendingAfter.data,
+      requestedDueAt: input.dueAt,
+      patch: pendingPatch,
+    });
+    return {
+      error: placed.error,
+      followUpId: placed.followUpId ?? created?.id ?? null,
+      dueAt: placed.dueAt ?? created?.due_at ?? null,
+    };
+  }
+
   const syncResult = await syncCompanyNextFollowUpAt(
     input.companyId,
     ownerUserId,
@@ -1329,7 +1751,12 @@ export async function completeFollowUp(
     return { error };
   }
 
-  return syncCompanyNextFollowUpAt(companyId, ownerUserId);
+  const collapsed = await collapseCompanyPendingFollowUps(companyId, ownerUserId);
+  if (collapsed.error) {
+    return { error: collapsed.error };
+  }
+
+  return { error: null };
 }
 
 export interface RescheduleFollowUpInput {
@@ -1400,13 +1827,44 @@ export async function rescheduleFollowUp(
     query = query.eq("user_id", input.ownerUserId);
   }
 
-  const { error } = await query;
+  let { error } = await query;
+
+  if (error && isUniqueViolation(error)) {
+    await supabase
+      .from("follow_ups")
+      .update({ status: "cancelled", source_follow_up_id: null })
+      .eq("company_id", input.companyId)
+      .eq("status", "pending")
+      .neq("id", input.followUpId);
+
+    let retry = supabase
+      .from("follow_ups")
+      .update(updates)
+      .eq("id", input.followUpId)
+      .eq("company_id", input.companyId);
+
+    if (!input.asAdmin) {
+      retry = retry.eq("user_id", input.ownerUserId);
+    }
+
+    const retried = await retry;
+    error = retried.error;
+  }
 
   if (error) {
     return { error };
   }
 
-  return syncCompanyNextFollowUpAt(input.companyId, input.ownerUserId);
+  const collapsed = await collapseCompanyPendingFollowUps(
+    input.companyId,
+    input.ownerUserId,
+    {
+      preferId: input.followUpId,
+      requestedDueAt: input.dueAt,
+    },
+  );
+
+  return { error: collapsed.error };
 }
 
 export interface CreateActivityNoteInput {

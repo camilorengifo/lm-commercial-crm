@@ -5,6 +5,7 @@ import {
   completionActivityCreationKey,
 } from "@/lib/followUpIdempotency";
 import {
+  collapseCompanyPendingFollowUps,
   createFollowUp,
   syncCompanyCommercialDates,
   type CreateFollowUpInput,
@@ -203,6 +204,7 @@ export async function completeFollowUpWithActivity(
         }
       }
 
+      await collapseCompanyPendingFollowUps(input.companyId, input.userId);
       return syncCompanyCommercialDates(input.companyId, input.userId);
     }
 
@@ -239,6 +241,7 @@ export async function completeFollowUpWithActivity(
     }
   }
 
+  await collapseCompanyPendingFollowUps(input.companyId, input.userId);
   return syncCompanyCommercialDates(input.companyId, input.userId);
 }
 

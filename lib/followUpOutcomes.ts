@@ -5,6 +5,7 @@ import {
 } from "@/lib/crmConstants";
 import { formatDateTime } from "@/lib/crmFormat";
 import {
+  collapseCompanyPendingFollowUps,
   createFollowUp,
   syncCompanyCommercialDates,
   type FollowUpEnriched,
@@ -77,7 +78,7 @@ function buildOutcomeNotes(input: {
     : "";
   const schedulePart =
     input.scheduleMode === "automatic_week"
-      ? " Next follow-up was scheduled automatically for one week later (same local time)."
+      ? " Next follow-up was scheduled automatically for 7 days after this action (same local time)."
       : " Next follow-up was scheduled manually.";
 
   if (input.outcome === "no_response") {
@@ -129,6 +130,7 @@ async function findSuccessorFollowUp(
     .from("follow_ups")
     .select("id, due_at")
     .eq("source_follow_up_id", sourceFollowUpId)
+    .eq("status", "pending")
     .order("created_at", { ascending: true })
     .limit(1);
 
@@ -149,13 +151,14 @@ async function findOutcomeActivity(input: {
     .select("id")
     .eq("follow_up_id", input.followUpId)
     .eq("activity_type", input.activityType)
-    .maybeSingle();
+    .limit(1);
 
-  if (error || !data) {
+  const row = data?.[0];
+  if (error || !row) {
     return null;
   }
 
-  return data as { id: string };
+  return row as { id: string };
 }
 
 async function completeSourceFollowUp(input: {
@@ -273,6 +276,34 @@ async function insertOutcomeActivity(input: {
   return { error: null };
 }
 
+async function resolveManagedContact(
+  followUp: CompleteAndScheduleNextInput["followUp"],
+): Promise<{ contactId: string | null; contactName: string | null }> {
+  const rowContactId = followUp.contact_id?.trim() || null;
+  if (!rowContactId) {
+    return {
+      contactId: followUp.contactId?.trim() || null,
+      contactName: followUp.contactName?.trim() || null,
+    };
+  }
+
+  const { data } = await supabase
+    .from("contacts")
+    .select("first_name, last_name")
+    .eq("id", rowContactId)
+    .maybeSingle();
+
+  const name = [data?.first_name, data?.last_name]
+    .filter((part) => typeof part === "string" && part.trim())
+    .join(" ")
+    .trim();
+
+  return {
+    contactId: rowContactId,
+    contactName: name || followUp.contactName?.trim() || null,
+  };
+}
+
 function buildCarriedTypeFields(
   followUp: CompleteAndScheduleNextInput["followUp"],
 ): FollowUpTypeFormValues {
@@ -317,7 +348,11 @@ export async function completeFollowUpAndScheduleNext(
     input.followUp.companyOwnerUserId ?? input.followUp.user_id;
   const completedFollowUpId = input.followUp.id;
   const previousDueAt = input.followUp.due_at;
-  const newDueAt = input.newDueAt;
+  const newDueAt =
+    input.scheduleMode === "automatic_week"
+      ? addCalendarDaysPreservingLocalTime(new Date().toISOString(), 7)
+      : input.newDueAt;
+  const managedContact = await resolveManagedContact(input.followUp);
 
   async function ensureOutcomeActivity(nextFollowUpId: string, dueAtForNotes: string) {
     await insertOutcomeActivity({
@@ -329,21 +364,30 @@ export async function completeFollowUpAndScheduleNext(
       previousDueAt,
       newDueAt: dueAtForNotes,
       scheduleMode: input.scheduleMode,
-      contactId: input.followUp.contactId,
-      contactName: input.followUp.contactName,
+      contactId: managedContact.contactId,
+      contactName: managedContact.contactName,
       companyName: input.followUp.companyName,
     });
   }
 
-  const existingSuccessor = await findSuccessorFollowUp(completedFollowUpId);
-  if (existingSuccessor) {
-    await ensureOutcomeActivity(existingSuccessor.id, existingSuccessor.due_at);
+  async function retainSuccessor(successor: { id: string; due_at: string }) {
+    await ensureOutcomeActivity(successor.id, successor.due_at);
+    await collapseCompanyPendingFollowUps(
+      input.followUp.company_id,
+      ownerUserId,
+      { preferId: successor.id },
+    );
     await syncCompanyCommercialDates(input.followUp.company_id, ownerUserId);
     return {
       error: null,
-      newDueAt: existingSuccessor.due_at,
-      nextFollowUpId: existingSuccessor.id,
+      newDueAt: successor.due_at,
+      nextFollowUpId: successor.id,
     };
+  }
+
+  const existingSuccessor = await findSuccessorFollowUp(completedFollowUpId);
+  if (existingSuccessor) {
+    return retainSuccessor(existingSuccessor);
   }
 
   const completeResult = await completeSourceFollowUp({
@@ -364,17 +408,7 @@ export async function completeFollowUpAndScheduleNext(
   // Re-check successor after completion (retry / race).
   const successorAfterComplete = await findSuccessorFollowUp(completedFollowUpId);
   if (successorAfterComplete) {
-    await ensureOutcomeActivity(
-      successorAfterComplete.id,
-      successorAfterComplete.due_at,
-    );
-    await syncCompanyCommercialDates(input.followUp.company_id, ownerUserId);
-
-    return {
-      error: null,
-      newDueAt: successorAfterComplete.due_at,
-      nextFollowUpId: successorAfterComplete.id,
-    };
+    return retainSuccessor(successorAfterComplete);
   }
 
   const createResult = await createFollowUp({
@@ -396,21 +430,19 @@ export async function completeFollowUpAndScheduleNext(
     ) {
       const racedSuccessor = await findSuccessorFollowUp(completedFollowUpId);
       if (racedSuccessor) {
-        await ensureOutcomeActivity(racedSuccessor.id, racedSuccessor.due_at);
-        await syncCompanyCommercialDates(
-          input.followUp.company_id,
-          ownerUserId,
-        );
-        return {
-          error: null,
-          newDueAt: racedSuccessor.due_at,
-          nextFollowUpId: racedSuccessor.id,
-        };
+        return retainSuccessor(racedSuccessor);
       }
     }
 
-    // Reopen the source follow-up if we completed it but could not schedule next.
-    if (!completeResult.alreadyCompleted) {
+    // Reopen the source only when the company has no open follow-up left.
+    const { data: openFollowUps } = await supabase
+      .from("follow_ups")
+      .select("id")
+      .eq("company_id", input.followUp.company_id)
+      .eq("status", "pending")
+      .limit(1);
+
+    if (!completeResult.alreadyCompleted && !openFollowUps?.length) {
       let reopenQuery = supabase
         .from("follow_ups")
         .update({ status: "pending", completed_at: null })
@@ -457,8 +489,8 @@ export async function completeFollowUpAndScheduleNext(
     previousDueAt,
     newDueAt: scheduledDueAt,
     scheduleMode: input.scheduleMode,
-    contactId: input.followUp.contactId,
-    contactName: input.followUp.contactName,
+    contactId: managedContact.contactId,
+    contactName: managedContact.contactName,
     companyName: input.followUp.companyName,
   });
 
