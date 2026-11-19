@@ -11,9 +11,9 @@ export const OUTREACH_REASONING_EFFORT = "medium" as const;
 
 export const OUTREACH_TEXT_VERBOSITY = "medium" as const;
 
-export const OUTREACH_PROMPT_CACHE_KEY = "lm-outreach-draft-v4";
+export const OUTREACH_PROMPT_CACHE_KEY = "lm-outreach-draft-v5";
 
-export const OUTREACH_QUICK_PROMPT_CACHE_KEY = "lm-account-outreach";
+export const OUTREACH_QUICK_PROMPT_CACHE_KEY = "lm-account-outreach-v2";
 
 export const OUTREACH_RESEARCH_PROMPT_CACHE_KEY = "lm-outreach-market-research";
 

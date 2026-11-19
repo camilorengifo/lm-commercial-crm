@@ -13,6 +13,13 @@ import {
   type OutreachTone,
 } from "./outreachTone.ts";
 import {
+  applyCommercialBrand,
+  applyCommercialBrandToDraft,
+  COMMERCIAL_COMPANY_NAME,
+  commercialBrandInstruction,
+  commercialDirectorIntro,
+} from "./commercialBrand.ts";
+import {
   compactOutreachContext,
   type OutreachPromptSource,
 } from "./outreachContext.ts";
@@ -254,17 +261,19 @@ How to think:
 1. Customer intelligence. Read the sales stage, priority, location, notes, contact roles, last communication, follow-ups, and load history. Judge whether the relationship is new, active, quoted, quiet, or in need of nurturing.
 2. Personalized outreach. Use the customer's actual products, lanes, and equipment when they are on file. Match the requested tone, including its length. The two-or-three-sentence note is only for Conversational. The one-to-three-sentence personal note is only for Natural. Vary the structure so it does not sound like a stock sales template. Do not repeat an approach the broker marked too generic, not relevant, or incorrect.
 3. Follow-up strategy. Recommend the next touch from the recorded history. Do not repeat an ask that earlier notes already made. When the account is quiet, early, or the last note shows resistance, recommend nurturing rather than a hard close.
-4. Sales intelligence. Name an objection only when a note records it, and suggest how the broker can respond without inventing a concession. Suggest a Logistics Masters service only where the recorded freight supports it. Offer discovery questions that are still unanswered, chosen from shipping volume, lanes, commodities, seasonality, and the customer's current broker or carrier setup. Recommend one next commercial action the broker can take.
+4. Sales intelligence. Name an objection only when a note records it, and suggest how the broker can respond without inventing a concession. Suggest an ${COMMERCIAL_COMPANY_NAME} service only where the recorded freight supports it. Offer discovery questions that are still unanswered, chosen from shipping volume, lanes, commodities, seasonality, and the customer's current broker or carrier setup. Recommend one next commercial action the broker can take.
 5. Freight judgment. You understand full truckload (FTL), refrigerated freight (reefer), dry van, flatbed, produce and fresh vegetables, fruit and vegetable transportation, shipping lanes, seasonal demand, carrier capacity, spot and contract rates, and shipper and receiver operations. Use that judgment to interpret the records. Do not use it to invent this customer's volume, lanes, or the market.
 
 The broker goal, when provided, refines the selected outreach type. It does not replace that type's objective.
 Outreach type sets the purpose. Tone sets how the draft is written. Language sets the language of the subject and the body.
 Prior draft feedback is the broker's judgment on earlier drafts for this company. Do not say the model was retrained.
 Be specific and commercially useful. Follow the language and the tone in the user message. Do not apply the Conversational length, or the Natural voice, to any other tone.
+
+${commercialBrandInstruction()}
 `.trim();
 
 export const ACCOUNT_OUTREACH_QUICK_SYSTEM_PROMPT = `
-You are a senior Business Development Director at Logistics Masters, a United States freight brokerage. You advise one broker inside the Logistics Masters AI Commercial Assistant.
+${commercialDirectorIntro()}
 ${OUTREACH_GUARDRAILS}
 Write the customer-facing drafts in English.
 Return JSON with exactly these keys:
@@ -366,17 +375,21 @@ export function normalizeAccountOutreachQuick(
       : {};
 
   return {
-    suggestedEmailSubject:
+    suggestedEmailSubject: applyCommercialBrand(
       normalizeString(record.suggestedEmailSubject) || "Follow-up on freight capacity",
-    suggestedEmailBody:
+    ),
+    suggestedEmailBody: applyCommercialBrand(
       normalizeString(record.suggestedEmailBody) ||
-      "Add more CRM notes to generate a stronger email draft.",
-    linkedInMessage:
+        "Add more CRM notes to generate a stronger email draft.",
+    ),
+    linkedInMessage: applyCommercialBrand(
       normalizeString(record.linkedInMessage) ||
-      "Add contact details to personalize LinkedIn outreach.",
-    callOpener:
+        "Add contact details to personalize LinkedIn outreach.",
+    ),
+    callOpener: applyCommercialBrand(
       normalizeString(record.callOpener) ||
-      "Hi — I wanted to follow up on your freight needs.",
+        "Hi — I wanted to follow up on your freight needs.",
+    ),
     followUpReason:
       normalizeString(record.followUpReason) ||
       "Scheduled follow-up based on CRM priority.",
@@ -478,7 +491,7 @@ export interface OutreachDraftResponse {
 }
 
 export const OUTREACH_SYSTEM_PROMPT = `
-You are a senior Business Development Director at Logistics Masters, a United States freight brokerage. You advise one broker inside the Logistics Masters AI Commercial Assistant.
+${commercialDirectorIntro()}
 ${OUTREACH_GUARDRAILS}
 Email length follows the selected tone. Conversational emails are two or three sentences. Natural emails are one to three short first-person sentences about one idea, and only when Natural is selected. Every other tone is a fuller note, usually two or three short paragraphs, and must not be collapsed into the Conversational or Natural form. Call scripts stay short enough to use live and still match the tone.
 Return JSON with these keys:
@@ -622,6 +635,10 @@ ${JSON.stringify(brief)}
 Market research payload:
 ${JSON.stringify(marketResearch)}
 
+Customer-facing brand, which overrides every historical company label in the CRM brief:
+${commercialBrandInstruction()}
+Keep those notes as internal context. Use them for facts, not as the name of our company.
+
 ${
   emailType
     ? "fullDraft must include the three subject alternatives, then the email body, then the suggested next step."
@@ -739,7 +756,7 @@ export function normalizeOutreachDraft(
       timelineNotes: options?.timelineNotes,
       recordedFreight: options?.recordedFreight,
     });
-    return {
+    return applyCommercialBrandToDraft({
       subjectLine: email.subject,
       subjectAlternatives: email.subjects,
       commercialSummary: null,
@@ -749,10 +766,10 @@ export function normalizeOutreachDraft(
       emailDraft: email.visible,
       sections: [{ title: "Email draft", content: email.visible }],
       fullDraft: email.visible,
-    };
+    });
   }
 
-  return {
+  return applyCommercialBrandToDraft({
     subjectLine,
     subjectAlternatives: normalizedSubjects,
     commercialSummary,
@@ -762,7 +779,7 @@ export function normalizeOutreachDraft(
     emailDraft,
     sections,
     fullDraft,
-  };
+  });
 }
 
 function nullableStringSchema(): Record<string, unknown> {

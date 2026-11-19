@@ -29,6 +29,10 @@ import {
   resolvePostPresentationLanguage,
   type PostPresentationLanguage,
 } from "@/lib/postPresentationEmail";
+import {
+  applyCommercialBrand,
+  correctOutreachSenderContent,
+} from "@/lib/commercialBrand";
 import { resolveOutreachTone } from "@/lib/outreachTone";
 import { companyDraftKey, usePersistentDraft } from "@/lib/usePersistentDraft";
 import { supabase } from "@/lib/supabaseClient";
@@ -128,7 +132,7 @@ export function AiOutreachAssistantSection({
     [companyId],
   );
 
-  const [form, setForm, clearForm] = usePersistentDraft<AiOutreachDraftState>({
+  const [form, setForm, clearForm, draftHydrated] = usePersistentDraft<AiOutreachDraftState>({
     key: draftKey,
     initialValue: emptyOutreachDraft(),
     isEmpty: isOutreachDraftEmpty,
@@ -180,6 +184,11 @@ export function AiOutreachAssistantSection({
     }
   }, [form.tone, setForm]);
 
+  useEffect(() => {
+    if (!draftHydrated) return;
+    setForm((current) => correctOutreachSenderContent(current));
+  }, [draftHydrated, draftKey, setForm]);
+
   async function generateDraft() {
     setLoading(true);
     setError(null);
@@ -207,7 +216,7 @@ export function AiOutreachAssistantSection({
 
     const requestedType = outreachType;
     setForm((prev) => {
-      const nextForm: AiOutreachDraftState = {
+      const nextForm = correctOutreachSenderContent({
         ...prev,
         outreachType: requestedType,
         draft: data.draft,
@@ -219,13 +228,13 @@ export function AiOutreachAssistantSection({
         editedEmail: data.draft.emailDraft ?? data.draft.fullDraft,
         editedNextStep: data.draft.suggestedNextStep ?? "",
         editedFullDraft: data.draft.fullDraft,
-      };
+      });
       return {
         ...nextForm,
         editedFullDraft:
           requestedType === "Technical Follow-up"
             ? technicalDraftText(nextForm)
-            : data.draft.fullDraft,
+            : nextForm.editedFullDraft,
       };
     });
     setFeedbackMessage(null);
@@ -237,15 +246,20 @@ export function AiOutreachAssistantSection({
     await generateDraft();
   }
 
-  function draftText(): string {
-    if (form.outreachType === "Technical Follow-up") {
-      return technicalDraftText(form) || form.editedFullDraft || form.draft?.fullDraft || "";
+  function draftText(state: AiOutreachDraftState = form): string {
+    const current = correctOutreachSenderContent(state);
+    if (current.outreachType === "Technical Follow-up") {
+      return applyCommercialBrand(
+        technicalDraftText(current) || current.editedFullDraft || current.draft?.fullDraft || "",
+      );
     }
-    return form.editedFullDraft || form.draft?.fullDraft || "";
+    return applyCommercialBrand(current.editedFullDraft || current.draft?.fullDraft || "");
   }
 
   async function handleCopy() {
-    const text = draftText();
+    const corrected = correctOutreachSenderContent(form);
+    if (corrected !== form) setForm(corrected);
+    const text = draftText(corrected);
     if (!text) return;
 
     try {
@@ -272,15 +286,19 @@ export function AiOutreachAssistantSection({
       ? formatContactName(selectedContact)
       : null;
 
+    const subjects = (form.editedSubjects ?? []).map((subject) => applyCommercialBrand(subject));
+    const subjectLine = form.draft?.subjectLine
+      ? applyCommercialBrand(form.draft.subjectLine)
+      : null;
     const notesParts = [
       `Outreach type: ${form.outreachType}`,
       `Tone: ${form.tone}`,
       contactLabel ? `Contact: ${contactLabel}` : null,
       form.goal.trim() ? `Goal: ${form.goal.trim()}` : null,
-      form.editedSubjects?.length
-        ? `Subjects:\n${form.editedSubjects.map((subject, index) => `${index + 1}. ${subject}`).join("\n")}`
-        : form.draft.subjectLine
-          ? `Subject: ${form.draft.subjectLine}`
+      subjects.length
+        ? `Subjects:\n${subjects.map((subject, index) => `${index + 1}. ${subject}`).join("\n")}`
+        : subjectLine
+          ? `Subject: ${subjectLine}`
           : null,
       "",
       textToSave,
@@ -661,7 +679,7 @@ export function AiOutreachAssistantSection({
               {(form.editedSubjects ?? []).map((subject, index) => (
                 <input
                   key={`subject-${index}`}
-                  value={subject}
+                  value={applyCommercialBrand(subject)}
                   onChange={(event) => {
                     const editedSubjects = [...(form.editedSubjects ?? [])];
                     editedSubjects[index] = event.target.value;
@@ -682,7 +700,7 @@ export function AiOutreachAssistantSection({
                     {section.title}
                   </h3>
                   <p className="mt-1 whitespace-pre-wrap text-sm text-zinc-700">
-                    {section.content}
+                    {applyCommercialBrand(section.content)}
                   </p>
                 </div>
               ))}
@@ -710,7 +728,7 @@ export function AiOutreachAssistantSection({
                   <textarea
                     id={`outreach-${key}`}
                     rows={key === "editedEmail" ? 10 : 4}
-                    value={value ?? ""}
+                    value={applyCommercialBrand(value ?? "")}
                     onChange={(event) =>
                       setForm((prev) => ({ ...prev, [key]: event.target.value }))
                     }
@@ -730,7 +748,7 @@ export function AiOutreachAssistantSection({
               <textarea
                 id="outreach-edited-draft"
                 rows={12}
-                value={form.editedFullDraft ?? ""}
+                value={applyCommercialBrand(form.editedFullDraft ?? "")}
                 onChange={(event) =>
                   setForm((prev) => ({
                     ...prev,
