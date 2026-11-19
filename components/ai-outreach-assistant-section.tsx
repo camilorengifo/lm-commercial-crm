@@ -96,7 +96,7 @@ function technicalDraftText(form: AiOutreachDraftState): string {
 
 function isOutreachDraftEmpty(value: AiOutreachDraftState): boolean {
   return (
-    !value.goal.trim() &&
+    !(value.goal ?? "").trim() &&
     !value.contactId &&
     !value.draft &&
     !value.editedFullDraft?.trim() &&
@@ -578,7 +578,10 @@ export function AiOutreachAssistantSection({
                   CRM information used
                 </h3>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
-                  {form.intelligence.crmFacts.map((fact) => (
+                  {(Array.isArray(form.intelligence.crmFacts)
+                    ? form.intelligence.crmFacts
+                    : []
+                  ).map((fact) => (
                     <li key={fact}>{fact}</li>
                   ))}
                 </ul>
@@ -587,17 +590,25 @@ export function AiOutreachAssistantSection({
                 <h3 className="text-sm font-semibold text-zinc-900">
                   Relevant lanes
                 </h3>
-                {form.intelligence.lanePatterns.length === 0 ? (
+                {(Array.isArray(form.intelligence.lanePatterns)
+                  ? form.intelligence.lanePatterns
+                  : []
+                ).length === 0 ? (
                   <p className="mt-1 text-sm text-zinc-600">
                     No origin and destination lanes are recorded for this company.
                   </p>
                 ) : (
                   <ul className="mt-2 space-y-2 text-sm text-zinc-700">
-                    {form.intelligence.lanePatterns.map((lane) => (
+                    {(Array.isArray(form.intelligence.lanePatterns)
+                      ? form.intelligence.lanePatterns
+                      : []
+                    ).map((lane) => (
                       <li key={`${lane.origin}-${lane.destination}-${lane.equipmentType ?? "equipment"}`}>
                         {lane.origin} to {lane.destination}
                         {lane.equipmentType ? ` · ${lane.equipmentType}` : ""}
-                        {lane.commodities.length ? ` · ${lane.commodities.join(", ")}` : ""}
+                        {Array.isArray(lane.commodities) && lane.commodities.length
+                          ? ` · ${lane.commodities.join(", ")}`
+                          : ""}
                         {` · ${lane.quoteCount} record${lane.quoteCount === 1 ? "" : "s"}`}
                         {lane.lastRecordedAt ? ` · last recorded ${lane.lastRecordedAt}` : ""}
                         {lane.repeatedLane ? " · repeated lane" : ""}
@@ -665,7 +676,7 @@ export function AiOutreachAssistantSection({
 
           {!technicalSelected && (
             <div className="space-y-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-              {form.draft.sections.map((section) => (
+              {(Array.isArray(form.draft.sections) ? form.draft.sections : []).map((section) => (
                 <div key={section.title}>
                   <h3 className="text-sm font-semibold text-zinc-900">
                     {section.title}
