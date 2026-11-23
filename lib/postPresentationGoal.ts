@@ -231,7 +231,7 @@ function readFollowUp(
   rest: string,
   folded: string,
   kind: "statement" | "request" | "agreement" | "note",
-): GoalMessage | null {
+): Extract<GoalMessage, { type: "follow_up" }> | null {
   const verb = firstVerb(folded);
   const when = readWhen(folded);
   const route = readRoute(rest);
