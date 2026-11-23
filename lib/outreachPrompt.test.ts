@@ -315,6 +315,40 @@ assert.match(professionalPost.fullDraft, /After our call, I can prepare a quote/
 assert.doesNotMatch(professionalPost.fullDraft, /Short note for every tone/);
 assert.doesNotMatch(professionalPost.fullDraft, /It was good to connect, and I am here whenever/);
 
+const goalDraft = normalizeOutreachDraft(
+  {
+    emailDraft: "Después de nuestra llamada, puedo prepararle una cotización. Me bastan el origen, el destino, el tipo de equipo y el día.",
+    fullDraft: "Need a lane before I write.",
+  },
+  "Post-Presentation Call Follow-up",
+  {
+    language: "es",
+    tone: "Professional",
+    contactName: "Maria Jose",
+    senderName: "Camilo Rengifo",
+    senderEmail: "camilo@armstrongtransport.com",
+    goal: "Me dice que ahora no están agregando carriers por ser final de año, incluye esto en el correo.",
+  },
+);
+assert.match(goalDraft.fullDraft, /cierre de año/);
+assert.match(goalDraft.fullDraft, /no está incorporando nuevos transportistas/);
+assert.equal(goalDraft.emailDraft, goalDraft.fullDraft);
+assert.equal(goalDraft.sections[0]?.content, goalDraft.fullDraft);
+assert.doesNotMatch(goalDraft.fullDraft, /Me bastan el origen|incluye esto/i);
+
+const goalPrompt = buildOutreachUserPrompt(
+  source({
+    outreachType: "Post-Presentation Call Follow-up",
+    goal: "Me pidió que le escribiera en enero para revisar una ruta de Miami a Atlanta",
+  }),
+  null,
+  { language: "es", sender: { name: "Camilo Rengifo", email: "camilo@armstrongtransport.com" } },
+);
+assert.match(goalPrompt, /Miami a Atlanta/);
+assert.match(goalPrompt, /habla de tú/);
+assert.match(goalPrompt, /decides the specific content and the next step/);
+assert.match(goalPrompt, /Do not ask for an origin/);
+
 const spanishRelationship = buildOutreachUserPrompt(
   source({ outreachType: "Relationship Follow-up", tone: "Warm" }),
   null,

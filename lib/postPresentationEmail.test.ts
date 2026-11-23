@@ -264,6 +264,117 @@ const conversationalWithLane = composePostPresentationEmail({
 assert.equal(conversationalWithLane.body, gabyConversational.body);
 assert.doesNotMatch(conversationalWithLane.body, /McAllen/);
 
+const yearEndGoal =
+  "Me dice que ahora no están agregando carriers por ser final de año, incluye esto en el correo.";
+const januaryGoal = "Me pidió que le escribiera en enero para revisar una ruta de Miami a Atlanta";
+const yearEndSpanish = composePostPresentationEmail({
+  language: "es",
+  tone: "Professional",
+  contactName: "Maria Jose",
+  ...sender,
+  goal: yearEndGoal,
+});
+assert.match(yearEndSpanish.body, /Muchas gracias por atender mi llamada hoy\./);
+assert.match(yearEndSpanish.body, /por el cierre de año, la empresa no está incorporando nuevos transportistas/);
+assert.match(yearEndSpanish.body, /Cuando quiera retomar la conversación/);
+assert.doesNotMatch(yearEndSpanish.visible, /incluye esto|origen|destino|cotizaci|enero|quedamos|acordamos|Me bastan/i);
+assert.equal(yearEndSpanish.visible, `Subject: ${yearEndSpanish.subject}\n\n${yearEndSpanish.body}`);
+
+const yearEndEnglish = composePostPresentationEmail({
+  language: "en",
+  tone: "Professional",
+  contactName: "Maria Jose",
+  ...sender,
+  goal: yearEndGoal,
+});
+assert.match(yearEndEnglish.body, /Thank you for taking my call today\./);
+assert.match(yearEndEnglish.body, /year-end close/);
+assert.match(yearEndEnglish.body, /not adding new carriers/);
+assert.match(yearEndEnglish.body, /pick the conversation back up/);
+assert.doesNotMatch(yearEndEnglish.visible, /incluye esto|origin|destination|equipment|quote|January|agreed|carriers por/i);
+
+const januarySpanish = composePostPresentationEmail({
+  language: "es",
+  tone: "Professional",
+  contactName: "Maria Jose",
+  ...sender,
+  goal: januaryGoal,
+});
+assert.match(januarySpanish.body, /en enero/);
+assert.match(januarySpanish.body, /ruta de Miami a Atlanta/);
+assert.match(januarySpanish.body, /como me lo pidió/);
+assert.doesNotMatch(januarySpanish.visible, /cierre de año|origen, el destino|Me bastan|quedamos|acordamos/i);
+assert.notEqual(januarySpanish.body, yearEndSpanish.body);
+
+const januaryEnglish = composePostPresentationEmail({
+  language: "en",
+  tone: "Professional",
+  contactName: "Maria Jose",
+  ...sender,
+  goal: januaryGoal,
+});
+assert.match(januaryEnglish.body, /in January/);
+assert.match(januaryEnglish.body, /Miami to Atlanta route/);
+assert.match(januaryEnglish.body, /as you asked/);
+assert.doesNotMatch(januaryEnglish.visible, /year-end|origin, destination|we agreed/i);
+
+const informal = composePostPresentationEmail({
+  language: "es",
+  tone: "Professional",
+  contactName: "Maria Jose",
+  ...sender,
+  goal: `${yearEndGoal} habla de tú`,
+});
+assert.match(informal.body, /Te agradezco que hayas tomado mi llamada/);
+assert.match(informal.body, /por el cierre de año, la empresa no está incorporando nuevos transportistas/);
+assert.match(informal.body, /Cuando quieras retomar la conversación/);
+assert.match(informal.visible, /Gracias por tu tiempo/);
+assert.doesNotMatch(informal.visible, /habla de tú|tutéa|Le agradezco|haya tomado|Cuando quiera\b|su tiempo|como me lo pidió|\busted\b|\b[Ll]e\b/i);
+
+const formal = composePostPresentationEmail({
+  language: "es",
+  tone: "Professional",
+  contactName: "Maria Jose",
+  ...sender,
+  goal: `${yearEndGoal} hable de usted`,
+});
+assert.match(formal.body, /Le agradezco que haya tomado mi llamada/);
+assert.match(formal.body, /por el cierre de año, la empresa no está incorporando nuevos transportistas/);
+assert.match(formal.body, /Cuando quiera retomar la conversación/);
+assert.match(formal.visible, /Gracias por su tiempo/);
+assert.doesNotMatch(formal.visible, /hable de usted|Te agradezco|hayas tomado|Cuando quieras|tu tiempo/i);
+
+const reeferGoal = composePostPresentationEmail({
+  language: "es",
+  tone: "Professional",
+  contactName: "Maria Jose",
+  ...sender,
+  goal: "Me dice que el equipo que usan es reefer",
+});
+assert.match(reeferGoal.body, /Entiendo que el equipo que usan es reefer/);
+assert.doesNotMatch(reeferGoal.visible, /Me bastan|origen, el destino|cotizaci/i);
+
+const mangoGoal = composePostPresentationEmail({
+  language: "en",
+  tone: "Professional",
+  contactName: "Maria Jose",
+  ...sender,
+  goal: "Preguntar por la temporada de mango",
+});
+assert.match(mangoGoal.body, /mango season/i);
+assert.doesNotMatch(mangoGoal.visible, /origin, destination|Preguntar por/i);
+
+const addressOnly = composePostPresentationEmail({
+  language: "es",
+  tone: "Professional",
+  contactName: "Maria Jose",
+  ...sender,
+  goal: "tutéala",
+});
+assert.match(addressOnly.body, /Te agradezco que hayas tomado mi llamada/);
+assert.match(addressOnly.body, /origen, el destino/);
+assert.doesNotMatch(addressOnly.visible, /tutéa|Le agradezco|\busted\b|\b[Ll]e\b|\bsu\b/i);
+
 assert.deepEqual(
   selectRecordedFreight([
     { lane: "— → —", equipmentType: "Dry Van", commodity: "Limes", updatedAt: "2026-11-18" },

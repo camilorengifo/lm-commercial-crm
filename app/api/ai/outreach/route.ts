@@ -145,6 +145,7 @@ export async function POST(request: Request) {
       senderEmail,
       timelineNotes,
       recordedFreight: selectRecordedFreight(context.opportunities),
+      goal,
     };
 
     let marketResearch: MarketResearchResult | null = null;

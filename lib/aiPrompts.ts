@@ -552,7 +552,8 @@ sections must be: Pattern in the CRM, Discovery questions, Email draft, Suggeste
 marketInsight is null.`;
     case POST_PRESENTATION_OUTREACH_TYPE:
       return `Objective: write a thank-you email after a call or presentation, from the broker to the contact.
-Follow the selected tone. Conversational stays to two or three sentences with a simple close. Natural, only when selected, is one to three short first-person sentences about one idea, with the greeting and configured signature kept separate. Every other tone uses two or three short paragraphs: why the broker is writing, one useful offer grounded in the recorded context, and one invitation that is easy to answer.
+The outreach type sets that situation. The broker goal, when one is written, sets the specific content and the next step and replaces the default quote offer. Do not ask for an origin, a destination, equipment, or a quote unless the goal asks for that. Do not invent a date, a route, or an agreement that the goal does not state.
+Follow the selected tone. Conversational stays to two or three sentences with a simple close. Natural, only when selected, is one to three short first-person sentences about one idea, with the greeting and configured signature kept separate. Every other tone uses two or three short paragraphs: why the broker is writing, the point the goal asks for or one useful offer grounded in the recorded context when no goal is written, and one invitation that is easy to answer.
 If the latest timeline note shows a voicemail or an unanswered call, do not thank the contact for taking the call. For Natural, pick up the voicemail in plain words. For every other tone, say that the broker reached voicemail or did not reach them.
 If the selected tone is not Natural and the note shows a conversation, or it does not say the call was missed, the first sentence after the greeting must be exactly "${POST_PRESENTATION_THANK_YOU.en}" when the email language is English, or exactly "${POST_PRESENTATION_THANK_YOU.es}" when the email language is Spanish.
 For Natural, do not force that stock sentence. If they spoke, a simple thanks is enough.
@@ -613,6 +614,18 @@ Close the customer email with only that configured name and email. Do not invent
 
 ${outreachToneInstructions(context.tone, context.outreachType)}
 Broker goal: ${context.goal?.trim() || "Not specified. Use the outreach type's commercial objective."}
+${
+  postPresentation
+    ? `Post-presentation goal rules:
+The outreach type means this is a follow-up after a call or presentation. When a goal is written, that goal decides the specific content and the next step. Use the current goal on every regeneration. An empty goal keeps the default thank-you.
+Phrases such as "incluye esto en el correo", "include this", "habla de tú", "tutéala", "hable de usted", and "trátala de usted" are writing instructions. Do not copy them into the subject or the body.
+Keep the facts the goal states, in language addressed to the customer. Do not invent a date, a route, a quote, a commitment, or an agreement.
+Do not ask for an origin, a destination, equipment, or an immediate quote unless the goal asks for that.
+If the goal states a constraint and no next step, acknowledge the constraint and leave the conversation open.
+If the goal states a requested follow-up, mention that follow-up and close on it.
+When the language is Spanish and the goal asks for tú, or an equivalent such as "habla de tú" or "tutéala", use tú for every verb, pronoun, and possessive that refers to the contact, in the subjects, the body, and the close, even when the tone is Professional. For example, "Te agradezco que hayas tomado mi llamada". When it asks for usted, or an equivalent such as "hable de usted" or "trátala de usted", use usted throughout, for example "Le agradezco que haya tomado mi llamada". Do not mix the two forms. When the goal does not choose a treatment, keep the default treatment.`
+    : ""
+}
 Selected contact: ${
     context.selectedContact
       ? `${context.selectedContact.name}${context.selectedContact.jobTitle ? `, ${context.selectedContact.jobTitle}` : ""}`
@@ -677,6 +690,7 @@ export function normalizeOutreachDraft(
     senderEmail?: string | null;
     timelineNotes?: Array<string | PostPresentationTimelineNote>;
     recordedFreight?: RecordedFreight | null;
+    goal?: string | null;
   },
 ): OutreachDraftResponse {
   const record =
@@ -755,6 +769,7 @@ export function normalizeOutreachDraft(
       senderEmail: options?.senderEmail,
       timelineNotes: options?.timelineNotes,
       recordedFreight: options?.recordedFreight,
+      goal: options?.goal,
     });
     return applyCommercialBrandToDraft({
       subjectLine: email.subject,

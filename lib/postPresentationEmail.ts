@@ -1,3 +1,12 @@
+import {
+  applySpanishTu,
+  explicitUstedOpening,
+  readPostPresentationGoal,
+  renderGoalClose,
+  renderGoalSentence,
+  type GoalAddress,
+  type GoalReading,
+} from "./postPresentationGoal.ts";
 import { outreachVoice, type OutreachVoice } from "./outreachTone.ts";
 
 export const POST_PRESENTATION_OUTREACH_TYPE = "Post-Presentation Call Follow-up";
@@ -61,6 +70,7 @@ export interface PostPresentationEmailInput {
   timelineNotes?: Array<string | PostPresentationTimelineNote>;
   tone?: string | null;
   recordedFreight?: RecordedFreight | null;
+  goal?: string | null;
 }
 
 type DevelopedVoice = Exclude<OutreachVoice, "conversational" | "natural">;
@@ -108,15 +118,29 @@ export function composePostPresentationEmail(input: PostPresentationEmailInput):
   const reading = readLatestCall(input.timelineNotes ?? []);
   const voice = outreachVoice(input.tone);
   const recordedLane = freightLabel(input.recordedFreight);
-  const paragraphs =
-    voice === "conversational"
+  const goal = readPostPresentationGoal(input.goal);
+  const goalParagraphs =
+    goal && goal.messages.length > 0
+      ? paragraphsForGoal(language, voice, reading.kind, goal)
+      : null;
+  let paragraphs =
+    goalParagraphs ??
+    (voice === "conversational"
       ? [openingSentence(language, reading.kind), conversationalCloser(language, reading)]
       : voice === "natural"
         ? [naturalMessage(language, reading, recordedLane)]
         : [
             openingSentence(language, reading.kind),
             ...developedParagraphs(language, voice, reading, recordedLane),
-          ];
+          ]);
+  let subjects = subjectLines(language, voice, reading.kind);
+  if (!goalParagraphs && language === "es" && goal?.address === "usted") {
+    paragraphs = paragraphs.map((paragraph) => explicitUstedOpening(paragraph));
+  }
+  if (language === "es" && goal?.address === "tu") {
+    if (!goalParagraphs) paragraphs = paragraphs.map((paragraph) => applySpanishTu(paragraph));
+    subjects = subjects.map((subject) => applySpanishTu(subject));
+  }
   const body = [
     greetingLine(language, input.contactName),
     "",
@@ -127,8 +151,6 @@ export function composePostPresentationEmail(input: PostPresentationEmailInput):
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-
-  const subjects = subjectLines(language, voice, reading.kind);
 
   return {
     subject: subjects[0],
@@ -146,6 +168,46 @@ export function firstSentenceAfterGreeting(body: string): string {
   const greetingIndex = lines.findIndex((line) => /^(hi|hello|hola)\b/i.test(line));
   const line = lines[greetingIndex + 1] ?? "";
   return line.split(/(?<=\.)\s/)[0] ?? line;
+}
+
+function paragraphsForGoal(
+  language: PostPresentationLanguage,
+  voice: OutreachVoice,
+  kind: CallKind,
+  goal: GoalReading,
+): string[] {
+  const address: GoalAddress | null = language === "es" ? goal.address : null;
+  const substance = goal.messages.map((message) => renderGoalSentence(message, language)).join(" ");
+  const close = renderGoalClose(goal.messages, language);
+  const withAddress = (value: string) => (address === "tu" ? applySpanishTu(value) : value);
+
+  if (voice === "natural") {
+    const lead =
+      kind === "voicemail"
+        ? language === "es"
+          ? "Le dejé un mensaje en el buzón."
+          : "I left you a voicemail."
+        : kind === "unanswered"
+          ? language === "es"
+            ? "Lo llamé hoy y no pude hablar con usted."
+            : "I called today and didn't reach you."
+          : language === "es" && address
+            ? "Le agradezco que haya tomado mi llamada."
+            : language === "es"
+              ? "Gracias por la llamada."
+              : "Thanks for the call.";
+    return [withAddress([lead, substance, close].filter(Boolean).join(" "))];
+  }
+
+  const opening = withAddress(
+    kind === "answered" && language === "es" && address
+      ? "Le agradezco que haya tomado mi llamada."
+      : openingSentence(language, kind),
+  );
+  const body = withAddress(substance);
+  const ending = withAddress(close);
+  if (voice === "conversational" || voice === "direct") return [opening, `${body} ${ending}`.trim()];
+  return [opening, body, ending];
 }
 
 function subjectLines(
