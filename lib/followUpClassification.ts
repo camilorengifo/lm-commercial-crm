@@ -108,6 +108,37 @@ export function businessCalendarDate(
   return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`;
 }
 
+/**
+ * Add calendar days in the CRM timezone, keeping the wall-clock time.
+ * "Today" for the new instant is America/Bogota, not the UTC date.
+ */
+export function addBusinessCalendarDays(
+  value: Date | string,
+  days: number,
+  timeZone: string = BUSINESS_TIMEZONE,
+): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Invalid follow-up due date.");
+  }
+
+  const parts = zonedParts(date, timeZone);
+  const shifted = new Date(
+    Date.UTC(parts.year, parts.month - 1, parts.day + days),
+  );
+
+  return zonedWallTimeToUtc(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth() + 1,
+    shifted.getUTCDate(),
+    parts.hour,
+    parts.minute,
+    parts.second,
+    date.getMilliseconds(),
+    timeZone,
+  ).toISOString();
+}
+
 export function getDayBounds(
   reference: Date = new Date(),
   timeZone: string = BUSINESS_TIMEZONE,

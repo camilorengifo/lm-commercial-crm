@@ -4,6 +4,8 @@
  * a separate follow-up sequence.
  */
 
+import { businessCalendarDate } from "./followUpClassification";
+
 export interface PendingFollowUpCandidate {
   id: string;
   companyId: string;
@@ -91,5 +93,170 @@ export function planSinglePendingFollowUp(input: {
     cancelIds: pending
       .filter((row) => row.id !== keep.id)
       .map((row) => row.id),
+  };
+}
+
+const COMPLETION_SUCCESSOR_SKEW_MS = 2000;
+const SCHEDULE_MATCH_MS = 60_000;
+
+export interface CompanyCycleFollowUp {
+  id: string;
+  companyId: string;
+  dueAt: string;
+  createdAt: string;
+  sourceFollowUpId: string | null;
+}
+
+export interface CompanyFollowUpCompletionPlan {
+  ok: boolean;
+  error: string | null;
+  completeTarget: boolean;
+  cancelIds: string[];
+  createSuccessor: boolean;
+  keepSuccessorId: string | null;
+  dueAt: string;
+  recordActivity: boolean;
+}
+
+function parsedInstant(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function schedulesMatch(left: string, right: string): boolean {
+  if (sameFollowUpInstant(left, right)) return true;
+  const leftInstant = parsedInstant(left);
+  const rightInstant = parsedInstant(right);
+  return (
+    leftInstant !== null &&
+    rightInstant !== null &&
+    Math.abs(leftInstant - rightInstant) < SCHEDULE_MATCH_MS
+  );
+}
+
+/**
+ * A pending row created by this completion, not an older duplicate that
+ * merely points at the follow-up being closed.
+ */
+function isSettledCompletionSuccessor(
+  row: CompanyCycleFollowUp,
+  input: {
+    companyId: string;
+    targetId: string;
+    targetStatus: string;
+    targetCompletedAt: string | null;
+    requestedDueAt: string;
+    activityScheduledDueAt: string | null;
+  },
+): boolean {
+  if (row.companyId !== input.companyId || row.id === input.targetId) return false;
+  if (row.sourceFollowUpId !== input.targetId) return false;
+  if (input.targetStatus !== "completed" || !input.targetCompletedAt) return false;
+
+  const completedAt = parsedInstant(input.targetCompletedAt);
+  const createdAt = parsedInstant(row.createdAt);
+  if (
+    completedAt !== null &&
+    createdAt !== null &&
+    createdAt >= completedAt - COMPLETION_SUCCESSOR_SKEW_MS
+  ) {
+    return true;
+  }
+
+  const activityDueAt = input.activityScheduledDueAt;
+  if (!activityDueAt || !schedulesMatch(row.dueAt, activityDueAt)) return false;
+
+  const requestedDay = businessCalendarDate(input.requestedDueAt);
+  const activityDay = businessCalendarDate(activityDueAt);
+  return Boolean(requestedDay && activityDay && requestedDay === activityDay);
+}
+
+/**
+ * Mark Complete closes one company cycle.
+ * Older open duplicates are cancelled. A retry keeps the successor this
+ * completion already created and does not schedule a second one.
+ */
+export function planCompanyFollowUpCompletion(input: {
+  companyId: string;
+  target: {
+    id: string;
+    companyId: string;
+    status: string;
+    completedAt: string | null;
+  };
+  pending: CompanyCycleFollowUp[];
+  requestedDueAt: string;
+  activityExists: boolean;
+  activityScheduledDueAt?: string | null;
+}): CompanyFollowUpCompletionPlan {
+  const fail = (error: string): CompanyFollowUpCompletionPlan => ({
+    ok: false,
+    error,
+    completeTarget: false,
+    cancelIds: [],
+    createSuccessor: false,
+    keepSuccessorId: null,
+    dueAt: input.requestedDueAt,
+    recordActivity: false,
+  });
+
+  if (input.target.companyId !== input.companyId) {
+    return fail("Follow-up does not belong to this company.");
+  }
+
+  if (!parsedInstant(input.requestedDueAt)) {
+    return fail("A next follow-up date is required.");
+  }
+
+  if (input.target.status !== "pending" && input.target.status !== "completed") {
+    return fail("Only pending follow-ups can be completed.");
+  }
+
+  const sameCompanyPending = input.pending.filter(
+    (row) => row.companyId === input.companyId && row.id !== input.target.id,
+  );
+
+  const settled = sameCompanyPending
+    .filter((row) =>
+      isSettledCompletionSuccessor(row, {
+        companyId: input.companyId,
+        targetId: input.target.id,
+        targetStatus: input.target.status,
+        targetCompletedAt: input.target.completedAt,
+        requestedDueAt: input.requestedDueAt,
+        activityScheduledDueAt: input.activityScheduledDueAt ?? null,
+      }),
+    )
+    .sort((left, right) => {
+      const created = left.createdAt.localeCompare(right.createdAt);
+      if (created !== 0) return created;
+      return left.id.localeCompare(right.id);
+    })[0];
+
+  if (settled) {
+    return {
+      ok: true,
+      error: null,
+      completeTarget: false,
+      cancelIds: sameCompanyPending
+        .filter((row) => row.id !== settled.id)
+        .map((row) => row.id),
+      createSuccessor: false,
+      keepSuccessorId: settled.id,
+      dueAt: settled.dueAt,
+      recordActivity: !input.activityExists,
+    };
+  }
+
+  return {
+    ok: true,
+    error: null,
+    completeTarget: input.target.status === "pending",
+    cancelIds: sameCompanyPending.map((row) => row.id),
+    createSuccessor: true,
+    keepSuccessorId: null,
+    dueAt: input.requestedDueAt,
+    recordActivity: !input.activityExists,
   };
 }

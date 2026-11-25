@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { planSinglePendingFollowUp } from "./singleCompanyFollowUp.ts";
+import {
+  planCompanyFollowUpCompletion,
+  planSinglePendingFollowUp,
+} from "./singleCompanyFollowUp.ts";
 
 const older = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -64,6 +67,146 @@ const migration = readFileSync(
   ),
   "utf8",
 );
+const companyId = older.companyId;
+const otherCompanyId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const overdueId = "33333333-3333-4333-8333-333333333333";
+const todayId = "44444444-4444-4444-8444-444444444444";
+const otherCompanyFollowUpId = "55555555-5555-4555-8555-555555555555";
+const nextId = "66666666-6666-4666-8666-666666666666";
+const requestedDueAt = "2026-12-02T16:31:00.000Z";
+const completedAt = "2026-11-25T16:31:00.000Z";
+
+const freshCycle = planCompanyFollowUpCompletion({
+  companyId,
+  target: {
+    id: overdueId,
+    companyId,
+    status: "completed",
+    completedAt,
+  },
+  pending: [
+    {
+      id: todayId,
+      companyId,
+      dueAt: "2026-11-25T15:00:00.000Z",
+      createdAt: "2026-11-20T15:00:00.000Z",
+      sourceFollowUpId: overdueId,
+    },
+    {
+      id: otherCompanyFollowUpId,
+      companyId: otherCompanyId,
+      dueAt: "2026-11-25T15:00:00.000Z",
+      createdAt: "2026-11-20T15:00:00.000Z",
+      sourceFollowUpId: null,
+    },
+  ],
+  requestedDueAt,
+  activityExists: false,
+});
+
+assert.equal(freshCycle.ok, true);
+assert.equal(freshCycle.completeTarget, false);
+assert.equal(freshCycle.createSuccessor, true);
+assert.equal(freshCycle.keepSuccessorId, null);
+assert.equal(freshCycle.dueAt, requestedDueAt);
+assert.deepEqual(freshCycle.cancelIds, [todayId]);
+assert.equal(freshCycle.recordActivity, true);
+
+const openCycle = planCompanyFollowUpCompletion({
+  companyId,
+  target: {
+    id: overdueId,
+    companyId,
+    status: "pending",
+    completedAt: null,
+  },
+  pending: [
+    {
+      id: overdueId,
+      companyId,
+      dueAt: "2026-11-18T16:00:00.000Z",
+      createdAt: "2026-11-01T16:00:00.000Z",
+      sourceFollowUpId: null,
+    },
+    {
+      id: todayId,
+      companyId,
+      dueAt: "2026-11-25T15:00:00.000Z",
+      createdAt: "2026-11-20T15:00:00.000Z",
+      sourceFollowUpId: overdueId,
+    },
+  ],
+  requestedDueAt,
+  activityExists: false,
+});
+
+assert.equal(openCycle.createSuccessor, true);
+assert.equal(openCycle.keepSuccessorId, null);
+assert.deepEqual(openCycle.cancelIds, [todayId]);
+assert.equal(openCycle.recordActivity, true);
+
+const retryCycle = planCompanyFollowUpCompletion({
+  companyId,
+  target: {
+    id: overdueId,
+    companyId,
+    status: "completed",
+    completedAt,
+  },
+  pending: [
+    {
+      id: nextId,
+      companyId,
+      dueAt: requestedDueAt,
+      createdAt: "2026-11-25T16:31:02.000Z",
+      sourceFollowUpId: overdueId,
+    },
+    {
+      id: todayId,
+      companyId,
+      dueAt: "2026-11-25T15:00:00.000Z",
+      createdAt: "2026-11-20T15:00:00.000Z",
+      sourceFollowUpId: null,
+    },
+  ],
+  requestedDueAt: "2026-12-02T16:31:08.000Z",
+  activityExists: true,
+  activityScheduledDueAt: requestedDueAt,
+});
+
+assert.equal(retryCycle.createSuccessor, false);
+assert.equal(retryCycle.keepSuccessorId, nextId);
+assert.equal(retryCycle.dueAt, requestedDueAt);
+assert.deepEqual(retryCycle.cancelIds, [todayId]);
+assert.equal(retryCycle.recordActivity, false);
+
+const staleActivity = planCompanyFollowUpCompletion({
+  companyId,
+  target: {
+    id: overdueId,
+    companyId,
+    status: "completed",
+    completedAt,
+  },
+  pending: [
+    {
+      id: todayId,
+      companyId,
+      dueAt: "2026-11-25T15:00:00.000Z",
+      createdAt: "2026-11-20T15:00:00.000Z",
+      sourceFollowUpId: overdueId,
+    },
+  ],
+  requestedDueAt,
+  activityExists: true,
+  activityScheduledDueAt: "2026-11-25T15:00:00.000Z",
+});
+
+assert.equal(staleActivity.createSuccessor, true);
+assert.equal(staleActivity.keepSuccessorId, null);
+assert.deepEqual(staleActivity.cancelIds, [todayId]);
+assert.equal(staleActivity.recordActivity, false);
+
 assert.match(migration, /follow_ups_one_pending_per_company_idx/);
 assert.match(migration, /activities_one_follow_up_outcome_idx/);
 assert.match(migration, /SET status = 'cancelled'/);

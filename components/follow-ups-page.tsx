@@ -1253,7 +1253,7 @@ export function FollowUpsPage() {
     let committed = false;
 
     try {
-      const { error, newDueAt } = await completeFollowUpAndScheduleNext({
+      const { error, newDueAt, nextFollowUpId } = await completeFollowUpAndScheduleNext({
         followUp,
         outcome,
         actorUserId: user.id,
@@ -1268,6 +1268,36 @@ export function FollowUpsPage() {
 
       committed = true;
       setScheduleTarget(null);
+      const completedAt = new Date().toISOString();
+      setPendingFollowUps((current) => {
+        const others = current.filter((row) => row.company_id !== followUp.company_id);
+        if (!nextFollowUpId) return others;
+        return [
+          ...others,
+          {
+            ...followUp,
+            id: nextFollowUpId,
+            due_at: newDueAt,
+            status: "pending",
+            completed_at: null,
+            created_at: completedAt,
+          },
+        ];
+      });
+      setCompletedFollowUps((current) => {
+        if (current.some((row) => row.id === followUp.id)) return current;
+        return [
+          {
+            ...followUp,
+            status: "completed",
+            completed_at: completedAt,
+            completionOutcome:
+              outcome === "no_response" ? "no_response" : "successful_contact",
+            nextFollowUpDueAt: newDueAt,
+          },
+          ...current,
+        ];
+      });
       showSuccess(
         outcome === "no_response"
           ? `No response recorded. Next follow-up scheduled for ${formatDateTime(newDueAt)}.`

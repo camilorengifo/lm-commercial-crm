@@ -1260,6 +1260,76 @@ export async function consolidateCompanyPendingFollowUps(input: {
   };
 }
 
+/**
+ * Cancel open duplicates for one company. Rows are kept as cancelled so the
+ * history remains, and source links are cleared so one new successor can be saved.
+ */
+export async function cancelFollowUpsInCompanyCycle(input: {
+  companyId: string;
+  ownerUserId: string;
+  followUpIds: string[];
+  asAdmin?: boolean;
+}): Promise<{ error: { message?: string; code?: string } | null }> {
+  const followUpIds = [...new Set(input.followUpIds.map((id) => id.trim()).filter(Boolean))];
+  if (followUpIds.length === 0) {
+    return { error: null };
+  }
+
+  let query = supabase
+    .from("follow_ups")
+    .update({ status: "cancelled", source_follow_up_id: null })
+    .in("id", followUpIds)
+    .eq("company_id", input.companyId)
+    .eq("status", "pending");
+
+  if (!input.asAdmin) {
+    query = query.eq("user_id", input.ownerUserId);
+  }
+
+  let { error } = await query;
+
+  if (error && isMissingColumnError(error, "source_follow_up_id")) {
+    let retry = supabase
+      .from("follow_ups")
+      .update({ status: "cancelled" })
+      .in("id", followUpIds)
+      .eq("company_id", input.companyId)
+      .eq("status", "pending");
+
+    if (!input.asAdmin) {
+      retry = retry.eq("user_id", input.ownerUserId);
+    }
+
+    const retried = await retry;
+    error = retried.error;
+  }
+
+  if (error) {
+    return { error };
+  }
+
+  const { data, error: readError } = await supabase
+    .from("follow_ups")
+    .select("id")
+    .in("id", followUpIds)
+    .eq("company_id", input.companyId)
+    .eq("status", "pending");
+
+  if (readError) {
+    return { error: readError };
+  }
+
+  if ((data ?? []).length > 0) {
+    return {
+      error: {
+        message: "Other open follow-ups for this company could not be resolved.",
+      },
+    };
+  }
+
+  return { error: null };
+}
+
 export async function collapseCompanyPendingFollowUps(
   companyId: string,
   ownerUserId: string,

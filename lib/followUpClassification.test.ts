@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  addBusinessCalendarDays,
   bucketFollowUpsWithCompanies,
   businessCalendarDate,
   getDayBounds,
@@ -16,6 +17,31 @@ assert.equal(
   businessCalendarDate(reference),
   "2026-11-04",
 );
+
+// Mark Complete / Automatic: 7 CRM calendar days from the completion instant.
+// 11:31 a.m. in Bogota on Nov 25, 2026.
+const completedAt = new Date("2026-11-25T16:31:00.000Z");
+const automaticNext = addBusinessCalendarDays(completedAt, 7);
+assert.equal(businessCalendarDate(completedAt), "2026-11-25");
+assert.equal(businessCalendarDate(automaticNext), "2026-12-02");
+assert.equal(getFollowUpBucket(automaticNext, completedAt), "upcoming");
+
+const overdueDuplicate = "2026-11-18T16:00:00.000Z";
+const todayDuplicate = "2026-11-25T15:00:00.000Z";
+assert.equal(getFollowUpBucket(overdueDuplicate, completedAt), "overdue");
+assert.equal(getFollowUpBucket(todayDuplicate, completedAt), "today");
+assert.notEqual(
+  businessCalendarDate(todayDuplicate),
+  businessCalendarDate(automaticNext),
+);
+
+// 9:30 p.m. Bogota is already the next UTC date. The CRM day is still Nov 25,
+// so Automatic lands on Dec 2 in Bogota, which is Upcoming.
+const bogotaEvening = new Date("2026-11-26T02:30:00.000Z");
+const eveningNext = addBusinessCalendarDays(bogotaEvening, 7);
+assert.equal(businessCalendarDate(bogotaEvening), "2026-11-25");
+assert.equal(businessCalendarDate(eveningNext), "2026-12-02");
+assert.equal(getFollowUpBucket(eveningNext, bogotaEvening), "upcoming");
 
 // Live follow-ups the Dashboard showed as due today.
 assert.equal(

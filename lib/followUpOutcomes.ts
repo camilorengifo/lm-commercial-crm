@@ -4,8 +4,10 @@ import {
   type ActivityType,
 } from "@/lib/crmConstants";
 import { formatDateTime } from "@/lib/crmFormat";
+import { addBusinessCalendarDays } from "@/lib/followUpClassification";
+import { isMissingColumnError } from "@/lib/followUpIdempotency";
 import {
-  collapseCompanyPendingFollowUps,
+  cancelFollowUpsInCompanyCycle,
   createFollowUp,
   syncCompanyCommercialDates,
   type FollowUpEnriched,
@@ -15,6 +17,11 @@ import {
   followUpTypeFormFromRecord,
   type FollowUpTypeFormValues,
 } from "@/lib/followUpSeasonal";
+import {
+  planCompanyFollowUpCompletion,
+  sameFollowUpInstant,
+  type CompanyCycleFollowUp,
+} from "@/lib/singleCompanyFollowUp";
 import { supabase } from "@/lib/supabaseClient";
 
 export type FollowUpCompletionOutcome = "completed_contact" | "no_response";
@@ -100,18 +107,15 @@ function buildOutcomeNotes(input: {
   );
 }
 
-/** Add calendar days in local time, preserving the scheduled hour/minute. */
+/**
+ * Add calendar days in the CRM timezone (America/Bogota), preserving the
+ * wall-clock hour. Buckets then classify that instant on the CRM calendar.
+ */
 export function addCalendarDaysPreservingLocalTime(
   isoDueAt: string,
   days: number,
 ): string {
-  const date = new Date(isoDueAt);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid follow-up due date.");
-  }
-
-  date.setDate(date.getDate() + days);
-  return date.toISOString();
+  return addBusinessCalendarDays(isoDueAt, days);
 }
 
 export function isFutureDueAt(
@@ -123,32 +127,13 @@ export function isFutureDueAt(
   return date.getTime() > reference.getTime();
 }
 
-async function findSuccessorFollowUp(
-  sourceFollowUpId: string,
-): Promise<{ id: string; due_at: string } | null> {
-  const { data, error } = await supabase
-    .from("follow_ups")
-    .select("id, due_at")
-    .eq("source_follow_up_id", sourceFollowUpId)
-    .eq("status", "pending")
-    .order("created_at", { ascending: true })
-    .limit(1);
-
-  const row = data?.[0];
-  if (error || !row) {
-    return null;
-  }
-
-  return row as { id: string; due_at: string };
-}
-
 async function findOutcomeActivity(input: {
   followUpId: string;
   activityType: ActivityType;
-}): Promise<{ id: string } | null> {
+}): Promise<{ id: string; scheduledDueAt: string | null } | null> {
   const { data, error } = await supabase
     .from("activities")
-    .select("id")
+    .select("id, scheduled_follow_up_at")
     .eq("follow_up_id", input.followUpId)
     .eq("activity_type", input.activityType)
     .limit(1);
@@ -158,7 +143,112 @@ async function findOutcomeActivity(input: {
     return null;
   }
 
-  return row as { id: string };
+  return {
+    id: row.id as string,
+    scheduledDueAt: (row.scheduled_follow_up_at as string | null) ?? null,
+  };
+}
+
+async function readFollowUpSource(
+  followUpId: string,
+  companyId: string,
+): Promise<{
+  row: { status: string; completedAt: string | null } | null;
+  error: { message?: string } | null;
+}> {
+  const { data, error } = await supabase
+    .from("follow_ups")
+    .select("status, completed_at")
+    .eq("id", followUpId)
+    .eq("company_id", companyId)
+    .maybeSingle();
+
+  if (error) {
+    return { row: null, error };
+  }
+
+  if (!data) {
+    return { row: null, error: null };
+  }
+
+  return {
+    row: {
+      status: data.status as string,
+      completedAt: (data.completed_at as string | null) ?? null,
+    },
+    error: null,
+  };
+}
+
+async function loadCompanyPendingCycle(companyId: string): Promise<{
+  rows: CompanyCycleFollowUp[];
+  error: { message?: string; code?: string } | null;
+}> {
+  const { data, error } = await supabase
+    .from("follow_ups")
+    .select("id, company_id, due_at, created_at, source_follow_up_id")
+    .eq("company_id", companyId)
+    .eq("status", "pending");
+
+  if (error && isMissingColumnError(error, "source_follow_up_id")) {
+    const retry = await supabase
+      .from("follow_ups")
+      .select("id, company_id, due_at, created_at")
+      .eq("company_id", companyId)
+      .eq("status", "pending");
+
+    if (retry.error) {
+      return { rows: [], error: retry.error };
+    }
+
+    return {
+      rows: ((retry.data ?? []) as Array<{
+        id: string;
+        company_id: string;
+        due_at: string;
+        created_at: string;
+      }>).map((row) => ({
+        id: row.id,
+        companyId: row.company_id,
+        dueAt: row.due_at,
+        createdAt: row.created_at,
+        sourceFollowUpId: null,
+      })),
+      error: null,
+    };
+  }
+
+  if (error) {
+    return { rows: [], error };
+  }
+
+  return {
+    rows: ((data ?? []) as Array<{
+      id: string;
+      company_id: string;
+      due_at: string;
+      created_at: string;
+      source_follow_up_id: string | null;
+    }>).map((row) => ({
+      id: row.id,
+      companyId: row.company_id,
+      dueAt: row.due_at,
+      createdAt: row.created_at,
+      sourceFollowUpId: row.source_follow_up_id,
+    })),
+    error: null,
+  };
+}
+
+function storedDueMatches(stored: string, expected: string): boolean {
+  if (sameFollowUpInstant(stored, expected)) return true;
+  const left = Date.parse(stored);
+  const right = Date.parse(expected);
+  return (
+    Number.isFinite(left) &&
+    Number.isFinite(right) &&
+    Math.abs(left - right) < 60_000
+  );
 }
 
 async function completeSourceFollowUp(input: {
@@ -346,144 +436,271 @@ export async function completeFollowUpAndScheduleNext(
 
   const ownerUserId =
     input.followUp.companyOwnerUserId ?? input.followUp.user_id;
+  const companyId = input.followUp.company_id;
   const completedFollowUpId = input.followUp.id;
   const previousDueAt = input.followUp.due_at;
-  const newDueAt =
+  const requestedDueAt =
     input.scheduleMode === "automatic_week"
       ? addCalendarDaysPreservingLocalTime(new Date().toISOString(), 7)
       : input.newDueAt;
   const managedContact = await resolveManagedContact(input.followUp);
 
-  async function ensureOutcomeActivity(nextFollowUpId: string, dueAtForNotes: string) {
-    await insertOutcomeActivity({
-      outcome: input.outcome,
-      actorUserId: input.actorUserId,
-      companyId: input.followUp.company_id,
-      completedFollowUpId,
-      nextFollowUpId,
-      previousDueAt,
-      newDueAt: dueAtForNotes,
-      scheduleMode: input.scheduleMode,
-      contactId: managedContact.contactId,
-      contactName: managedContact.contactName,
-      companyName: input.followUp.companyName,
-    });
+  const sourceRead = await readFollowUpSource(completedFollowUpId, companyId);
+  if (sourceRead.error) {
+    return { error: sourceRead.error, newDueAt: requestedDueAt, nextFollowUpId: null };
   }
-
-  async function retainSuccessor(successor: { id: string; due_at: string }) {
-    await ensureOutcomeActivity(successor.id, successor.due_at);
-    await collapseCompanyPendingFollowUps(
-      input.followUp.company_id,
-      ownerUserId,
-      { preferId: successor.id },
-    );
-    await syncCompanyCommercialDates(input.followUp.company_id, ownerUserId);
+  if (!sourceRead.row) {
     return {
-      error: null,
-      newDueAt: successor.due_at,
-      nextFollowUpId: successor.id,
-    };
-  }
-
-  const existingSuccessor = await findSuccessorFollowUp(completedFollowUpId);
-  if (existingSuccessor) {
-    return retainSuccessor(existingSuccessor);
-  }
-
-  const completeResult = await completeSourceFollowUp({
-    followUpId: completedFollowUpId,
-    ownerUserId,
-    companyId: input.followUp.company_id,
-    asAdmin: input.asAdmin,
-  });
-
-  if (completeResult.error) {
-    return {
-      error: completeResult.error,
-      newDueAt,
+      error: { message: "Follow-up not found." },
+      newDueAt: requestedDueAt,
       nextFollowUpId: null,
     };
   }
 
-  // Re-check successor after completion (retry / race).
-  const successorAfterComplete = await findSuccessorFollowUp(completedFollowUpId);
-  if (successorAfterComplete) {
-    return retainSuccessor(successorAfterComplete);
-  }
+  let source = sourceRead.row;
+  let completedInThisCall = false;
 
-  const createResult = await createFollowUp({
-    userId: ownerUserId,
-    companyId: input.followUp.company_id,
-    title: input.followUp.title,
-    notes: input.followUp.notes,
-    dueAt: newDueAt,
-    typeFields: buildCarriedTypeFields(input.followUp),
-    sourceFollowUpId: completedFollowUpId,
-    contactId: input.followUp.contact_id ?? null,
-  });
+  if (source.status === "pending") {
+    const completeResult = await completeSourceFollowUp({
+      followUpId: completedFollowUpId,
+      ownerUserId,
+      companyId,
+      asAdmin: input.asAdmin,
+    });
 
-  if (createResult.error && !createResult.followUpId) {
-    // Unique source race: load successor if another request created it.
-    if (
-      createResult.error.message?.includes("follow_ups_one_successor") ||
-      createResult.error.code === "23505"
-    ) {
-      const racedSuccessor = await findSuccessorFollowUp(completedFollowUpId);
-      if (racedSuccessor) {
-        return retainSuccessor(racedSuccessor);
-      }
+    if (completeResult.error) {
+      return {
+        error: completeResult.error,
+        newDueAt: requestedDueAt,
+        nextFollowUpId: null,
+      };
     }
 
-    // Reopen the source only when the company has no open follow-up left.
-    const { data: openFollowUps } = await supabase
-      .from("follow_ups")
-      .select("id")
-      .eq("company_id", input.followUp.company_id)
-      .eq("status", "pending")
-      .limit(1);
+    const afterComplete = await readFollowUpSource(completedFollowUpId, companyId);
+    if (afterComplete.error) {
+      return {
+        error: afterComplete.error,
+        newDueAt: requestedDueAt,
+        nextFollowUpId: null,
+      };
+    }
 
-    if (!completeResult.alreadyCompleted && !openFollowUps?.length) {
-      let reopenQuery = supabase
+    if (!afterComplete.row || afterComplete.row.status !== "completed") {
+      return {
+        error: { message: "Only pending follow-ups can be completed." },
+        newDueAt: requestedDueAt,
+        nextFollowUpId: null,
+      };
+    }
+
+    source = afterComplete.row;
+    completedInThisCall = !completeResult.alreadyCompleted;
+  }
+
+  const pending = await loadCompanyPendingCycle(companyId);
+  if (pending.error) {
+    return { error: pending.error, newDueAt: requestedDueAt, nextFollowUpId: null };
+  }
+
+  const existingActivity = await findOutcomeActivity({
+    followUpId: completedFollowUpId,
+    activityType: outcomeActivityType(input.outcome),
+  });
+
+  const plan = planCompanyFollowUpCompletion({
+    companyId,
+    target: {
+      id: completedFollowUpId,
+      companyId,
+      status: source.status,
+      completedAt: source.completedAt,
+    },
+    pending: pending.rows,
+    requestedDueAt,
+    activityExists: Boolean(existingActivity),
+    activityScheduledDueAt: existingActivity?.scheduledDueAt ?? null,
+  });
+
+  if (!plan.ok) {
+    return {
+      error: { message: plan.error ?? "Unable to complete this follow-up." },
+      newDueAt: requestedDueAt,
+      nextFollowUpId: null,
+    };
+  }
+
+  if (plan.cancelIds.length > 0) {
+    const cancelResult = await cancelFollowUpsInCompanyCycle({
+      companyId,
+      ownerUserId,
+      followUpIds: plan.cancelIds,
+      asAdmin: input.asAdmin,
+    });
+
+    if (cancelResult.error) {
+      return {
+        error: cancelResult.error,
+        newDueAt: requestedDueAt,
+        nextFollowUpId: null,
+      };
+    }
+  }
+
+  let nextFollowUpId = plan.keepSuccessorId;
+  let scheduledDueAt = plan.dueAt;
+
+  if (plan.createSuccessor) {
+    const createResult = await createFollowUp({
+      userId: ownerUserId,
+      companyId,
+      title: input.followUp.title,
+      notes: input.followUp.notes,
+      dueAt: plan.dueAt,
+      typeFields: buildCarriedTypeFields(input.followUp),
+      sourceFollowUpId: completedFollowUpId,
+      contactId: input.followUp.contact_id ?? null,
+    });
+
+    if (!createResult.followUpId) {
+      const raced = await loadCompanyPendingCycle(companyId);
+      const racedSuccessor = raced.rows.find(
+        (row) => row.sourceFollowUpId === completedFollowUpId,
+      );
+
+      if (!racedSuccessor) {
+        if (completedInThisCall && (raced.rows.length === 0 || raced.error)) {
+          let reopenQuery = supabase
+            .from("follow_ups")
+            .update({ status: "pending", completed_at: null })
+            .eq("id", completedFollowUpId)
+            .eq("company_id", companyId)
+            .eq("status", "completed");
+
+          if (!input.asAdmin) {
+            reopenQuery = reopenQuery.eq("user_id", ownerUserId);
+          }
+
+          await reopenQuery;
+          await syncCompanyCommercialDates(companyId, ownerUserId);
+        }
+
+        return {
+          error: createResult.error ?? { message: "Unable to schedule the next follow-up." },
+          newDueAt: requestedDueAt,
+          nextFollowUpId: null,
+        };
+      }
+
+      nextFollowUpId = racedSuccessor.id;
+      scheduledDueAt = racedSuccessor.dueAt;
+    } else {
+      nextFollowUpId = createResult.followUpId;
+      scheduledDueAt = createResult.dueAt ?? plan.dueAt;
+    }
+
+    if (!storedDueMatches(scheduledDueAt, plan.dueAt)) {
+      let alignQuery = supabase
         .from("follow_ups")
-        .update({ status: "pending", completed_at: null })
-        .eq("id", completedFollowUpId)
-        .eq("company_id", input.followUp.company_id)
-        .eq("status", "completed");
+        .update({
+          due_at: plan.dueAt,
+          source_follow_up_id: completedFollowUpId,
+        })
+        .eq("id", nextFollowUpId)
+        .eq("company_id", companyId)
+        .eq("status", "pending");
 
       if (!input.asAdmin) {
-        reopenQuery = reopenQuery.eq("user_id", ownerUserId);
+        alignQuery = alignQuery.eq("user_id", ownerUserId);
       }
 
-      await reopenQuery;
-      await syncCompanyCommercialDates(input.followUp.company_id, ownerUserId);
-    }
+      const aligned = await alignQuery;
+      if (aligned.error && !isMissingColumnError(aligned.error, "source_follow_up_id")) {
+        return {
+          error: aligned.error,
+          newDueAt: plan.dueAt,
+          nextFollowUpId,
+        };
+      }
 
+      if (aligned.error) {
+        let dueOnly = supabase
+          .from("follow_ups")
+          .update({ due_at: plan.dueAt })
+          .eq("id", nextFollowUpId)
+          .eq("company_id", companyId)
+          .eq("status", "pending");
+
+        if (!input.asAdmin) {
+          dueOnly = dueOnly.eq("user_id", ownerUserId);
+        }
+
+        const dueAligned = await dueOnly;
+        if (dueAligned.error) {
+          return {
+            error: dueAligned.error,
+            newDueAt: plan.dueAt,
+            nextFollowUpId,
+          };
+        }
+      }
+
+      scheduledDueAt = plan.dueAt;
+    }
+  }
+
+  if (!nextFollowUpId) {
     return {
-      error: createResult.error,
-      newDueAt,
+      error: { message: "Next follow-up was created but no ID was returned." },
+      newDueAt: requestedDueAt,
       nextFollowUpId: null,
     };
   }
 
-  const nextFollowUpId = createResult.followUpId;
-  if (!nextFollowUpId) {
+  const openAfter = await loadCompanyPendingCycle(companyId);
+  if (openAfter.error) {
+    return { error: openAfter.error, newDueAt: scheduledDueAt, nextFollowUpId };
+  }
+
+  const extras = openAfter.rows
+    .filter((row) => row.id !== nextFollowUpId)
+    .map((row) => row.id);
+
+  if (extras.length > 0) {
+    const sweep = await cancelFollowUpsInCompanyCycle({
+      companyId,
+      ownerUserId,
+      followUpIds: extras,
+      asAdmin: input.asAdmin,
+    });
+
+    if (sweep.error) {
+      return { error: sweep.error, newDueAt: scheduledDueAt, nextFollowUpId };
+    }
+  }
+
+  const openFinal = await loadCompanyPendingCycle(companyId);
+  if (openFinal.error) {
+    return { error: openFinal.error, newDueAt: scheduledDueAt, nextFollowUpId };
+  }
+
+  const saved = openFinal.rows.find((row) => row.id === nextFollowUpId);
+  if (openFinal.rows.length !== 1 || !saved || !storedDueMatches(saved.dueAt, scheduledDueAt)) {
     return {
       error: {
         message:
-          createResult.error?.message ??
-          "Next follow-up was created but no ID was returned.",
+          "The next follow-up for this company could not be saved as a single open item.",
       },
-      newDueAt,
-      nextFollowUpId: null,
+      newDueAt: scheduledDueAt,
+      nextFollowUpId,
     };
   }
 
-  const scheduledDueAt = createResult.dueAt ?? newDueAt;
+  scheduledDueAt = saved.dueAt;
 
   const activityResult = await insertOutcomeActivity({
     outcome: input.outcome,
     actorUserId: input.actorUserId,
-    companyId: input.followUp.company_id,
+    companyId,
     completedFollowUpId,
     nextFollowUpId,
     previousDueAt,
@@ -502,10 +719,7 @@ export async function completeFollowUpAndScheduleNext(
     };
   }
 
-  const syncResult = await syncCompanyCommercialDates(
-    input.followUp.company_id,
-    ownerUserId,
-  );
+  const syncResult = await syncCompanyCommercialDates(companyId, ownerUserId);
 
   if (syncResult.error) {
     return {
